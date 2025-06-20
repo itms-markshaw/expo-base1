@@ -12,9 +12,11 @@ import {
   TouchableOpacity,
   RefreshControl,
   Alert,
+  Modal,
 } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
 import { databaseService } from '../services/database';
+import ChatterComponent from '../components/ChatterComponent';
 
 interface DataRecord {
   id: number;
@@ -30,6 +32,8 @@ export default function DataScreen() {
   const [data, setData] = useState<DataRecord[]>([]);
   const [loading, setLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  const [showChatter, setShowChatter] = useState(false);
+  const [selectedRecord, setSelectedRecord] = useState<{ id: number; name: string; model: string } | null>(null);
 
   useEffect(() => {
     loadData();
@@ -78,12 +82,33 @@ export default function DataScreen() {
     );
   };
 
+  const handleOpenChatter = (record: DataRecord) => {
+    const modelMap = {
+      'contacts': 'res.partner',
+      'users': 'res.users',
+      'crm_leads': 'crm.lead',
+    };
+
+    setSelectedRecord({
+      id: record.id,
+      name: record.name,
+      model: modelMap[selectedTable] || selectedTable
+    });
+    setShowChatter(true);
+  };
+
   const renderRecord = ({ item }: { item: DataRecord }) => (
-    <View style={styles.recordCard}>
+    <TouchableOpacity
+      style={styles.recordCard}
+      onPress={() => handleOpenChatter(item)}
+    >
       <View style={styles.recordHeader}>
         <View style={styles.recordInfo}>
           <Text style={styles.recordName}>{item.name}</Text>
           <Text style={styles.recordId}>ID: {item.id}</Text>
+        </View>
+        <View style={styles.recordActions}>
+          <MaterialIcons name="chat" size={20} color="#007AFF" />
         </View>
         {selectedTable === 'contacts' && item.is_company ? (
           <View style={styles.companyBadge}>
@@ -133,7 +158,7 @@ export default function DataScreen() {
           </Text>
         </View>
       ) : null}
-    </View>
+    </TouchableOpacity>
   );
 
   return (
@@ -244,6 +269,31 @@ export default function DataScreen() {
           </Text>
         </View>
       ) : null}
+
+      {/* Chatter Modal */}
+      <Modal
+        visible={showChatter}
+        animationType="slide"
+        presentationStyle="fullScreen"
+      >
+        <SafeAreaView style={styles.modalContainer}>
+          <View style={styles.modalHeader}>
+            <TouchableOpacity onPress={() => setShowChatter(false)}>
+              <MaterialIcons name="close" size={24} color="#666" />
+            </TouchableOpacity>
+            <Text style={styles.modalTitle}>Chatter</Text>
+            <View style={{ width: 24 }} />
+          </View>
+
+          {selectedRecord && (
+            <ChatterComponent
+              model={selectedRecord.model}
+              recordId={selectedRecord.id}
+              recordName={selectedRecord.name}
+            />
+          )}
+        </SafeAreaView>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -325,6 +375,9 @@ const styles = StyleSheet.create({
   recordInfo: {
     flex: 1,
   },
+  recordActions: {
+    padding: 4,
+  },
   recordName: {
     fontSize: 16,
     fontWeight: '600',
@@ -386,5 +439,24 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#666',
     textAlign: 'center',
+  },
+  modalContainer: {
+    flex: 1,
+    backgroundColor: '#F8F9FA',
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    backgroundColor: '#FFF',
+    borderBottomWidth: 1,
+    borderBottomColor: '#E5E5E5',
+  },
+  modalTitle: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#1A1A1A',
   },
 });
