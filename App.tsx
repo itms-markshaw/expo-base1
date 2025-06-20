@@ -20,6 +20,7 @@ import LoginScreen from './src/screens/LoginScreen';
 import HomeScreen from './src/screens/HomeScreen';
 import SyncScreen from './src/screens/SyncScreen';
 import DataScreen from './src/screens/DataScreen';
+import TestScreen from './src/screens/TestScreen';
 import SettingsScreen from './src/screens/SettingsScreen';
 import { useAppStore } from './src/store';
 
@@ -50,6 +51,8 @@ function MainTabs() {
             iconName = 'sync';
           } else if (route.name === 'Data') {
             iconName = 'table-view';
+          } else if (route.name === 'Test') {
+            iconName = 'bug-report';
           } else if (route.name === 'Settings') {
             iconName = 'settings';
           } else {
@@ -73,6 +76,7 @@ function MainTabs() {
       <Tab.Screen name="Home" component={HomeScreen} />
       <Tab.Screen name="Sync" component={SyncScreen} />
       <Tab.Screen name="Data" component={DataScreen} />
+      <Tab.Screen name="Test" component={TestScreen} />
       <Tab.Screen name="Settings" component={SettingsScreen} />
     </Tab.Navigator>
   );

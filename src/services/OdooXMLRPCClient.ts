@@ -420,4 +420,92 @@ export class OdooXMLRPCClient {
     // Default to string if no type specified
     return trimmed;
   }
+
+  // ==================== CONVENIENCE METHODS ====================
+
+  async searchRead(model, domain = [], fields = [], options = {}) {
+    const { limit = 100, offset = 0, order = 'id desc' } = options;
+
+    return await this.callModel(model, 'search_read', [domain], {
+      fields,
+      limit,
+      offset,
+      order
+    });
+  }
+
+  async create(model, values) {
+    return await this.callModel(model, 'create', [values]);
+  }
+
+  async update(model, ids, values) {
+    return await this.callModel(model, 'write', [
+      Array.isArray(ids) ? ids : [ids],
+      values
+    ]);
+  }
+
+  async delete(model, ids) {
+    return await this.callModel(model, 'unlink', [
+      Array.isArray(ids) ? ids : [ids]
+    ]);
+  }
+
+  async search(model, domain = [], options = {}) {
+    const { limit = 100, offset = 0, order = 'id desc' } = options;
+
+    return await this.callModel(model, 'search', [domain], {
+      limit,
+      offset,
+      order
+    });
+  }
+
+  async read(model, ids, fields = []) {
+    return await this.callModel(model, 'read', [
+      Array.isArray(ids) ? ids : [ids]
+    ], { fields });
+  }
+
+  async searchCount(model, domain = []) {
+    return await this.callModel(model, 'search_count', [domain]);
+  }
+
+  async getFields(model) {
+    return await this.callModel(model, 'fields_get', [], {
+      attributes: ['string', 'type', 'help', 'required']
+    });
+  }
+
+  /**
+   * Test connection to server
+   */
+  async testConnection() {
+    try {
+      console.log('🧪 Testing XML-RPC connection...');
+
+      // Test server accessibility
+      const version = await this.callService('common', 'version', []);
+      console.log('✅ Server reachable, version:', version);
+
+      // Test authentication if not already done
+      if (!this.uid) {
+        await this.authenticate();
+      }
+
+      return {
+        success: true,
+        message: 'Connection successful',
+        version,
+        uid: this.uid,
+        database: this.database
+      };
+    } catch (error) {
+      console.error('❌ Connection test failed:', error);
+      return {
+        success: false,
+        error: error.message
+      };
+    }
+  }
 }
