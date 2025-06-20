@@ -64,13 +64,19 @@ class SyncService {
         description: 'System users',
         enabled: true,
       },
+      {
+        name: 'crm.lead',
+        displayName: 'CRM Leads',
+        description: 'Sales leads and opportunities',
+        enabled: true,
+      },
     ];
   }
 
   /**
    * Start sync process
    */
-  async startSync(selectedModels: string[] = ['res.partner', 'res.users']): Promise<void> {
+  async startSync(selectedModels: string[] = ['res.partner', 'res.users', 'crm.lead']): Promise<void> {
     if (this.isRunning) {
       throw new Error('Sync already in progress');
     }
@@ -194,8 +200,9 @@ class SyncService {
     const tableMap: { [key: string]: string } = {
       'res.partner': 'contacts',
       'res.users': 'users',
+      'crm.lead': 'crm_leads',
     };
-    
+
     return tableMap[modelName] || modelName.replace('.', '_');
   }
 
@@ -206,8 +213,16 @@ class SyncService {
     const fieldMap: { [key: string]: string[] } = {
       'res.partner': ['name', 'email', 'phone', 'is_company', 'create_date', 'write_date'],
       'res.users': ['name', 'login', 'email', 'create_date', 'write_date'],
+      'crm.lead': [
+        'name', 'partner_name', 'email_from', 'phone', 'mobile', 'website',
+        'street', 'street2', 'city', 'state_id', 'zip', 'country_id',
+        'stage_id', 'user_id', 'team_id', 'company_id', 'source_id', 'medium_id', 'campaign_id',
+        'referred', 'probability', 'expected_revenue', 'priority', 'type', 'active',
+        'description', 'create_date', 'write_date', 'date_deadline', 'date_closed',
+        'date_conversion', 'lost_reason_id', 'tag_ids'
+      ],
     };
-    
+
     return fieldMap[modelName] || ['name', 'create_date', 'write_date'];
   }
 

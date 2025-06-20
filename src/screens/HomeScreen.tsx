@@ -74,9 +74,17 @@ export default function HomeScreen() {
             </Text>
             <Text style={styles.statLabel}>Users</Text>
           </View>
-          
+
           <View style={styles.statCard}>
-            <MaterialIcons name="storage" size={24} color="#FF9500" />
+            <MaterialIcons name="trending-up" size={24} color="#FF9500" />
+            <Text style={styles.statValue}>
+              {databaseStats?.tables?.find((t: any) => t.name === 'crm_leads')?.recordCount || 0}
+            </Text>
+            <Text style={styles.statLabel}>CRM Leads</Text>
+          </View>
+
+          <View style={styles.statCard}>
+            <MaterialIcons name="storage" size={24} color="#9C27B0" />
             <Text style={styles.statValue}>{databaseStats?.totalRecords || 0}</Text>
             <Text style={styles.statLabel}>Total Records</Text>
           </View>

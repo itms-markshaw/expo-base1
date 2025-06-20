@@ -61,6 +61,50 @@ class DatabaseService {
       );
     `);
 
+    // CRM Leads table
+    await this.db.execAsync(`
+      CREATE TABLE IF NOT EXISTS crm_leads (
+        id INTEGER PRIMARY KEY,
+        name TEXT,
+        partner_name TEXT,
+        email_from TEXT,
+        phone TEXT,
+        mobile TEXT,
+        website TEXT,
+        street TEXT,
+        street2 TEXT,
+        city TEXT,
+        state_id INTEGER,
+        zip TEXT,
+        country_id INTEGER,
+        stage_id INTEGER,
+        stage_name TEXT,
+        user_id INTEGER,
+        user_name TEXT,
+        team_id INTEGER,
+        team_name TEXT,
+        company_id INTEGER,
+        source_id INTEGER,
+        medium_id INTEGER,
+        campaign_id INTEGER,
+        referred TEXT,
+        probability REAL,
+        expected_revenue REAL,
+        priority TEXT,
+        type TEXT,
+        active BOOLEAN DEFAULT 1,
+        description TEXT,
+        create_date TEXT,
+        write_date TEXT,
+        date_deadline TEXT,
+        date_closed TEXT,
+        date_conversion TEXT,
+        lost_reason_id INTEGER,
+        tag_ids TEXT,
+        synced_at INTEGER DEFAULT (strftime('%s', 'now'))
+      );
+    `);
+
     // Sync metadata table
     await this.db.execAsync(`
       CREATE TABLE IF NOT EXISTS sync_metadata (
@@ -121,6 +165,41 @@ class DatabaseService {
     } else if (tableName === 'users') {
       filteredRecord.login = record.login || '';
       filteredRecord.email = record.email || null;
+    } else if (tableName === 'crm_leads') {
+      // CRM Lead specific fields
+      filteredRecord.partner_name = record.partner_name || null;
+      filteredRecord.email_from = record.email_from || null;
+      filteredRecord.phone = record.phone || null;
+      filteredRecord.mobile = record.mobile || null;
+      filteredRecord.website = record.website || null;
+      filteredRecord.street = record.street || null;
+      filteredRecord.street2 = record.street2 || null;
+      filteredRecord.city = record.city || null;
+      filteredRecord.state_id = record.state_id ? (Array.isArray(record.state_id) ? record.state_id[0] : record.state_id) : null;
+      filteredRecord.zip = record.zip || null;
+      filteredRecord.country_id = record.country_id ? (Array.isArray(record.country_id) ? record.country_id[0] : record.country_id) : null;
+      filteredRecord.stage_id = record.stage_id ? (Array.isArray(record.stage_id) ? record.stage_id[0] : record.stage_id) : null;
+      filteredRecord.stage_name = record.stage_id && Array.isArray(record.stage_id) ? record.stage_id[1] : null;
+      filteredRecord.user_id = record.user_id ? (Array.isArray(record.user_id) ? record.user_id[0] : record.user_id) : null;
+      filteredRecord.user_name = record.user_id && Array.isArray(record.user_id) ? record.user_id[1] : null;
+      filteredRecord.team_id = record.team_id ? (Array.isArray(record.team_id) ? record.team_id[0] : record.team_id) : null;
+      filteredRecord.team_name = record.team_id && Array.isArray(record.team_id) ? record.team_id[1] : null;
+      filteredRecord.company_id = record.company_id ? (Array.isArray(record.company_id) ? record.company_id[0] : record.company_id) : null;
+      filteredRecord.source_id = record.source_id ? (Array.isArray(record.source_id) ? record.source_id[0] : record.source_id) : null;
+      filteredRecord.medium_id = record.medium_id ? (Array.isArray(record.medium_id) ? record.medium_id[0] : record.medium_id) : null;
+      filteredRecord.campaign_id = record.campaign_id ? (Array.isArray(record.campaign_id) ? record.campaign_id[0] : record.campaign_id) : null;
+      filteredRecord.referred = record.referred || null;
+      filteredRecord.probability = record.probability || 0;
+      filteredRecord.expected_revenue = record.expected_revenue || 0;
+      filteredRecord.priority = record.priority || null;
+      filteredRecord.type = record.type || null;
+      filteredRecord.active = record.active !== false ? 1 : 0;
+      filteredRecord.description = record.description || null;
+      filteredRecord.date_deadline = record.date_deadline || null;
+      filteredRecord.date_closed = record.date_closed || null;
+      filteredRecord.date_conversion = record.date_conversion || null;
+      filteredRecord.lost_reason_id = record.lost_reason_id ? (Array.isArray(record.lost_reason_id) ? record.lost_reason_id[0] : record.lost_reason_id) : null;
+      filteredRecord.tag_ids = record.tag_ids ? JSON.stringify(record.tag_ids) : null;
     }
 
     // Add common fields

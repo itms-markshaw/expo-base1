@@ -26,7 +26,7 @@ interface DataRecord {
 }
 
 export default function DataScreen() {
-  const [selectedTable, setSelectedTable] = useState('contacts' as 'contacts' | 'users');
+  const [selectedTable, setSelectedTable] = useState('contacts' as 'contacts' | 'users' | 'crm_leads');
   const [data, setData] = useState<DataRecord[]>([]);
   const [loading, setLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
@@ -90,12 +90,17 @@ export default function DataScreen() {
             <Text style={styles.companyBadgeText}>Company</Text>
           </View>
         ) : null}
+        {selectedTable === 'crm_leads' && item.stage_name ? (
+          <View style={[styles.companyBadge, { backgroundColor: '#E8F5E8' }]}>
+            <Text style={[styles.companyBadgeText, { color: '#34C759' }]}>{item.stage_name}</Text>
+          </View>
+        ) : null}
       </View>
       
-      {item.email ? (
+      {(item.email || item.email_from) ? (
         <View style={styles.recordDetail}>
           <MaterialIcons name="email" size={16} color="#666" />
-          <Text style={styles.recordDetailText}>{item.email}</Text>
+          <Text style={styles.recordDetailText}>{item.email || item.email_from}</Text>
         </View>
       ) : null}
 
@@ -103,6 +108,20 @@ export default function DataScreen() {
         <View style={styles.recordDetail}>
           <MaterialIcons name="phone" size={16} color="#666" />
           <Text style={styles.recordDetailText}>{item.phone}</Text>
+        </View>
+      ) : null}
+
+      {selectedTable === 'crm_leads' && item.probability !== undefined ? (
+        <View style={styles.recordDetail}>
+          <MaterialIcons name="trending-up" size={16} color="#666" />
+          <Text style={styles.recordDetailText}>{item.probability}% probability</Text>
+        </View>
+      ) : null}
+
+      {selectedTable === 'crm_leads' && item.expected_revenue ? (
+        <View style={styles.recordDetail}>
+          <MaterialIcons name="attach-money" size={16} color="#666" />
+          <Text style={styles.recordDetailText}>${item.expected_revenue}</Text>
         </View>
       ) : null}
 
@@ -158,10 +177,10 @@ export default function DataScreen() {
           ]}
           onPress={() => setSelectedTable('users')}
         >
-          <MaterialIcons 
-            name="people" 
-            size={20} 
-            color={selectedTable === 'users' ? '#FFF' : '#007AFF'} 
+          <MaterialIcons
+            name="people"
+            size={20}
+            color={selectedTable === 'users' ? '#FFF' : '#007AFF'}
           />
           <Text
             style={[
@@ -170,6 +189,28 @@ export default function DataScreen() {
             ]}
           >
             Users
+          </Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={[
+            styles.selectorButton,
+            selectedTable === 'crm_leads' && styles.selectorButtonActive,
+          ]}
+          onPress={() => setSelectedTable('crm_leads')}
+        >
+          <MaterialIcons
+            name="trending-up"
+            size={20}
+            color={selectedTable === 'crm_leads' ? '#FFF' : '#007AFF'}
+          />
+          <Text
+            style={[
+              styles.selectorButtonText,
+              selectedTable === 'crm_leads' && styles.selectorButtonTextActive,
+            ]}
+          >
+            Leads
           </Text>
         </TouchableOpacity>
       </View>

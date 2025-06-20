@@ -5,6 +5,7 @@
 
 import { authService } from './auth';
 import { databaseService } from './database';
+import { crmActionsService } from './crmActions';
 
 interface TestResult {
   operation: string;
@@ -40,7 +41,10 @@ class CRUDTestingService {
     
     // Test Contacts CRUD
     await this.testContactsCRUD();
-    
+
+    // Test CRM Leads CRUD + Actions
+    await this.testCRMLeadsCRUD();
+
     // Print summary
     this.printTestSummary();
     
@@ -205,6 +209,130 @@ class CRUDTestingService {
         
         const result = await client.delete('res.partner', testContactId!);
         console.log(`🗑️ Deleted contact ${testContactId}`);
+        return result;
+      });
+    }
+
+    this.testResults.push(suite);
+  }
+
+  /**
+   * Test CRM Leads CRUD + Actions
+   */
+  private async testCRMLeadsCRUD(): Promise<void> {
+    const suite: TestSuite = {
+      name: 'CRM Leads CRUD + Actions Tests',
+      results: [],
+      totalTests: 0,
+      passedTests: 0,
+      failedTests: 0,
+      totalDuration: 0,
+    };
+
+    console.log('\n🎯 Testing CRM Leads CRUD + Actions...');
+
+    // Test 1: Read existing leads
+    await this.runTest(suite, 'READ', 'crm.lead', async () => {
+      const client = authService.getClient();
+      if (!client) throw new Error('Not authenticated');
+
+      const leads = await client.searchRead('crm.lead', [],
+        ['name', 'partner_name', 'email_from', 'phone', 'stage_id', 'probability'],
+        { limit: 5 }
+      );
+      console.log(`📖 Found ${leads.length} leads`);
+      return leads;
+    });
+
+    // Test 2: Create a test lead
+    let testLeadId: number | null = null;
+    await this.runTest(suite, 'CREATE', 'crm.lead', async () => {
+      const client = authService.getClient();
+      if (!client) throw new Error('Not authenticated');
+
+      const leadData = {
+        name: `Test Lead ${Date.now()}`,
+        partner_name: `Test Company ${Date.now()}`,
+        email_from: `testlead_${Date.now()}@example.com`,
+        phone: '+1234567890',
+        description: 'This is a test lead created by CRUD testing',
+        type: 'lead',
+        probability: 10,
+        expected_revenue: 5000,
+      };
+
+      testLeadId = await client.create('crm.lead', leadData);
+      console.log(`✨ Created lead with ID: ${testLeadId}`);
+      return { id: testLeadId, ...leadData };
+    });
+
+    if (testLeadId) {
+      // Test 3: Update the test lead
+      await this.runTest(suite, 'UPDATE', 'crm.lead', async () => {
+        const client = authService.getClient();
+        if (!client) throw new Error('Not authenticated');
+
+        const updateData = {
+          name: `Updated Test Lead ${Date.now()}`,
+          probability: 25,
+          expected_revenue: 7500,
+        };
+
+        const result = await client.update('crm.lead', testLeadId!, updateData);
+        console.log(`📝 Updated lead ${testLeadId}`);
+        return result;
+      });
+
+      // Test 4: Read the updated lead
+      await this.runTest(suite, 'READ_UPDATED', 'crm.lead', async () => {
+        const client = authService.getClient();
+        if (!client) throw new Error('Not authenticated');
+
+        const lead = await client.read('crm.lead', testLeadId!,
+          ['name', 'partner_name', 'email_from', 'probability', 'expected_revenue', 'stage_id']
+        );
+        console.log(`📖 Read updated lead:`, lead[0]);
+        return lead[0];
+      });
+
+      // Test 5: CRM Action - Convert to Opportunity
+      await this.runTest(suite, 'CONVERT_TO_OPPORTUNITY', 'crm.lead', async () => {
+        const result = await crmActionsService.convertToOpportunity(testLeadId!);
+        if (!result.success) throw new Error(result.error);
+        console.log(`🔄 Converted lead ${testLeadId} to opportunity`);
+        return result;
+      });
+
+      // Test 6: CRM Action - Schedule Activity
+      await this.runTest(suite, 'SCHEDULE_ACTIVITY', 'crm.lead', async () => {
+        const tomorrow = new Date();
+        tomorrow.setDate(tomorrow.getDate() + 1);
+        const result = await crmActionsService.scheduleActivity(
+          testLeadId!,
+          'Call',
+          'Test follow-up call',
+          tomorrow.toISOString().split('T')[0]
+        );
+        if (!result.success) throw new Error(result.error);
+        console.log(`📅 Scheduled activity for lead ${testLeadId}`);
+        return result;
+      });
+
+      // Test 7: CRM Action - Mark as Won
+      await this.runTest(suite, 'MARK_AS_WON', 'crm.lead', async () => {
+        const result = await crmActionsService.markAsWon(testLeadId!, 7500);
+        if (!result.success) throw new Error(result.error);
+        console.log(`🏆 Marked lead ${testLeadId} as won`);
+        return result;
+      });
+
+      // Test 8: Delete the test lead
+      await this.runTest(suite, 'DELETE', 'crm.lead', async () => {
+        const client = authService.getClient();
+        if (!client) throw new Error('Not authenticated');
+
+        const result = await client.delete('crm.lead', testLeadId!);
+        console.log(`🗑️ Deleted lead ${testLeadId}`);
         return result;
       });
     }
