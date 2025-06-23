@@ -16,12 +16,14 @@ import {
   Modal,
 } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
-import { 
-  chatterService, 
-  ChatterMessage, 
-  ChatterActivity, 
+import {
+  chatterService,
+  ChatterMessage,
+  ChatterActivity,
   ChatterFollower,
-  ActivityType 
+  ActivityType,
+  MentionableUser,
+  WorkflowAction
 } from '../services/chatterService';
 
 interface ChatterComponentProps {
@@ -30,7 +32,7 @@ interface ChatterComponentProps {
   recordName?: string;
 }
 
-type ChatterTab = 'messages' | 'activities' | 'followers';
+type ChatterTab = 'messages' | 'activities' | 'followers' | 'workflows';
 
 export default function ChatterComponent({ model, recordId, recordName }: ChatterComponentProps) {
   const [activeTab, setActiveTab] = useState<ChatterTab>('messages');
@@ -38,6 +40,8 @@ export default function ChatterComponent({ model, recordId, recordName }: Chatte
   const [activities, setActivities] = useState<ChatterActivity[]>([]);
   const [followers, setFollowers] = useState<ChatterFollower[]>([]);
   const [activityTypes, setActivityTypes] = useState<ActivityType[]>([]);
+  const [mentionableUsers, setMentionableUsers] = useState<MentionableUser[]>([]);
+  const [workflowActions, setWorkflowActions] = useState<WorkflowAction[]>([]);
   const [loading, setLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
 
@@ -45,6 +49,8 @@ export default function ChatterComponent({ model, recordId, recordName }: Chatte
   const [showMessageComposer, setShowMessageComposer] = useState(false);
   const [messageText, setMessageText] = useState('');
   const [isInternalNote, setIsInternalNote] = useState(false);
+  const [showMentionPicker, setShowMentionPicker] = useState(false);
+  const [selectedMentions, setSelectedMentions] = useState<MentionableUser[]>([]);
 
   // Activity scheduling
   const [showActivityModal, setShowActivityModal] = useState(false);
@@ -52,9 +58,16 @@ export default function ChatterComponent({ model, recordId, recordName }: Chatte
   const [selectedActivityType, setSelectedActivityType] = useState<number | null>(null);
   const [activityDueDate, setActivityDueDate] = useState('');
 
+  // Workflow actions
+  const [showWorkflowModal, setShowWorkflowModal] = useState(false);
+  const [selectedWorkflowAction, setSelectedWorkflowAction] = useState<WorkflowAction | null>(null);
+  const [workflowFeedback, setWorkflowFeedback] = useState('');
+
   useEffect(() => {
     loadData();
     loadActivityTypes();
+    loadMentionableUsers();
+    loadWorkflowActions();
   }, [model, recordId]);
 
   const loadData = async () => {
@@ -85,6 +98,24 @@ export default function ChatterComponent({ model, recordId, recordName }: Chatte
     }
   };
 
+  const loadMentionableUsers = async () => {
+    try {
+      const users = await chatterService.getMentionableUsers();
+      setMentionableUsers(users);
+    } catch (error) {
+      console.error('Failed to load mentionable users:', error);
+    }
+  };
+
+  const loadWorkflowActions = async () => {
+    try {
+      const actions = await chatterService.getWorkflowActions(model);
+      setWorkflowActions(actions);
+    } catch (error) {
+      console.error('Failed to load workflow actions:', error);
+    }
+  };
+
   const handleRefresh = async () => {
     setRefreshing(true);
     await loadData();
@@ -95,15 +126,30 @@ export default function ChatterComponent({ model, recordId, recordName }: Chatte
     if (!messageText.trim()) return;
 
     try {
+      // Format message with mentions
+      let formattedBody = messageText;
+      const mentionData = selectedMentions.map(user => ({
+        userId: user.id,
+        userName: user.name,
+        partnerId: user.partner_id[0]
+      }));
+
+      if (mentionData.length > 0) {
+        formattedBody = chatterService.formatMessageWithMentions(messageText, mentionData);
+      }
+
       const messageId = await chatterService.postMessage(
         model,
         recordId,
-        messageText,
-        isInternalNote
+        formattedBody,
+        isInternalNote,
+        undefined,
+        selectedMentions.map(user => user.id)
       );
 
       if (messageId) {
         setMessageText('');
+        setSelectedMentions([]);
         setShowMessageComposer(false);
         await loadData(); // Refresh to show new message
         Alert.alert('Success', 'Message posted successfully');
@@ -167,6 +213,47 @@ export default function ChatterComponent({ model, recordId, recordName }: Chatte
     );
   };
 
+  const handleExecuteWorkflow = async () => {
+    if (!selectedWorkflowAction) return;
+
+    try {
+      const success = await chatterService.executeWorkflowAction(
+        model,
+        recordId,
+        selectedWorkflowAction,
+        workflowFeedback
+      );
+
+      if (success) {
+        setWorkflowFeedback('');
+        setSelectedWorkflowAction(null);
+        setShowWorkflowModal(false);
+        await loadData(); // Refresh to show changes
+        Alert.alert('Success', 'Workflow action executed successfully');
+      } else {
+        Alert.alert('Error', 'Failed to execute workflow action');
+      }
+    } catch (error) {
+      Alert.alert('Error', 'Failed to execute workflow action');
+    }
+  };
+
+  const handleAddMention = (user: MentionableUser) => {
+    if (!selectedMentions.find(m => m.id === user.id)) {
+      setSelectedMentions([...selectedMentions, user]);
+      setMessageText(messageText + `@${user.name} `);
+    }
+    setShowMentionPicker(false);
+  };
+
+  const handleRemoveMention = (userId: number) => {
+    const user = selectedMentions.find(m => m.id === userId);
+    if (user) {
+      setSelectedMentions(selectedMentions.filter(m => m.id !== userId));
+      setMessageText(messageText.replace(`@${user.name} `, ''));
+    }
+  };
+
   const formatDate = (dateString: string) => {
     return new Date(dateString).toLocaleDateString();
   };
@@ -218,13 +305,27 @@ export default function ChatterComponent({ model, recordId, recordName }: Chatte
         style={[styles.tab, activeTab === 'followers' && styles.activeTab]}
         onPress={() => setActiveTab('followers')}
       >
-        <MaterialIcons 
-          name="people" 
-          size={20} 
-          color={activeTab === 'followers' ? '#007AFF' : '#666'} 
+        <MaterialIcons
+          name="people"
+          size={20}
+          color={activeTab === 'followers' ? '#007AFF' : '#666'}
         />
         <Text style={[styles.tabText, activeTab === 'followers' && styles.activeTabText]}>
           Followers ({followers.length})
+        </Text>
+      </TouchableOpacity>
+
+      <TouchableOpacity
+        style={[styles.tab, activeTab === 'workflows' && styles.activeTab]}
+        onPress={() => setActiveTab('workflows')}
+      >
+        <MaterialIcons
+          name="settings"
+          size={20}
+          color={activeTab === 'workflows' ? '#007AFF' : '#666'}
+        />
+        <Text style={[styles.tabText, activeTab === 'workflows' && styles.activeTabText]}>
+          Actions ({workflowActions.length})
         </Text>
       </TouchableOpacity>
     </View>
@@ -239,6 +340,14 @@ export default function ChatterComponent({ model, recordId, recordName }: Chatte
         >
           <MaterialIcons name="add-comment" size={20} color="#007AFF" />
           <Text style={styles.actionButtonText}>Add Message</Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={[styles.actionButton, { marginLeft: 8 }]}
+          onPress={() => setShowWorkflowModal(true)}
+        >
+          <MaterialIcons name="play-arrow" size={20} color="#34C759" />
+          <Text style={[styles.actionButtonText, { color: '#34C759' }]}>Workflow</Text>
         </TouchableOpacity>
       </View>
 
@@ -340,6 +449,44 @@ export default function ChatterComponent({ model, recordId, recordName }: Chatte
     </View>
   );
 
+  const renderWorkflows = () => (
+    <View style={styles.tabContent}>
+      <ScrollView
+        style={styles.workflowsList}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} />}
+      >
+        {workflowActions.map((action) => (
+          <TouchableOpacity
+            key={action.id}
+            style={styles.workflowCard}
+            onPress={() => {
+              setSelectedWorkflowAction(action);
+              setShowWorkflowModal(true);
+            }}
+          >
+            <View style={styles.workflowHeader}>
+              <Text style={styles.workflowName}>{action.name}</Text>
+              <MaterialIcons name="play-arrow" size={20} color="#34C759" />
+            </View>
+            {action.description && (
+              <Text style={styles.workflowDescription}>{action.description}</Text>
+            )}
+            <Text style={styles.workflowType}>
+              Type: {action.action_type.replace('_', ' ')}
+            </Text>
+          </TouchableOpacity>
+        ))}
+
+        {workflowActions.length === 0 && (
+          <View style={styles.emptyWorkflows}>
+            <MaterialIcons name="settings" size={48} color="#C7C7CC" />
+            <Text style={styles.emptyWorkflowsText}>No workflow actions available</Text>
+          </View>
+        )}
+      </ScrollView>
+    </View>
+  );
+
   return (
     <View style={styles.container}>
       <View style={styles.header}>
@@ -353,6 +500,7 @@ export default function ChatterComponent({ model, recordId, recordName }: Chatte
       {activeTab === 'messages' && renderMessages()}
       {activeTab === 'activities' && renderActivities()}
       {activeTab === 'followers' && renderFollowers()}
+      {activeTab === 'workflows' && renderWorkflows()}
 
       {/* Message Composer Modal */}
       <Modal
@@ -391,15 +539,40 @@ export default function ChatterComponent({ model, recordId, recordName }: Chatte
               </TouchableOpacity>
             </View>
 
-            <TextInput
-              style={styles.messageInput}
-              placeholder="Type your message..."
-              value={messageText}
-              onChangeText={setMessageText}
-              multiline
-              numberOfLines={6}
-              textAlignVertical="top"
-            />
+            {/* Selected Mentions */}
+            {selectedMentions.length > 0 && (
+              <View style={styles.mentionsContainer}>
+                <Text style={styles.mentionsLabel}>Mentions:</Text>
+                <View style={styles.mentionsList}>
+                  {selectedMentions.map((user) => (
+                    <View key={user.id} style={styles.mentionChip}>
+                      <Text style={styles.mentionChipText}>@{user.name}</Text>
+                      <TouchableOpacity onPress={() => handleRemoveMention(user.id)}>
+                        <MaterialIcons name="close" size={16} color="#666" />
+                      </TouchableOpacity>
+                    </View>
+                  ))}
+                </View>
+              </View>
+            )}
+
+            <View style={styles.messageInputContainer}>
+              <TextInput
+                style={styles.messageInput}
+                placeholder="Type your message..."
+                value={messageText}
+                onChangeText={setMessageText}
+                multiline
+                numberOfLines={6}
+                textAlignVertical="top"
+              />
+              <TouchableOpacity
+                style={styles.mentionButton}
+                onPress={() => setShowMentionPicker(true)}
+              >
+                <MaterialIcons name="alternate-email" size={24} color="#007AFF" />
+              </TouchableOpacity>
+            </View>
           </View>
         </View>
       </Modal>
@@ -456,6 +629,101 @@ export default function ChatterComponent({ model, recordId, recordName }: Chatte
                 </TouchableOpacity>
               ))}
             </ScrollView>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Mention Picker Modal */}
+      <Modal
+        visible={showMentionPicker}
+        animationType="slide"
+        presentationStyle="pageSheet"
+      >
+        <View style={styles.modalContainer}>
+          <View style={styles.modalHeader}>
+            <TouchableOpacity onPress={() => setShowMentionPicker(false)}>
+              <Text style={styles.modalCancel}>Cancel</Text>
+            </TouchableOpacity>
+            <Text style={styles.modalTitle}>Select User to Mention</Text>
+            <View style={{ width: 60 }} />
+          </View>
+
+          <ScrollView style={styles.modalContent}>
+            {mentionableUsers.map((user) => (
+              <TouchableOpacity
+                key={user.id}
+                style={styles.userItem}
+                onPress={() => handleAddMention(user)}
+              >
+                <MaterialIcons name="person" size={24} color="#666" />
+                <View style={styles.userInfo}>
+                  <Text style={styles.userName}>{user.name}</Text>
+                  <Text style={styles.userLogin}>@{user.login}</Text>
+                  {user.email && (
+                    <Text style={styles.userEmail}>{user.email}</Text>
+                  )}
+                </View>
+              </TouchableOpacity>
+            ))}
+          </ScrollView>
+        </View>
+      </Modal>
+
+      {/* Workflow Action Modal */}
+      <Modal
+        visible={showWorkflowModal}
+        animationType="slide"
+        presentationStyle="pageSheet"
+      >
+        <View style={styles.modalContainer}>
+          <View style={styles.modalHeader}>
+            <TouchableOpacity onPress={() => setShowWorkflowModal(false)}>
+              <Text style={styles.modalCancel}>Cancel</Text>
+            </TouchableOpacity>
+            <Text style={styles.modalTitle}>Execute Workflow Action</Text>
+            <TouchableOpacity onPress={handleExecuteWorkflow}>
+              <Text style={styles.modalSave}>Execute</Text>
+            </TouchableOpacity>
+          </View>
+
+          <View style={styles.modalContent}>
+            {selectedWorkflowAction && (
+              <>
+                <Text style={styles.workflowActionTitle}>{selectedWorkflowAction.name}</Text>
+                {selectedWorkflowAction.description && (
+                  <Text style={styles.workflowActionDescription}>
+                    {selectedWorkflowAction.description}
+                  </Text>
+                )}
+
+                <Text style={styles.label}>Feedback (optional):</Text>
+                <TextInput
+                  style={styles.input}
+                  placeholder="Add a note about this action..."
+                  value={workflowFeedback}
+                  onChangeText={setWorkflowFeedback}
+                  multiline
+                  numberOfLines={3}
+                />
+              </>
+            )}
+
+            {!selectedWorkflowAction && (
+              <ScrollView style={styles.workflowActionsList}>
+                {workflowActions.map((action) => (
+                  <TouchableOpacity
+                    key={action.id}
+                    style={styles.workflowActionItem}
+                    onPress={() => setSelectedWorkflowAction(action)}
+                  >
+                    <Text style={styles.workflowActionName}>{action.name}</Text>
+                    {action.description && (
+                      <Text style={styles.workflowActionDesc}>{action.description}</Text>
+                    )}
+                  </TouchableOpacity>
+                ))}
+              </ScrollView>
+            )}
           </View>
         </View>
       </Modal>
@@ -710,14 +978,52 @@ const styles = StyleSheet.create({
     color: '#FFF',
     fontWeight: '600',
   },
+  mentionsContainer: {
+    marginBottom: 12,
+  },
+  mentionsLabel: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#1A1A1A',
+    marginBottom: 8,
+  },
+  mentionsList: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  mentionChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#E3F2FD',
+    borderRadius: 16,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    gap: 4,
+  },
+  mentionChipText: {
+    fontSize: 14,
+    color: '#007AFF',
+    fontWeight: '600',
+  },
+  messageInputContainer: {
+    position: 'relative',
+  },
   messageInput: {
     backgroundColor: '#FFF',
     borderRadius: 8,
     padding: 12,
+    paddingRight: 48,
     fontSize: 16,
     borderWidth: 1,
     borderColor: '#E5E5E5',
     minHeight: 120,
+  },
+  mentionButton: {
+    position: 'absolute',
+    top: 8,
+    right: 8,
+    padding: 8,
   },
   input: {
     backgroundColor: '#FFF',
@@ -756,5 +1062,117 @@ const styles = StyleSheet.create({
   activityTypeNameSelected: {
     color: '#007AFF',
     fontWeight: '600',
+  },
+  workflowsList: {
+    flex: 1,
+    padding: 16,
+  },
+  workflowCard: {
+    backgroundColor: '#FFF',
+    borderRadius: 8,
+    padding: 12,
+    marginBottom: 12,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.1,
+    shadowRadius: 2,
+    elevation: 2,
+  },
+  workflowHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 4,
+  },
+  workflowName: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#1A1A1A',
+    flex: 1,
+  },
+  workflowDescription: {
+    fontSize: 12,
+    color: '#666',
+    marginBottom: 4,
+  },
+  workflowType: {
+    fontSize: 11,
+    color: '#999',
+    textTransform: 'capitalize',
+  },
+  emptyWorkflows: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 64,
+  },
+  emptyWorkflowsText: {
+    fontSize: 16,
+    color: '#666',
+    marginTop: 16,
+  },
+  userItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 12,
+    backgroundColor: '#FFF',
+    borderRadius: 8,
+    marginBottom: 8,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.1,
+    shadowRadius: 2,
+    elevation: 2,
+  },
+  userInfo: {
+    marginLeft: 12,
+    flex: 1,
+  },
+  userName: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#1A1A1A',
+  },
+  userLogin: {
+    fontSize: 14,
+    color: '#007AFF',
+    marginTop: 2,
+  },
+  userEmail: {
+    fontSize: 12,
+    color: '#666',
+    marginTop: 2,
+  },
+  workflowActionTitle: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#1A1A1A',
+    marginBottom: 8,
+  },
+  workflowActionDescription: {
+    fontSize: 14,
+    color: '#666',
+    marginBottom: 16,
+    lineHeight: 20,
+  },
+  workflowActionsList: {
+    maxHeight: 300,
+  },
+  workflowActionItem: {
+    padding: 12,
+    backgroundColor: '#FFF',
+    borderRadius: 8,
+    marginBottom: 8,
+    borderWidth: 1,
+    borderColor: '#E5E5E5',
+  },
+  workflowActionName: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#1A1A1A',
+  },
+  workflowActionDesc: {
+    fontSize: 12,
+    color: '#666',
+    marginTop: 4,
   },
 });

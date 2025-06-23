@@ -105,6 +105,34 @@ class DatabaseService {
       );
     `);
 
+    // Employees table
+    await this.db.execAsync(`
+      CREATE TABLE IF NOT EXISTS employees (
+        id INTEGER PRIMARY KEY,
+        name TEXT,
+        work_email TEXT,
+        work_phone TEXT,
+        mobile_phone TEXT,
+        job_title TEXT,
+        department_id INTEGER,
+        department_name TEXT,
+        parent_id INTEGER,
+        parent_name TEXT,
+        coach_id INTEGER,
+        coach_name TEXT,
+        company_id INTEGER,
+        company_name TEXT,
+        user_id INTEGER,
+        user_name TEXT,
+        resource_id INTEGER,
+        employee_type TEXT,
+        active BOOLEAN DEFAULT 1,
+        create_date TEXT,
+        write_date TEXT,
+        synced_at INTEGER DEFAULT (strftime('%s', 'now'))
+      );
+    `);
+
     // Sync metadata table
     await this.db.execAsync(`
       CREATE TABLE IF NOT EXISTS sync_metadata (
@@ -165,6 +193,25 @@ class DatabaseService {
     } else if (tableName === 'users') {
       filteredRecord.login = record.login || '';
       filteredRecord.email = record.email || null;
+    } else if (tableName === 'employees') {
+      // Employees table
+      filteredRecord.work_email = record.work_email || null;
+      filteredRecord.work_phone = record.work_phone || null;
+      filteredRecord.mobile_phone = record.mobile_phone || null;
+      filteredRecord.job_title = record.job_title || null;
+      filteredRecord.department_id = record.department_id ? (Array.isArray(record.department_id) ? record.department_id[0] : record.department_id) : null;
+      filteredRecord.department_name = record.department_id && Array.isArray(record.department_id) ? record.department_id[1] : null;
+      filteredRecord.parent_id = record.parent_id ? (Array.isArray(record.parent_id) ? record.parent_id[0] : record.parent_id) : null;
+      filteredRecord.parent_name = record.parent_id && Array.isArray(record.parent_id) ? record.parent_id[1] : null;
+      filteredRecord.coach_id = record.coach_id ? (Array.isArray(record.coach_id) ? record.coach_id[0] : record.coach_id) : null;
+      filteredRecord.coach_name = record.coach_id && Array.isArray(record.coach_id) ? record.coach_id[1] : null;
+      filteredRecord.company_id = record.company_id ? (Array.isArray(record.company_id) ? record.company_id[0] : record.company_id) : null;
+      filteredRecord.company_name = record.company_id && Array.isArray(record.company_id) ? record.company_id[1] : null;
+      filteredRecord.user_id = record.user_id ? (Array.isArray(record.user_id) ? record.user_id[0] : record.user_id) : null;
+      filteredRecord.user_name = record.user_id && Array.isArray(record.user_id) ? record.user_id[1] : null;
+      filteredRecord.resource_id = record.resource_id ? (Array.isArray(record.resource_id) ? record.resource_id[0] : record.resource_id) : null;
+      filteredRecord.employee_type = record.employee_type || null;
+      filteredRecord.active = record.active !== false ? 1 : 0;
     } else if (tableName === 'crm_leads') {
       // CRM Lead specific fields
       filteredRecord.partner_name = record.partner_name || null;
@@ -271,21 +318,31 @@ class DatabaseService {
   async getStats(): Promise<{ totalRecords: number; tables: any[] }> {
     if (!this.db) throw new Error('Database not initialized');
 
-    const tables = ['contacts', 'users'];
+    const tables = ['contacts', 'users', 'employees', 'crm_leads'];
     const stats = [];
     let totalRecords = 0;
 
     for (const table of tables) {
-      const count = await this.countRecords(table);
-      const metadata = await this.getSyncMetadata(table);
+      try {
+        const count = await this.countRecords(table);
+        const metadata = await this.getSyncMetadata(table);
 
-      stats.push({
-        name: table,
-        recordCount: count,
-        lastSync: metadata?.last_sync || null,
-      });
+        stats.push({
+          name: table,
+          recordCount: count,
+          lastSync: metadata?.last_sync || null,
+        });
 
-      totalRecords += count;
+        totalRecords += count;
+      } catch (error) {
+        // Table might not exist yet, add with 0 count
+        console.log(`Table ${table} not found, adding with 0 count`);
+        stats.push({
+          name: table,
+          recordCount: 0,
+          lastSync: null,
+        });
+      }
     }
 
     return {
@@ -302,6 +359,8 @@ class DatabaseService {
 
     await this.db.execAsync('DELETE FROM contacts');
     await this.db.execAsync('DELETE FROM users');
+    await this.db.execAsync('DELETE FROM employees');
+    await this.db.execAsync('DELETE FROM crm_leads');
     await this.db.execAsync('DELETE FROM sync_metadata');
 
     console.log('✅ All data cleared');

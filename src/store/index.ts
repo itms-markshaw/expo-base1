@@ -46,7 +46,23 @@ export const useAppStore = create<AppStore>((set, get) => ({
     errors: [],
   },
   availableModels: syncService.getAvailableModels(),
-  selectedModels: ['res.partner', 'res.users'],
+  selectedModels: [
+    'res.partner',
+    'sale.order',
+    'crm.lead',
+    'hr.employee',
+    'mail.activity',
+    'mail.message',
+    'mail.thread',
+    'ir.attachment',
+    'calendar.event',
+    'res.users',
+    'product.product',
+    'product.template',
+    'account.move',
+    'project.project',
+    'project.task'
+  ],
   databaseStats: null,
 
   // Actions

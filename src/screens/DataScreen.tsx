@@ -16,7 +16,7 @@ import {
 } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
 import { databaseService } from '../services/database';
-import ChatterComponent from '../components/ChatterComponent';
+import ImprovedChatterComponent from '../components/ImprovedChatterComponent';
 
 interface DataRecord {
   id: number;
@@ -28,7 +28,7 @@ interface DataRecord {
 }
 
 export default function DataScreen() {
-  const [selectedTable, setSelectedTable] = useState('contacts' as 'contacts' | 'users' | 'crm_leads');
+  const [selectedTable, setSelectedTable] = useState('contacts' as 'contacts' | 'users' | 'employees' | 'crm_leads');
   const [data, setData] = useState<DataRecord[]>([]);
   const [loading, setLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
@@ -86,6 +86,7 @@ export default function DataScreen() {
     const modelMap = {
       'contacts': 'res.partner',
       'users': 'res.users',
+      'employees': 'hr.employee',
       'crm_leads': 'crm.lead',
     };
 
@@ -220,6 +221,28 @@ export default function DataScreen() {
         <TouchableOpacity
           style={[
             styles.selectorButton,
+            selectedTable === 'employees' && styles.selectorButtonActive,
+          ]}
+          onPress={() => setSelectedTable('employees')}
+        >
+          <MaterialIcons
+            name="badge"
+            size={20}
+            color={selectedTable === 'employees' ? '#FFF' : '#007AFF'}
+          />
+          <Text
+            style={[
+              styles.selectorButtonText,
+              selectedTable === 'employees' && styles.selectorButtonTextActive,
+            ]}
+          >
+            Employees
+          </Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={[
+            styles.selectorButton,
             selectedTable === 'crm_leads' && styles.selectorButtonActive,
           ]}
           onPress={() => setSelectedTable('crm_leads')}
@@ -286,7 +309,7 @@ export default function DataScreen() {
           </View>
 
           {selectedRecord && (
-            <ChatterComponent
+            <ImprovedChatterComponent
               model={selectedRecord.model}
               recordId={selectedRecord.id}
               recordName={selectedRecord.name}

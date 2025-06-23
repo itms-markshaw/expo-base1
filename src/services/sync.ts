@@ -59,9 +59,9 @@ class SyncService {
         enabled: true,
       },
       {
-        name: 'res.users',
-        displayName: 'Users',
-        description: 'System users',
+        name: 'sale.order',
+        displayName: 'Sales Orders',
+        description: 'Sales orders and quotations',
         enabled: true,
       },
       {
@@ -70,13 +70,115 @@ class SyncService {
         description: 'Sales leads and opportunities',
         enabled: true,
       },
+      {
+        name: 'hr.employee',
+        displayName: 'Employees',
+        description: 'Company employees and HR data',
+        enabled: true,
+      },
+      {
+        name: 'mail.activity',
+        displayName: 'Activities',
+        description: 'Tasks, reminders, and activities',
+        enabled: true,
+      },
+      {
+        name: 'mail.message',
+        displayName: 'Messages',
+        description: 'Chatter messages and communications',
+        enabled: true,
+      },
+      {
+        name: 'mail.thread',
+        displayName: 'Mail Threads',
+        description: 'Message threads and conversations',
+        enabled: true,
+      },
+      {
+        name: 'ir.attachment',
+        displayName: 'Attachments',
+        description: 'Files and document attachments',
+        enabled: true,
+      },
+      {
+        name: 'calendar.event',
+        displayName: 'Calendar Events',
+        description: 'Calendar events and meetings',
+        enabled: true,
+      },
+      {
+        name: 'res.users',
+        displayName: 'Users',
+        description: 'System users and authentication',
+        enabled: true,
+      },
+      {
+        name: 'product.product',
+        displayName: 'Products',
+        description: 'Product catalog and variants',
+        enabled: false,
+      },
+      {
+        name: 'product.template',
+        displayName: 'Product Templates',
+        description: 'Product templates and categories',
+        enabled: false,
+      },
+      {
+        name: 'account.move',
+        displayName: 'Invoices',
+        description: 'Invoices and accounting entries',
+        enabled: false,
+      },
+      {
+        name: 'stock.picking',
+        displayName: 'Deliveries',
+        description: 'Delivery orders and shipments',
+        enabled: false,
+      },
+      {
+        name: 'project.project',
+        displayName: 'Projects',
+        description: 'Project management',
+        enabled: false,
+      },
+      {
+        name: 'project.task',
+        displayName: 'Project Tasks',
+        description: 'Project tasks and milestones',
+        enabled: false,
+      },
+      {
+        name: 'helpdesk.ticket',
+        displayName: 'Helpdesk Tickets',
+        description: 'Support tickets and requests',
+        enabled: true,
+      },
+      {
+        name: 'helpdesk.team',
+        displayName: 'Helpdesk Teams',
+        description: 'Support team management',
+        enabled: true,
+      },
     ];
   }
 
   /**
    * Start sync process
    */
-  async startSync(selectedModels: string[] = ['res.partner', 'res.users', 'crm.lead']): Promise<void> {
+  async startSync(selectedModels: string[] = [
+    'res.partner',
+    'sale.order',
+    'crm.lead',
+    'hr.employee',
+    'mail.activity',
+    'mail.message',
+    'ir.attachment',
+    'calendar.event',
+    'res.users',
+    'helpdesk.ticket',
+    'helpdesk.team'
+  ]): Promise<void> {
     if (this.isRunning) {
       throw new Error('Sync already in progress');
     }
@@ -199,8 +301,23 @@ class SyncService {
   private getTableName(modelName: string): string {
     const tableMap: { [key: string]: string } = {
       'res.partner': 'contacts',
-      'res.users': 'users',
+      'sale.order': 'sale_orders',
       'crm.lead': 'crm_leads',
+      'hr.employee': 'employees',
+      'mail.activity': 'activities',
+      'mail.message': 'messages',
+      'mail.thread': 'mail_threads',
+      'ir.attachment': 'attachments',
+      'calendar.event': 'calendar_events',
+      'res.users': 'users',
+      'product.product': 'products',
+      'product.template': 'product_templates',
+      'account.move': 'invoices',
+      'stock.picking': 'deliveries',
+      'project.project': 'projects',
+      'project.task': 'project_tasks',
+      'helpdesk.ticket': 'helpdesk_tickets',
+      'helpdesk.team': 'helpdesk_teams',
     };
 
     return tableMap[modelName] || modelName.replace('.', '_');
@@ -211,8 +328,16 @@ class SyncService {
    */
   private getFieldsForModel(modelName: string): string[] {
     const fieldMap: { [key: string]: string[] } = {
-      'res.partner': ['name', 'email', 'phone', 'is_company', 'create_date', 'write_date'],
-      'res.users': ['name', 'login', 'email', 'create_date', 'write_date'],
+      'res.partner': [
+        'name', 'email', 'phone', 'mobile', 'is_company', 'customer_rank', 'supplier_rank',
+        'street', 'street2', 'city', 'state_id', 'zip', 'country_id', 'website',
+        'category_id', 'user_id', 'company_id', 'active', 'create_date', 'write_date'
+      ],
+      'sale.order': [
+        'name', 'partner_id', 'date_order', 'validity_date', 'user_id', 'team_id',
+        'amount_untaxed', 'amount_tax', 'amount_total', 'currency_id', 'state',
+        'invoice_status', 'delivery_status', 'note', 'create_date', 'write_date'
+      ],
       'crm.lead': [
         'name', 'partner_name', 'email_from', 'phone', 'mobile', 'website',
         'street', 'street2', 'city', 'state_id', 'zip', 'country_id',
@@ -220,6 +345,73 @@ class SyncService {
         'referred', 'probability', 'expected_revenue', 'priority', 'type', 'active',
         'description', 'create_date', 'write_date', 'date_deadline', 'date_closed',
         'date_conversion', 'lost_reason_id', 'tag_ids'
+      ],
+      'hr.employee': [
+        'name', 'work_email', 'work_phone', 'job_title',
+        'department_id', 'company_id', 'user_id',
+        'active', 'create_date', 'write_date'
+      ],
+      'mail.activity': [
+        'summary', 'note', 'date_deadline', 'user_id', 'res_model', 'res_id',
+        'res_name', 'activity_type_id', 'state', 'create_date', 'write_date'
+      ],
+      'mail.message': [
+        'subject', 'body', 'date', 'author_id', 'email_from', 'message_type',
+        'subtype_id', 'model', 'res_id', 'record_name', 'reply_to',
+        'attachment_ids', 'create_date', 'write_date'
+      ],
+      'mail.thread': [
+        'message_ids', 'message_follower_ids', 'message_partner_ids',
+        'create_date', 'write_date'
+      ],
+      'ir.attachment': [
+        'name', 'datas_fname', 'description', 'res_model', 'res_id',
+        'res_name', 'type', 'url', 'file_size', 'mimetype',
+        'create_date', 'write_date'
+      ],
+      'calendar.event': [
+        'name', 'description', 'start', 'stop', 'allday', 'duration',
+        'user_id', 'partner_ids', 'location', 'privacy', 'show_as',
+        'state', 'create_date', 'write_date'
+      ],
+      'res.users': [
+        'name', 'login', 'email', 'partner_id', 'company_id', 'company_ids',
+        'groups_id', 'active', 'create_date', 'write_date'
+      ],
+      'product.product': [
+        'name', 'default_code', 'barcode', 'product_tmpl_id', 'list_price',
+        'standard_price', 'categ_id', 'uom_id', 'active', 'create_date', 'write_date'
+      ],
+      'product.template': [
+        'name', 'description', 'list_price', 'standard_price', 'categ_id',
+        'uom_id', 'uom_po_id', 'type', 'sale_ok', 'purchase_ok',
+        'active', 'create_date', 'write_date'
+      ],
+      'account.move': [
+        'name', 'partner_id', 'invoice_date', 'invoice_date_due', 'amount_untaxed',
+        'amount_tax', 'amount_total', 'currency_id', 'state', 'move_type',
+        'ref', 'create_date', 'write_date'
+      ],
+      'stock.picking': [
+        'name', 'partner_id', 'picking_type_id', 'location_id', 'location_dest_id',
+        'scheduled_date', 'date_done', 'state', 'origin', 'note',
+        'create_date', 'write_date'
+      ],
+      'project.project': [
+        'name', 'description', 'user_id', 'partner_id', 'date_start', 'date',
+        'state', 'privacy_visibility', 'active', 'create_date', 'write_date'
+      ],
+      'project.task': [
+        'name', 'description', 'project_id', 'user_id', 'partner_id',
+        'date_deadline', 'stage_id', 'priority', 'active', 'create_date', 'write_date'
+      ],
+      'helpdesk.ticket': [
+        'name', 'description', 'partner_id', 'user_id', 'team_id', 'stage_id',
+        'priority', 'kanban_state', 'active', 'create_date', 'write_date', 'close_date'
+      ],
+      'helpdesk.team': [
+        'name', 'description', 'user_id', 'member_ids', 'active', 'color',
+        'alias_name', 'alias_domain', 'create_date', 'write_date'
       ],
     };
 

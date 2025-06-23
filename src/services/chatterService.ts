@@ -57,6 +57,26 @@ export interface MessageSubtype {
   default: boolean;
 }
 
+export interface MentionableUser {
+  id: number;
+  name: string;
+  login: string;
+  email?: string;
+  partner_id: [number, string];
+  avatar?: string;
+}
+
+export interface WorkflowAction {
+  id: number;
+  name: string;
+  description?: string;
+  model: string;
+  action_type: 'field_update' | 'server_action' | 'stage_change';
+  field_updates?: { [key: string]: any };
+  server_action_id?: number;
+  stage_id?: number;
+}
+
 class ChatterService {
   
   /**
@@ -67,72 +87,105 @@ class ChatterService {
       const client = authService.getClient();
       if (!client) throw new Error('Not authenticated');
 
-      const messages = await client.searchRead('mail.message', 
-        [
-          ['res_model', '=', model], 
-          ['res_id', '=', recordId],
-          ['message_type', 'in', ['comment', 'email', 'notification']]
-        ], 
-        [
-          'id', 'subject', 'body', 'message_type', 'subtype_id', 
-          'author_id', 'partner_ids', 'create_date', 'attachment_ids',
-          'tracking_value_ids'
-        ], 
-        { 
-          limit, 
-          order: 'create_date desc' 
-        }
-      );
+      // Try to get messages using model field (newer Odoo versions)
+      try {
+        const messages = await client.searchRead('mail.message',
+          [
+            ['model', '=', model],
+            ['res_id', '=', recordId],
+            ['message_type', 'in', ['comment', 'email', 'notification']]
+          ],
+          [
+            'id', 'subject', 'body', 'message_type', 'subtype_id',
+            'author_id', 'create_date'
+          ],
+          {
+            limit,
+            order: 'create_date desc'
+          }
+        );
 
-      return messages.map(msg => ({
-        ...msg,
-        is_internal: msg.subtype_id && msg.subtype_id[1]?.toLowerCase().includes('internal')
-      }));
+        return messages.map(msg => ({
+          ...msg,
+          partner_ids: msg.partner_ids || [],
+          attachment_ids: msg.attachment_ids || [],
+          tracking_value_ids: msg.tracking_value_ids || [],
+          is_internal: msg.subtype_id && msg.subtype_id[1]?.toLowerCase().includes('internal')
+        }));
+      } catch (modelFieldError) {
+        console.log('🔄 Trying fallback message query with res_model field...');
+
+        // Fallback: try with res_model field (older Odoo versions)
+        const messages = await client.searchRead('mail.message',
+          [
+            ['res_model', '=', model],
+            ['res_id', '=', recordId],
+            ['message_type', 'in', ['comment', 'email', 'notification']]
+          ],
+          [
+            'id', 'subject', 'body', 'message_type', 'author_id', 'create_date'
+          ],
+          {
+            limit,
+            order: 'create_date desc'
+          }
+        );
+
+        return messages.map(msg => ({
+          ...msg,
+          subtype_id: msg.subtype_id || null,
+          partner_ids: msg.partner_ids || [],
+          attachment_ids: msg.attachment_ids || [],
+          tracking_value_ids: msg.tracking_value_ids || [],
+          is_internal: false
+        }));
+      }
     } catch (error) {
       console.error('❌ Failed to get messages:', error.message);
+
+      // Final fallback: return empty array
+      console.log('🔄 All message queries failed, returning empty array');
       return [];
     }
   }
 
   /**
-   * Post a message (comment or internal note)
+   * Post a simple message (simplified version)
    */
   async postMessage(
-    model: string, 
-    recordId: number, 
-    body: string, 
-    isInternal: boolean = false,
-    subject?: string
+    model: string,
+    recordId: number,
+    body: string,
+    isInternal: boolean = false
   ): Promise<number | null> {
     try {
       const client = authService.getClient();
       if (!client) throw new Error('Not authenticated');
 
-      // Get appropriate subtype
-      const subtypeId = await this.getMessageSubtype(isInternal);
-
-      const messageData: any = {
-        model: model,
-        res_id: recordId,
+      // Use the record's message_post method instead of creating mail.message directly
+      // This is the proper Odoo way and handles all the complexity
+      const result = await client.callModel(model, 'message_post', [], {
         body: body,
-        message_type: 'comment',
-        author_id: client.uid,
-      };
+        message_type: isInternal ? 'comment' : 'comment',
+        subtype_xmlid: isInternal ? 'mail.mt_note' : 'mail.mt_comment',
+      });
 
-      if (subject) {
-        messageData.subject = subject;
-      }
-
-      if (subtypeId) {
-        messageData.subtype_id = subtypeId;
-      }
-
-      const messageId = await client.create('mail.message', messageData);
-      console.log(`✅ Posted message ${messageId} to ${model}:${recordId}`);
-      return messageId;
+      console.log(`✅ Posted message to ${model}:${recordId}`);
+      return result;
     } catch (error) {
       console.error('❌ Failed to post message:', error.message);
-      return null;
+
+      // Fallback to simple approach
+      try {
+        console.log('🔄 Trying fallback message posting...');
+        const simpleMessage = await client.callModel(model, 'message_post', [], {
+          body: body,
+        });
+        return simpleMessage;
+      } catch (fallbackError) {
+        console.error('❌ Fallback also failed:', fallbackError.message);
+        return null;
+      }
     }
   }
 
@@ -379,6 +432,206 @@ class ChatterService {
   }
 
   /**
+   * Get mentionable users
+   */
+  async getMentionableUsers(searchTerm?: string): Promise<MentionableUser[]> {
+    try {
+      const client = authService.getClient();
+      if (!client) throw new Error('Not authenticated');
+
+      const domain = [['active', '=', true]];
+      if (searchTerm) {
+        domain.push(['name', 'ilike', searchTerm]);
+      }
+
+      const users = await client.searchRead('res.users',
+        domain,
+        ['id', 'name', 'login', 'email', 'partner_id'],
+        { limit: 20, order: 'name asc' }
+      );
+
+      return users.map(user => ({
+        id: user.id,
+        name: user.name,
+        login: user.login,
+        email: user.email,
+        partner_id: user.partner_id,
+      }));
+    } catch (error) {
+      console.error('❌ Failed to get mentionable users:', error.message);
+      return [];
+    }
+  }
+
+  /**
+   * Format message body with @mentions
+   */
+  formatMessageWithMentions(body: string, mentions: { userId: number; userName: string; partnerId: number }[]): string {
+    let formattedBody = body;
+
+    mentions.forEach(mention => {
+      const mentionPattern = new RegExp(`@${mention.userName}`, 'gi');
+      const mentionLink = `<a href="#" data-oe-model="res.partner" data-oe-id="${mention.partnerId}">@${mention.userName}</a>`;
+      formattedBody = formattedBody.replace(mentionPattern, mentionLink);
+    });
+
+    return formattedBody;
+  }
+
+  /**
+   * Get available workflow actions for a model
+   */
+  async getWorkflowActions(model: string): Promise<WorkflowAction[]> {
+    try {
+      const client = authService.getClient();
+      if (!client) throw new Error('Not authenticated');
+
+      const actions: WorkflowAction[] = [];
+
+      // Get stages for models that have them (like CRM)
+      if (model === 'crm.lead') {
+        const stages = await client.searchRead('crm.stage', [],
+          ['id', 'name', 'sequence', 'is_won', 'probability'],
+          { order: 'sequence asc' }
+        );
+
+        stages.forEach(stage => {
+          actions.push({
+            id: stage.id,
+            name: `Move to ${stage.name}`,
+            description: `Change stage to ${stage.name} (${stage.probability}% probability)`,
+            model: model,
+            action_type: 'stage_change',
+            stage_id: stage.id,
+            field_updates: {
+              stage_id: stage.id,
+              probability: stage.probability,
+            }
+          });
+        });
+
+        // Add common CRM actions
+        actions.push(
+          {
+            id: 9001,
+            name: 'Convert to Opportunity',
+            description: 'Convert this lead to an opportunity',
+            model: model,
+            action_type: 'field_update',
+            field_updates: { type: 'opportunity', probability: 25 }
+          },
+          {
+            id: 9002,
+            name: 'Mark as Won',
+            description: 'Mark this opportunity as won',
+            model: model,
+            action_type: 'field_update',
+            field_updates: { probability: 100, date_closed: new Date().toISOString().split('T')[0] }
+          },
+          {
+            id: 9003,
+            name: 'Mark as Lost',
+            description: 'Mark this opportunity as lost',
+            model: model,
+            action_type: 'field_update',
+            field_updates: { probability: 0, active: false, date_closed: new Date().toISOString().split('T')[0] }
+          }
+        );
+      }
+
+      return actions;
+    } catch (error) {
+      console.error('❌ Failed to get workflow actions:', error.message);
+      return [];
+    }
+  }
+
+  /**
+   * Execute a workflow action
+   */
+  async executeWorkflowAction(
+    model: string,
+    recordId: number,
+    action: WorkflowAction,
+    feedback?: string
+  ): Promise<boolean> {
+    try {
+      const client = authService.getClient();
+      if (!client) throw new Error('Not authenticated');
+
+      console.log(`🔄 Executing workflow action: ${action.name}`);
+
+      // Execute the action based on type
+      if (action.action_type === 'field_update' || action.action_type === 'stage_change') {
+        if (action.field_updates) {
+          await client.update(model, recordId, action.field_updates);
+          console.log(`✅ Updated fields:`, action.field_updates);
+        }
+      }
+
+      // Post a message about the action
+      if (feedback) {
+        await this.postMessage(
+          model,
+          recordId,
+          `<p><strong>Workflow Action:</strong> ${action.name}</p><p>${feedback}</p>`,
+          false
+        );
+      } else {
+        await this.postMessage(
+          model,
+          recordId,
+          `<p><strong>Workflow Action:</strong> ${action.name}</p>`,
+          false
+        );
+      }
+
+      console.log(`✅ Executed workflow action: ${action.name}`);
+      return true;
+    } catch (error) {
+      console.error('❌ Failed to execute workflow action:', error.message);
+      return false;
+    }
+  }
+
+  /**
+   * Helper: Get partner IDs from user IDs
+   */
+  private async getUserPartnerIds(userIds: number[]): Promise<number[]> {
+    try {
+      const client = authService.getClient();
+      if (!client) throw new Error('Not authenticated');
+
+      const users = await client.read('res.users', userIds, ['partner_id']);
+      return users.map(user => user.partner_id[0]);
+    } catch (error) {
+      console.error('❌ Failed to get partner IDs:', error.message);
+      return [];
+    }
+  }
+
+  /**
+   * Helper: Get model ID for a model name
+   */
+  private async getModelId(modelName: string): Promise<number | null> {
+    try {
+      const client = authService.getClient();
+      if (!client) throw new Error('Not authenticated');
+
+      const models = await client.searchRead('ir.model',
+        [['model', '=', modelName]],
+        ['id'],
+        { limit: 1 }
+      );
+
+      return models.length > 0 ? models[0].id : null;
+    } catch (error) {
+      console.error('❌ Failed to get model ID:', error.message);
+      return null;
+    }
+  }
+
+  /**
    * Helper: Get appropriate message subtype
    */
   private async getMessageSubtype(isInternal: boolean): Promise<number | null> {
@@ -386,9 +639,9 @@ class ChatterService {
       const client = authService.getClient();
       if (!client) throw new Error('Not authenticated');
 
-      const subtypes = await client.searchRead('mail.message.subtype', 
-        [['internal', '=', isInternal]], 
-        ['id'], 
+      const subtypes = await client.searchRead('mail.message.subtype',
+        [['internal', '=', isInternal]],
+        ['id'],
         { limit: 1 }
       );
 

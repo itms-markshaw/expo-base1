@@ -6,6 +6,7 @@ import React, { useEffect } from 'react';
 import { StatusBar } from 'expo-status-bar';
 import { NavigationContainer } from '@react-navigation/native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
+import { createStackNavigator } from '@react-navigation/stack';
 import { MaterialIcons } from '@expo/vector-icons';
 import {
   View,
@@ -17,44 +18,132 @@ import {
 
 // Import screens and store
 import LoginScreen from './src/screens/LoginScreen';
-import HomeScreen from './src/screens/HomeScreen';
+import NavigationDashboardScreen from './src/screens/NavigationDashboardScreen';
+import ContactsScreen from './src/screens/ContactsScreen';
+import ActivitiesScreen from './src/screens/ActivitiesScreen';
+import CalendarScreen from './src/screens/CalendarScreen';
 import SyncScreen from './src/screens/SyncScreen';
-import DataScreen from './src/screens/DataScreen';
-import TestScreen from './src/screens/TestScreen';
+import CRMLeadsScreen from './src/screens/CRMLeadsScreen';
+import SalesOrderScreen from './src/screens/SalesOrderScreen';
+import MoreScreen from './src/screens/MoreScreen';
+import EmployeesScreen from './src/screens/EmployeesScreen';
+import MobileScreen from './src/screens/MobileScreen';
+import MessagesScreen from './src/screens/MessagesScreen';
+import AttachmentsScreen from './src/screens/AttachmentsScreen';
+import ProjectsScreen from './src/screens/ProjectsScreen';
+import HelpdeskScreen from './src/screens/HelpdeskScreen';
+import HelpdeskTeamsScreen from './src/screens/HelpdeskTeamsScreen';
 import SettingsScreen from './src/screens/SettingsScreen';
 import { useAppStore } from './src/store';
+import AppStoreProvider from './src/store/AppStoreProvider';
+import AppNavigationProvider from './src/components/AppNavigationProvider';
+import LoadingScreen from './src/components/LoadingScreen';
 
-// Tab Navigator
+// Navigators
 const Tab = createBottomTabNavigator();
+const Stack = createStackNavigator();
 
-// Loading Screen Component
-function LoadingScreen() {
+// Stack Navigator for all screens
+function AllScreensStack() {
   return (
-    <View style={styles.loadingContainer}>
-      <ActivityIndicator size="large" color="#007AFF" />
-      <Text style={styles.loadingText}>Initializing...</Text>
-    </View>
+    <Stack.Navigator
+      screenOptions={{
+        headerShown: true,
+        headerStyle: {
+          backgroundColor: '#FFF',
+          elevation: 1,
+          shadowOpacity: 0.1,
+        },
+        headerTitleStyle: {
+          fontSize: 18,
+          fontWeight: '600',
+          color: '#1A1A1A',
+        },
+        headerTintColor: '#007AFF',
+        headerBackTitleVisible: false,
+      }}
+    >
+      {/* Primary Tab Screens - No header */}
+      <Stack.Screen
+        name="MainTabs"
+        component={MainTabs}
+        options={{ headerShown: false }}
+      />
+
+      {/* Secondary Screens - With headers and back buttons */}
+      <Stack.Screen
+        name="SalesOrders"
+        component={SalesOrderScreen}
+        options={{ title: 'Sales Orders' }}
+      />
+      <Stack.Screen
+        name="Employees"
+        component={EmployeesScreen}
+        options={{ title: 'Employees' }}
+      />
+      <Stack.Screen
+        name="CRMLeads"
+        component={CRMLeadsScreen}
+        options={{ title: 'CRM Leads' }}
+      />
+      <Stack.Screen
+        name="Messages"
+        component={MessagesScreen}
+        options={{ title: 'Messages' }}
+      />
+      <Stack.Screen
+        name="Attachments"
+        component={AttachmentsScreen}
+        options={{ title: 'Attachments' }}
+      />
+      <Stack.Screen
+        name="Projects"
+        component={ProjectsScreen}
+        options={{ title: 'Projects' }}
+      />
+      <Stack.Screen
+        name="Helpdesk"
+        component={HelpdeskScreen}
+        options={{ title: 'Helpdesk' }}
+      />
+      <Stack.Screen
+        name="HelpdeskTeams"
+        component={HelpdeskTeamsScreen}
+        options={{ title: 'Helpdesk Teams' }}
+      />
+      <Stack.Screen
+        name="Mobile"
+        component={MobileScreen}
+        options={{ title: 'Mobile' }}
+      />
+      <Stack.Screen
+        name="Settings"
+        component={SettingsScreen}
+        options={{ title: 'Settings' }}
+      />
+    </Stack.Navigator>
   );
 }
 
 // Main Tab Navigator
 function MainTabs() {
+
   return (
     <Tab.Navigator
       screenOptions={({ route }) => ({
         tabBarIcon: ({ focused, color, size }) => {
           let iconName: string;
 
-          if (route.name === 'Home') {
-            iconName = 'home';
-          } else if (route.name === 'Sync') {
-            iconName = 'sync';
-          } else if (route.name === 'Data') {
-            iconName = 'table-view';
-          } else if (route.name === 'Test') {
-            iconName = 'bug-report';
-          } else if (route.name === 'Settings') {
-            iconName = 'settings';
+          if (route.name === 'Dashboard') {
+            iconName = 'dashboard';
+          } else if (route.name === 'CRM') {
+            iconName = 'trending-up';
+          } else if (route.name === 'Sales') {
+            iconName = 'shopping-cart';
+          } else if (route.name === 'Activities') {
+            iconName = 'event-note';
+          } else if (route.name === 'More') {
+            iconName = 'more-horiz';
           } else {
             iconName = 'help';
           }
@@ -73,17 +162,17 @@ function MainTabs() {
         headerShown: false,
       })}
     >
-      <Tab.Screen name="Home" component={HomeScreen} />
-      <Tab.Screen name="Sync" component={SyncScreen} />
-      <Tab.Screen name="Data" component={DataScreen} />
-      <Tab.Screen name="Test" component={TestScreen} />
-      <Tab.Screen name="Settings" component={SettingsScreen} />
-    </Tab.Navigator>
+        <Tab.Screen name="Dashboard" component={NavigationDashboardScreen} />
+        <Tab.Screen name="CRM" component={CRMLeadsScreen} />
+        <Tab.Screen name="Sales" component={SalesOrderScreen} />
+        <Tab.Screen name="Activities" component={ActivitiesScreen} />
+        <Tab.Screen name="More" component={MoreScreen} />
+      </Tab.Navigator>
   );
 }
 
-// Main App Component
-export default function App() {
+// App Content Component (inside provider)
+function AppContent() {
   const { isAuthenticated, authLoading, checkAuth } = useAppStore();
 
   useEffect(() => {
@@ -97,21 +186,18 @@ export default function App() {
   return (
     <NavigationContainer>
       <StatusBar style="dark" backgroundColor="#F8F9FA" />
-      {isAuthenticated ? <MainTabs /> : <LoginScreen />}
+      <AppNavigationProvider>
+        {isAuthenticated ? <AllScreensStack /> : <LoginScreen />}
+      </AppNavigationProvider>
     </NavigationContainer>
   );
 }
 
-const styles = StyleSheet.create({
-  loadingContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    backgroundColor: '#F8F9FA',
-  },
-  loadingText: {
-    marginTop: 16,
-    fontSize: 16,
-    color: '#666',
-  },
-});
+// Main App Component
+export default function App() {
+  return (
+    <AppStoreProvider>
+      <AppContent />
+    </AppStoreProvider>
+  );
+}

@@ -22,7 +22,8 @@
         {
           "enableFTS": true
         }
-      ]
+      ],
+      "expo-router"
     ]
   }
 }

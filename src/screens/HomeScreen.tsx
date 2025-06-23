@@ -2,7 +2,7 @@
  * Home Screen - Actually shows real data
  */
 
-import React, { useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   View,
   Text,
@@ -11,9 +11,14 @@ import {
   TouchableOpacity,
   ScrollView,
   RefreshControl,
+  Modal,
 } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
 import { useAppStore } from '../store';
+import ActivitiesComponent from '../components/ActivitiesComponent';
+import UniversalSearchComponent from '../components/UniversalSearchComponent';
+import NavigationDrawer from '../components/NavigationDrawer';
+import { NavigationService, NavigationItem } from '../navigation/NavigationConfig';
 
 export default function HomeScreen() {
   const {
@@ -23,6 +28,10 @@ export default function HomeScreen() {
     loadDatabaseStats,
     startSync,
   } = useAppStore();
+
+  const [showActivities, setShowActivities] = useState(false);
+  const [showUniversalSearch, setShowUniversalSearch] = useState(false);
+  const [showNavigationDrawer, setShowNavigationDrawer] = useState(false);
 
   useEffect(() => {
     loadDatabaseStats();
@@ -38,6 +47,17 @@ export default function HomeScreen() {
     }
   };
 
+  const handleNavigate = (item: NavigationItem) => {
+    console.log('Navigate to:', item.name);
+    // In a real app, this would use React Navigation
+    // navigation.navigate(item.component);
+  };
+
+  const handleRecordSelect = (model: string, recordId: number) => {
+    console.log('Open record:', model, recordId);
+    // In a real app, this would navigate to the record detail
+  };
+
   return (
     <SafeAreaView style={styles.container}>
       <ScrollView
@@ -48,14 +68,35 @@ export default function HomeScreen() {
       >
         {/* Header */}
         <View style={styles.header}>
-          <View>
+          <View style={styles.headerLeft}>
             <Text style={styles.welcomeText}>Welcome back</Text>
             <Text style={styles.userName}>{user?.name || 'User'}</Text>
           </View>
-          <TouchableOpacity style={styles.profileButton}>
-            <MaterialIcons name="account-circle" size={32} color="#007AFF" />
-          </TouchableOpacity>
+          <View style={styles.headerActions}>
+            <TouchableOpacity
+              style={styles.searchButton}
+              onPress={() => setShowUniversalSearch(true)}
+            >
+              <MaterialIcons name="search" size={24} color="#666" />
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.profileButton}
+              onPress={() => setShowNavigationDrawer(true)}
+            >
+              <MaterialIcons name="account-circle" size={32} color="#007AFF" />
+            </TouchableOpacity>
+          </View>
         </View>
+
+        {/* Universal Search Bar */}
+        <TouchableOpacity
+          style={styles.searchBar}
+          onPress={() => setShowUniversalSearch(true)}
+        >
+          <MaterialIcons name="search" size={20} color="#666" />
+          <Text style={styles.searchPlaceholder}>Search everything...</Text>
+          <MaterialIcons name="mic" size={20} color="#666" />
+        </TouchableOpacity>
 
         {/* Database Stats */}
         <View style={styles.statsContainer}>
@@ -66,13 +107,23 @@ export default function HomeScreen() {
             </Text>
             <Text style={styles.statLabel}>Contacts</Text>
           </View>
-          
+
           <View style={styles.statCard}>
             <MaterialIcons name="people" size={24} color="#34C759" />
             <Text style={styles.statValue}>
               {databaseStats?.tables?.find((t: any) => t.name === 'users')?.recordCount || 0}
             </Text>
             <Text style={styles.statLabel}>Users</Text>
+          </View>
+        </View>
+
+        <View style={styles.statsContainer}>
+          <View style={styles.statCard}>
+            <MaterialIcons name="badge" size={24} color="#FF6B35" />
+            <Text style={styles.statValue}>
+              {databaseStats?.tables?.find((t: any) => t.name === 'employees')?.recordCount || 0}
+            </Text>
+            <Text style={styles.statLabel}>Employees</Text>
           </View>
 
           <View style={styles.statCard}>
@@ -82,8 +133,10 @@ export default function HomeScreen() {
             </Text>
             <Text style={styles.statLabel}>CRM Leads</Text>
           </View>
+        </View>
 
-          <View style={styles.statCard}>
+        <View style={styles.statsContainer}>
+          <View style={[styles.statCard, { flex: 2 }]}>
             <MaterialIcons name="storage" size={24} color="#9C27B0" />
             <Text style={styles.statValue}>{databaseStats?.totalRecords || 0}</Text>
             <Text style={styles.statLabel}>Total Records</Text>
@@ -108,15 +161,15 @@ export default function HomeScreen() {
 
         {/* Quick Actions */}
         <View style={styles.actionsContainer}>
-          <TouchableOpacity 
+          <TouchableOpacity
             style={[styles.actionCard, syncStatus.isRunning && styles.actionCardDisabled]}
             onPress={handleQuickSync}
             disabled={syncStatus.isRunning}
           >
-            <MaterialIcons 
-              name={syncStatus.isRunning ? "hourglass-empty" : "sync"} 
-              size={32} 
-              color={syncStatus.isRunning ? "#999" : "#007AFF"} 
+            <MaterialIcons
+              name={syncStatus.isRunning ? "hourglass-empty" : "sync"}
+              size={32}
+              color={syncStatus.isRunning ? "#999" : "#007AFF"}
             />
             <View style={styles.actionText}>
               <Text style={[styles.actionTitle, syncStatus.isRunning && styles.actionTitleDisabled]}>
@@ -126,6 +179,22 @@ export default function HomeScreen() {
                 {syncStatus.isRunning ? 'Please wait' : 'Sync recent changes'}
               </Text>
             </View>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={[styles.actionCard, styles.activitiesCard]}
+            onPress={() => setShowActivities(true)}
+          >
+            <MaterialIcons
+              name="event-note"
+              size={32}
+              color="#FF9500"
+            />
+            <View style={styles.actionText}>
+              <Text style={styles.actionTitle}>My Activities</Text>
+              <Text style={styles.actionSubtitle}>View today's tasks and schedule</Text>
+            </View>
+            <MaterialIcons name="chevron-right" size={24} color="#C7C7CC" />
           </TouchableOpacity>
         </View>
 
@@ -157,6 +226,41 @@ export default function HomeScreen() {
           </View>
         ) : null}
       </ScrollView>
+
+      {/* Activities Modal */}
+      <Modal
+        visible={showActivities}
+        animationType="slide"
+        presentationStyle="fullScreen"
+        onRequestClose={() => setShowActivities(false)}
+      >
+        <SafeAreaView style={styles.activitiesModal}>
+          <View style={styles.activitiesHeader}>
+            <TouchableOpacity onPress={() => setShowActivities(false)}>
+              <MaterialIcons name="close" size={24} color="#007AFF" />
+            </TouchableOpacity>
+            <Text style={styles.activitiesTitle}>My Activities</Text>
+            <View style={{ width: 24 }} />
+          </View>
+          <ActivitiesComponent />
+        </SafeAreaView>
+      </Modal>
+
+      {/* Universal Search Modal */}
+      <UniversalSearchComponent
+        visible={showUniversalSearch}
+        onClose={() => setShowUniversalSearch(false)}
+        onNavigate={handleNavigate}
+        onRecordSelect={handleRecordSelect}
+      />
+
+      {/* Navigation Drawer */}
+      <NavigationDrawer
+        visible={showNavigationDrawer}
+        onClose={() => setShowNavigationDrawer(false)}
+        onNavigate={handleNavigate}
+        currentRoute="home"
+      />
     </SafeAreaView>
   );
 }
@@ -175,7 +279,19 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingHorizontal: 20,
     paddingTop: 20,
-    paddingBottom: 24,
+    paddingBottom: 16,
+  },
+  headerLeft: {
+    flex: 1,
+  },
+  headerActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  searchButton: {
+    padding: 8,
+    borderRadius: 8,
   },
   welcomeText: {
     fontSize: 16,
@@ -188,6 +304,27 @@ const styles = StyleSheet.create({
   },
   profileButton: {
     padding: 4,
+  },
+  searchBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#FFF',
+    borderRadius: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    marginHorizontal: 20,
+    marginBottom: 24,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
+    gap: 12,
+  },
+  searchPlaceholder: {
+    flex: 1,
+    fontSize: 16,
+    color: '#999',
   },
   statsContainer: {
     flexDirection: 'row',
@@ -261,6 +398,9 @@ const styles = StyleSheet.create({
   actionCardDisabled: {
     opacity: 0.6,
   },
+  activitiesCard: {
+    marginTop: 12,
+  },
   actionText: {
     marginLeft: 16,
   },
@@ -327,5 +467,23 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#D32F2F',
     marginBottom: 4,
+  },
+  activitiesModal: {
+    flex: 1,
+    backgroundColor: '#F8F9FA',
+  },
+  activitiesHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: 16,
+    backgroundColor: '#FFF',
+    borderBottomWidth: 1,
+    borderBottomColor: '#E5E5E5',
+  },
+  activitiesTitle: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#1A1A1A',
   },
 });
