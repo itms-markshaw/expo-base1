@@ -17,6 +17,8 @@ import {
 } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
 import { authService } from '../services/auth';
+import FilterBottomSheet from '../components/FilterBottomSheet';
+import EmployeeDetailBottomSheet from '../components/EmployeeDetailBottomSheet';
 
 interface Employee {
   id: number;
@@ -36,6 +38,9 @@ export default function EmployeesScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [filter, setFilter] = useState<'all' | 'active' | 'managers' | 'departments'>('all');
+  const [showFilterSheet, setShowFilterSheet] = useState(false);
+  const [selectedEmployee, setSelectedEmployee] = useState<Employee | null>(null);
+  const [showEmployeeDetail, setShowEmployeeDetail] = useState(false);
 
   const filters = [
     { id: 'all', name: 'All', icon: 'people', count: employees.length },
@@ -104,8 +109,17 @@ export default function EmployeesScreen() {
     return filtered;
   };
 
+  const handleEmployeePress = (employee: Employee) => {
+    setSelectedEmployee(employee);
+    setShowEmployeeDetail(true);
+  };
+
   const renderEmployeeCard = (employee: Employee) => (
-    <TouchableOpacity key={employee.id} style={styles.employeeCard}>
+    <TouchableOpacity
+      key={employee.id}
+      style={styles.employeeCard}
+      onPress={() => handleEmployeePress(employee)}
+    >
       <View style={styles.employeeHeader}>
         <View style={[styles.employeeAvatar, { backgroundColor: employee.active ? '#34C759' : '#999' }]}>
           <MaterialIcons name="person" size={24} color="#FFF" />
@@ -159,6 +173,33 @@ export default function EmployeesScreen() {
 
   return (
     <SafeAreaView style={styles.container}>
+      {/* Header */}
+      <View style={styles.header}>
+        <View style={styles.headerLeft}>
+          <Text style={styles.headerTitle}>Employees</Text>
+          <Text style={styles.headerSubtitle}>
+            {filter === 'all' ? 'All employees' :
+             filter === 'active' ? 'Active employees' :
+             filter === 'managers' ? 'Managers' :
+             'By department'} • {filteredEmployees.length}
+          </Text>
+        </View>
+        <View style={styles.headerActions}>
+          <TouchableOpacity
+            style={styles.filterButton}
+            onPress={() => {
+              console.log('Filter button pressed in EmployeesScreen');
+              setShowFilterSheet(true);
+            }}
+          >
+            <MaterialIcons name="filter-list" size={20} color="#007AFF" />
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.addButton}>
+            <MaterialIcons name="person-add" size={24} color="#007AFF" />
+          </TouchableOpacity>
+        </View>
+      </View>
+
       {/* Search Bar */}
       <View style={styles.searchContainer}>
         <View style={styles.searchBox}>
@@ -178,48 +219,6 @@ export default function EmployeesScreen() {
         </View>
       </View>
 
-      {/* Filter Tabs */}
-      <ScrollView 
-        horizontal 
-        showsHorizontalScrollIndicator={false}
-        style={styles.filterContainer}
-        contentContainerStyle={styles.filterContent}
-      >
-        {filters.map((filterItem) => (
-          <TouchableOpacity
-            key={filterItem.id}
-            style={[
-              styles.filterTab,
-              filter === filterItem.id && styles.filterTabActive
-            ]}
-            onPress={() => setFilter(filterItem.id as any)}
-          >
-            <MaterialIcons
-              name={filterItem.icon as any}
-              size={16}
-              color={filter === filterItem.id ? '#FFF' : '#666'}
-            />
-            <Text style={[
-              styles.filterTabText,
-              filter === filterItem.id && styles.filterTabTextActive
-            ]}>
-              {filterItem.name}
-            </Text>
-            <View style={[
-              styles.filterBadge,
-              filter === filterItem.id && styles.filterBadgeActive
-            ]}>
-              <Text style={[
-                styles.filterBadgeText,
-                filter === filterItem.id && styles.filterBadgeTextActive
-              ]}>
-                {filterItem.count}
-              </Text>
-            </View>
-          </TouchableOpacity>
-        ))}
-      </ScrollView>
-
       {/* Employees List */}
       <ScrollView
         style={styles.employeesList}
@@ -237,6 +236,32 @@ export default function EmployeesScreen() {
           </View>
         )}
       </ScrollView>
+
+      {/* Filter Bottom Sheet */}
+      <FilterBottomSheet
+        visible={showFilterSheet}
+        onClose={() => {
+          console.log('FilterBottomSheet closing');
+          setShowFilterSheet(false);
+        }}
+        title="Filter Employees"
+        filters={filters}
+        selectedFilter={filter}
+        onFilterSelect={(filterId) => {
+          console.log('Filter selected:', filterId);
+          setFilter(filterId as any);
+        }}
+      />
+
+      {/* Employee Detail Bottom Sheet */}
+      <EmployeeDetailBottomSheet
+        visible={showEmployeeDetail}
+        onClose={() => {
+          setShowEmployeeDetail(false);
+          setSelectedEmployee(null);
+        }}
+        employee={selectedEmployee}
+      />
     </SafeAreaView>
   );
 }
@@ -266,10 +291,27 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: '#E5E5E5',
   },
+  headerLeft: {
+    flex: 1,
+  },
   headerTitle: {
     fontSize: 24,
     fontWeight: '700',
     color: '#1A1A1A',
+  },
+  headerSubtitle: {
+    fontSize: 12,
+    color: '#666',
+    marginTop: 2,
+  },
+  headerActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  filterButton: {
+    padding: 8,
+    borderRadius: 8,
   },
   addButton: {
     padding: 8,
@@ -296,56 +338,7 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: '#1A1A1A',
   },
-  filterContainer: {
-    backgroundColor: '#FFF',
-    borderBottomWidth: 1,
-    borderBottomColor: '#E5E5E5',
-  },
-  filterContent: {
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    gap: 8,
-  },
-  filterTab: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 6,
-    paddingHorizontal: 10,
-    borderRadius: 16,
-    backgroundColor: '#F8F9FA',
-    gap: 4,
-    minWidth: 70,
-  },
-  filterTabActive: {
-    backgroundColor: '#FF6B35',
-  },
-  filterTabText: {
-    fontSize: 12,
-    fontWeight: '500',
-    color: '#666',
-  },
-  filterTabTextActive: {
-    color: '#FFF',
-  },
-  filterBadge: {
-    backgroundColor: '#E5E5E5',
-    borderRadius: 8,
-    paddingHorizontal: 4,
-    paddingVertical: 1,
-    minWidth: 16,
-    alignItems: 'center',
-  },
-  filterBadgeActive: {
-    backgroundColor: '#FFF',
-  },
-  filterBadgeText: {
-    fontSize: 10,
-    fontWeight: '600',
-    color: '#666',
-  },
-  filterBadgeTextActive: {
-    color: '#FF6B35',
-  },
+
   employeesList: {
     flex: 1,
     paddingHorizontal: 16,

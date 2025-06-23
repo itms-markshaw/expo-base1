@@ -14,7 +14,9 @@ const path = require('path');
 const config = {
   serverUrl: 'https://itmsgroup.com.au',
   wsUrl: 'wss://itmsgroup.com.au',
-  database: 'itmsgroup_com_au'
+  database: 'ITMS_v17_3_backup_2025_02_17_08_15'
+  username: 'mark.shaw@itmsgroup.com.au', // Replace with your username
+  password: 'hTempTWxeCFYWVswzMcv', // Replace with your password
 };
 
 /**

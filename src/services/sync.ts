@@ -92,7 +92,7 @@ class SyncService {
         name: 'mail.thread',
         displayName: 'Mail Threads',
         description: 'Message threads and conversations',
-        enabled: true,
+        enabled: false,
       },
       {
         name: 'ir.attachment',
@@ -365,14 +365,14 @@ class SyncService {
         'create_date', 'write_date'
       ],
       'ir.attachment': [
-        'name', 'datas_fname', 'description', 'res_model', 'res_id',
+        'name', 'description', 'res_model', 'res_id',
         'res_name', 'type', 'url', 'file_size', 'mimetype',
         'create_date', 'write_date'
       ],
       'calendar.event': [
         'name', 'description', 'start', 'stop', 'allday', 'duration',
         'user_id', 'partner_ids', 'location', 'privacy', 'show_as',
-        'state', 'create_date', 'write_date'
+        'create_date', 'write_date'
       ],
       'res.users': [
         'name', 'login', 'email', 'partner_id', 'company_id', 'company_ids',

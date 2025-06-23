@@ -250,9 +250,9 @@ export default function AttachmentsScreen() {
         </View>
       </View>
 
-      {/* Filter Tabs */}
-      <ScrollView 
-        horizontal 
+      {/* Compact Filter Tabs */}
+      <ScrollView
+        horizontal
         showsHorizontalScrollIndicator={false}
         style={styles.filterContainer}
         contentContainerStyle={styles.filterContent}
@@ -268,7 +268,7 @@ export default function AttachmentsScreen() {
           >
             <MaterialIcons
               name={filterItem.icon as any}
-              size={16}
+              size={14}
               color={filter === filterItem.id ? '#FFF' : '#666'}
             />
             <Text style={[
@@ -297,7 +297,55 @@ export default function AttachmentsScreen() {
         style={styles.attachmentsList}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} />}
       >
-        {filteredAttachments.map(renderAttachmentCard)}
+        {filteredAttachments.map((attachment, index) => (
+          <TouchableOpacity key={`attachment-${attachment.id}-${index}`} style={styles.attachmentCard}>
+            <View style={styles.attachmentHeader}>
+              <View style={[styles.fileIcon, { backgroundColor: getFileColor(attachment.mimetype) + '15' }]}>
+                <MaterialIcons
+                  name={getFileIcon(attachment.mimetype) as any}
+                  size={24}
+                  color={getFileColor(attachment.mimetype)}
+                />
+              </View>
+
+              <View style={styles.attachmentInfo}>
+                <Text style={styles.fileName} numberOfLines={1}>
+                  {attachment.name || 'Unnamed file'}
+                </Text>
+                <Text style={styles.fileSize}>
+                  {formatFileSize(attachment.file_size)}
+                </Text>
+                <Text style={styles.fileDate}>
+                  {new Date(attachment.create_date).toLocaleDateString()}
+                </Text>
+              </View>
+
+              <View style={styles.attachmentMeta}>
+                <View style={[styles.typeBadge, { backgroundColor: getFileColor(attachment.mimetype) }]}>
+                  <Text style={styles.typeBadgeText}>
+                    {attachment.mimetype?.split('/')[1]?.toUpperCase() || 'FILE'}
+                  </Text>
+                </View>
+                <MaterialIcons name="chevron-right" size={20} color="#C7C7CC" />
+              </View>
+            </View>
+
+            {attachment.description && (
+              <Text style={styles.fileDescription} numberOfLines={2}>
+                {attachment.description}
+              </Text>
+            )}
+
+            {attachment.res_name && (
+              <View style={styles.attachmentContext}>
+                <MaterialIcons name="link" size={14} color="#666" />
+                <Text style={styles.contextText}>
+                  {attachment.res_model}: {attachment.res_name}
+                </Text>
+              </View>
+            )}
+          </TouchableOpacity>
+        ))}
 
         {filteredAttachments.length === 0 && (
           <View style={styles.emptyState}>
@@ -390,24 +438,24 @@ const styles = StyleSheet.create({
   },
   filterContent: {
     paddingHorizontal: 16,
-    paddingVertical: 8,
-    gap: 8,
+    paddingVertical: 6,
+    gap: 6,
   },
   filterTab: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: 6,
-    paddingHorizontal: 10,
-    borderRadius: 16,
+    paddingVertical: 4,
+    paddingHorizontal: 8,
+    borderRadius: 12,
     backgroundColor: '#F8F9FA',
-    gap: 4,
-    minWidth: 70,
+    gap: 3,
+    minWidth: 60,
   },
   filterTabActive: {
     backgroundColor: '#5856D6',
   },
   filterTabText: {
-    fontSize: 12,
+    fontSize: 11,
     fontWeight: '500',
     color: '#666',
   },
@@ -416,17 +464,17 @@ const styles = StyleSheet.create({
   },
   filterBadge: {
     backgroundColor: '#E5E5E5',
-    borderRadius: 8,
-    paddingHorizontal: 4,
+    borderRadius: 6,
+    paddingHorizontal: 3,
     paddingVertical: 1,
-    minWidth: 16,
+    minWidth: 14,
     alignItems: 'center',
   },
   filterBadgeActive: {
     backgroundColor: '#FFF',
   },
   filterBadgeText: {
-    fontSize: 10,
+    fontSize: 9,
     fontWeight: '600',
     color: '#666',
   },

@@ -1,10 +1,11 @@
 /**
  * App Navigation Provider
- * Centralized navigation management for all screens
+ * Simple wrapper that provides navigation utilities
  */
 
 import React, { createContext, useContext, useState } from 'react';
-import { useNavigation as useReactNavigation } from '@react-navigation/native';
+import { Alert } from 'react-native';
+import { useNavigation } from '@react-navigation/native';
 import NavigationDrawer from './NavigationDrawer';
 import UniversalSearchComponent from './UniversalSearchComponent';
 import { NavigationItem } from '../navigation/NavigationConfig';
@@ -32,7 +33,7 @@ interface AppNavigationProviderProps {
 }
 
 export default function AppNavigationProvider({ children }: AppNavigationProviderProps) {
-  const navigation = useReactNavigation();
+  const navigation = useNavigation();
   const [showDrawer, setShowDrawer] = useState(false);
   const [showSearch, setShowSearch] = useState(false);
   const [currentScreen, setCurrentScreen] = useState('Dashboard');
@@ -45,47 +46,55 @@ export default function AppNavigationProvider({ children }: AppNavigationProvide
     setShowSearch(true);
   };
 
+  // Simple navigation function that uses React Navigation directly
   const navigateToScreen = (screenName: string) => {
     console.log('Navigating to:', screenName);
     setCurrentScreen(screenName);
+    setShowDrawer(false);
 
-    // Map screen names to navigation routes
-    const routeMapping: Record<string, string> = {
+    // Map screen names to actual navigation routes
+    const routeMap: Record<string, string> = {
       'Dashboard': 'MainTabs',
+      'Sales': 'MainTabs',
+      'Sales Orders': 'MainTabs',
       'Contacts': 'MainTabs',
-      'Activities': 'MainTabs',
       'Calendar': 'MainTabs',
-      'Sync': 'MainTabs',
-      // Secondary screens
-      'Sales Orders': 'SalesOrders',
-      'Employees': 'Employees',
-      'CRM Leads': 'CRMLeads',
+      'More': 'MainTabs',
+      'Activities': 'Activities',
       'Messages': 'Messages',
-      'Attachments': 'Attachments',
       'Projects': 'Projects',
+      'Attachments': 'Attachments',
       'Helpdesk': 'Helpdesk',
-      'Helpdesk Teams': 'HelpdeskTeams',
-      'Mobile': 'Mobile',
+      'CRM': 'CRMLeads',
+      'CRM Leads': 'CRMLeads',
+      'Employees': 'Employees',
       'Settings': 'Settings',
+      'Sync': 'SyncStack',
+      'Data': 'Data',
+      'Testing': 'Testing',
+      'Mobile': 'Mobile',
+      'Documentation': 'Mobile',
     };
 
-    const routeName = routeMapping[screenName];
-
-    if (routeName) {
-      // Close drawer if open
-      setShowDrawer(false);
-
-      // Navigate to the screen
-      try {
-        if (routeName === 'MainTabs') {
-          // For primary tabs, navigate to MainTabs
-          navigation.navigate('MainTabs' as never);
-        } else {
-          // For secondary screens, navigate directly
-          navigation.navigate(routeName as never);
+    const route = routeMap[screenName];
+    if (route) {
+      if (route === 'MainTabs') {
+        // For main tabs, navigate to the tab
+        const tabMap: Record<string, string> = {
+          'Dashboard': 'Dashboard',
+          'Sales': 'Sales',
+          'Sales Orders': 'Sales',
+          'Contacts': 'Contacts',
+          'Calendar': 'Calendar',
+          'More': 'More',
+        };
+        const tab = tabMap[screenName];
+        if (tab) {
+          navigation.navigate('MainTabs' as never, { screen: tab } as never);
         }
-      } catch (error) {
-        console.error('Navigation error:', error);
+      } else {
+        // For stack screens, navigate directly
+        navigation.navigate(route as never);
       }
     } else {
       console.warn(`No route found for screen: ${screenName}`);

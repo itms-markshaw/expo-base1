@@ -14,9 +14,11 @@ import {
   RefreshControl,
   ActivityIndicator,
   TextInput,
+  Dimensions,
 } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
 import { authService } from '../services/auth';
+import FilterBottomSheet from '../components/FilterBottomSheet';
 
 interface Contact {
   id: number;
@@ -36,6 +38,7 @@ export default function ContactsScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [filter, setFilter] = useState<'all' | 'customers' | 'suppliers' | 'companies'>('all');
+  const [showFilterSheet, setShowFilterSheet] = useState(false);
 
   const filters = [
     { id: 'all', name: 'All', icon: 'people', count: contacts.length },
@@ -103,7 +106,7 @@ export default function ContactsScreen() {
   };
 
   const renderContactCard = (contact: Contact) => (
-    <TouchableOpacity key={contact.id} style={styles.contactCard}>
+    <TouchableOpacity style={styles.contactCard}>
       <View style={styles.contactHeader}>
         <View style={[styles.contactAvatar, { backgroundColor: contact.is_company ? '#FF9500' : '#007AFF' }]}>
           <MaterialIcons 
@@ -163,10 +166,26 @@ export default function ContactsScreen() {
     <SafeAreaView style={styles.container}>
       {/* Header */}
       <View style={styles.header}>
-        <Text style={styles.headerTitle}>Contacts</Text>
-        <TouchableOpacity style={styles.addButton}>
-          <MaterialIcons name="add" size={24} color="#007AFF" />
-        </TouchableOpacity>
+        <View style={styles.headerLeft}>
+          <Text style={styles.headerTitle}>Contacts</Text>
+          <Text style={styles.headerSubtitle}>
+            {filter === 'all' ? 'All contacts' :
+             filter === 'customers' ? 'Customers' :
+             filter === 'suppliers' ? 'Suppliers' :
+             'Companies'} • {filteredContacts.length}
+          </Text>
+        </View>
+        <View style={styles.headerActions}>
+          <TouchableOpacity
+            style={styles.filterButton}
+            onPress={() => setShowFilterSheet(true)}
+          >
+            <MaterialIcons name="filter-list" size={20} color="#007AFF" />
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.addButton}>
+            <MaterialIcons name="add" size={24} color="#007AFF" />
+          </TouchableOpacity>
+        </View>
       </View>
 
       {/* Search Bar */}
@@ -188,54 +207,16 @@ export default function ContactsScreen() {
         </View>
       </View>
 
-      {/* Filter Tabs */}
-      <ScrollView 
-        horizontal 
-        showsHorizontalScrollIndicator={false}
-        style={styles.filterContainer}
-        contentContainerStyle={styles.filterContent}
-      >
-        {filters.map((filterItem) => (
-          <TouchableOpacity
-            key={filterItem.id}
-            style={[
-              styles.filterTab,
-              filter === filterItem.id && styles.filterTabActive
-            ]}
-            onPress={() => setFilter(filterItem.id as any)}
-          >
-            <MaterialIcons
-              name={filterItem.icon as any}
-              size={16}
-              color={filter === filterItem.id ? '#FFF' : '#666'}
-            />
-            <Text style={[
-              styles.filterTabText,
-              filter === filterItem.id && styles.filterTabTextActive
-            ]}>
-              {filterItem.name}
-            </Text>
-            <View style={[
-              styles.filterBadge,
-              filter === filterItem.id && styles.filterBadgeActive
-            ]}>
-              <Text style={[
-                styles.filterBadgeText,
-                filter === filterItem.id && styles.filterBadgeTextActive
-              ]}>
-                {filterItem.count}
-              </Text>
-            </View>
-          </TouchableOpacity>
-        ))}
-      </ScrollView>
-
       {/* Contacts List */}
       <ScrollView
         style={styles.contactsList}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} />}
       >
-        {filteredContacts.map(renderContactCard)}
+        {filteredContacts.map((contact) => (
+          <View key={contact.id}>
+            {renderContactCard(contact)}
+          </View>
+        ))}
 
         {filteredContacts.length === 0 && (
           <View style={styles.emptyState}>
@@ -247,6 +228,16 @@ export default function ContactsScreen() {
           </View>
         )}
       </ScrollView>
+
+      {/* Filter Bottom Sheet */}
+      <FilterBottomSheet
+        visible={showFilterSheet}
+        onClose={() => setShowFilterSheet(false)}
+        title="Filter Contacts"
+        filters={filters}
+        selectedFilter={filter}
+        onFilterSelect={(filterId) => setFilter(filterId as any)}
+      />
     </SafeAreaView>
   );
 }
@@ -276,10 +267,27 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: '#E5E5E5',
   },
+  headerLeft: {
+    flex: 1,
+  },
   headerTitle: {
     fontSize: 24,
     fontWeight: '700',
     color: '#1A1A1A',
+  },
+  headerSubtitle: {
+    fontSize: 12,
+    color: '#666',
+    marginTop: 2,
+  },
+  headerActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  filterButton: {
+    padding: 8,
+    borderRadius: 8,
   },
   addButton: {
     padding: 8,

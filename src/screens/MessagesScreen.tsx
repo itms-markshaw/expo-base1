@@ -18,6 +18,7 @@ import {
 import { MaterialIcons } from '@expo/vector-icons';
 import { authService } from '../services/auth';
 import { useAppNavigation } from '../components/AppNavigationProvider';
+import CustomBottomNavigation from '../components/CustomBottomNavigation';
 
 interface Message {
   id: number;
@@ -289,6 +290,9 @@ export default function MessagesScreen() {
           </View>
         )}
       </ScrollView>
+
+      {/* Custom Bottom Navigation */}
+      <CustomBottomNavigation currentScreen="Messages" />
     </SafeAreaView>
   );
 }

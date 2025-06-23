@@ -17,6 +17,7 @@ import {
 } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
 import { authService } from '../services/auth';
+import FilterBottomSheet from '../components/FilterBottomSheet';
 
 interface CRMLead {
   id: number;
@@ -40,6 +41,7 @@ export default function CRMLeadsScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [filter, setFilter] = useState<'all' | 'new' | 'qualified' | 'won' | 'lost'>('all');
+  const [showFilterSheet, setShowFilterSheet] = useState(false);
 
   const filters = [
     { id: 'all', name: 'All', icon: 'trending-up', count: leads.length },
@@ -225,10 +227,27 @@ export default function CRMLeadsScreen() {
     <SafeAreaView style={styles.container}>
       {/* Header */}
       <View style={styles.header}>
-        <Text style={styles.headerTitle}>CRM Leads</Text>
-        <TouchableOpacity style={styles.addButton}>
-          <MaterialIcons name="person-add" size={24} color="#007AFF" />
-        </TouchableOpacity>
+        <View style={styles.headerLeft}>
+          <Text style={styles.headerTitle}>CRM Leads</Text>
+          <Text style={styles.headerSubtitle}>
+            {filter === 'all' ? 'All leads' :
+             filter === 'new' ? 'New leads' :
+             filter === 'qualified' ? 'Qualified leads' :
+             filter === 'won' ? 'Won leads' :
+             'Lost leads'} • {filteredLeads.length}
+          </Text>
+        </View>
+        <View style={styles.headerActions}>
+          <TouchableOpacity
+            style={styles.filterButton}
+            onPress={() => setShowFilterSheet(true)}
+          >
+            <MaterialIcons name="filter-list" size={20} color="#007AFF" />
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.addButton}>
+            <MaterialIcons name="person-add" size={24} color="#007AFF" />
+          </TouchableOpacity>
+        </View>
       </View>
 
       {/* Search Bar */}
@@ -250,48 +269,6 @@ export default function CRMLeadsScreen() {
         </View>
       </View>
 
-      {/* Filter Tabs */}
-      <ScrollView 
-        horizontal 
-        showsHorizontalScrollIndicator={false}
-        style={styles.filterContainer}
-        contentContainerStyle={styles.filterContent}
-      >
-        {filters.map((filterItem) => (
-          <TouchableOpacity
-            key={filterItem.id}
-            style={[
-              styles.filterTab,
-              filter === filterItem.id && styles.filterTabActive
-            ]}
-            onPress={() => setFilter(filterItem.id as any)}
-          >
-            <MaterialIcons
-              name={filterItem.icon as any}
-              size={16}
-              color={filter === filterItem.id ? '#FFF' : '#666'}
-            />
-            <Text style={[
-              styles.filterTabText,
-              filter === filterItem.id && styles.filterTabTextActive
-            ]}>
-              {filterItem.name}
-            </Text>
-            <View style={[
-              styles.filterBadge,
-              filter === filterItem.id && styles.filterBadgeActive
-            ]}>
-              <Text style={[
-                styles.filterBadgeText,
-                filter === filterItem.id && styles.filterBadgeTextActive
-              ]}>
-                {filterItem.count}
-              </Text>
-            </View>
-          </TouchableOpacity>
-        ))}
-      </ScrollView>
-
       {/* Leads List */}
       <ScrollView
         style={styles.leadsList}
@@ -309,6 +286,16 @@ export default function CRMLeadsScreen() {
           </View>
         )}
       </ScrollView>
+
+      {/* Filter Bottom Sheet */}
+      <FilterBottomSheet
+        visible={showFilterSheet}
+        onClose={() => setShowFilterSheet(false)}
+        title="Filter Leads"
+        filters={filters}
+        selectedFilter={filter}
+        onFilterSelect={(filterId) => setFilter(filterId as any)}
+      />
     </SafeAreaView>
   );
 }
@@ -338,10 +325,27 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: '#E5E5E5',
   },
+  headerLeft: {
+    flex: 1,
+  },
   headerTitle: {
     fontSize: 24,
     fontWeight: '700',
     color: '#1A1A1A',
+  },
+  headerSubtitle: {
+    fontSize: 12,
+    color: '#666',
+    marginTop: 2,
+  },
+  headerActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  filterButton: {
+    padding: 8,
+    borderRadius: 8,
   },
   addButton: {
     padding: 8,
@@ -368,56 +372,7 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: '#1A1A1A',
   },
-  filterContainer: {
-    backgroundColor: '#FFF',
-    borderBottomWidth: 1,
-    borderBottomColor: '#E5E5E5',
-  },
-  filterContent: {
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    gap: 8,
-  },
-  filterTab: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 6,
-    paddingHorizontal: 10,
-    borderRadius: 16,
-    backgroundColor: '#F8F9FA',
-    gap: 4,
-    minWidth: 70,
-  },
-  filterTabActive: {
-    backgroundColor: '#FF9500',
-  },
-  filterTabText: {
-    fontSize: 12,
-    fontWeight: '500',
-    color: '#666',
-  },
-  filterTabTextActive: {
-    color: '#FFF',
-  },
-  filterBadge: {
-    backgroundColor: '#E5E5E5',
-    borderRadius: 8,
-    paddingHorizontal: 4,
-    paddingVertical: 1,
-    minWidth: 16,
-    alignItems: 'center',
-  },
-  filterBadgeActive: {
-    backgroundColor: '#FFF',
-  },
-  filterBadgeText: {
-    fontSize: 10,
-    fontWeight: '600',
-    color: '#666',
-  },
-  filterBadgeTextActive: {
-    color: '#FF9500',
-  },
+
   leadsList: {
     flex: 1,
     paddingHorizontal: 16,

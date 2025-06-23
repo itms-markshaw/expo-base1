@@ -49,6 +49,8 @@ export default function FilterBottomSheet({
   onSortSelect,
 }: FilterBottomSheetProps) {
 
+  console.log('FilterBottomSheet render:', { visible, title, filtersCount: filters.length });
+
   const handleFilterSelect = (filterId: string) => {
     onFilterSelect(filterId);
     onClose();
@@ -66,9 +68,9 @@ export default function FilterBottomSheet({
       visible={visible}
       onClose={onClose}
       title={title}
-      height={40}
+      height={60}
     >
-      <ScrollView showsVerticalScrollIndicator={false}>
+      <View style={styles.container}>
         {/* Filters Section */}
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Filter by</Text>
@@ -85,7 +87,7 @@ export default function FilterBottomSheet({
                 <View style={styles.filterOptionContent}>
                   <MaterialIcons
                     name={filter.icon as any}
-                    size={24}
+                    size={20}
                     color={selectedFilter === filter.id ? '#007AFF' : '#666'}
                   />
                   <Text style={[
@@ -109,7 +111,7 @@ export default function FilterBottomSheet({
                   )}
                 </View>
                 {selectedFilter === filter.id && (
-                  <MaterialIcons name="check" size={20} color="#007AFF" />
+                  <MaterialIcons name="check" size={16} color="#007AFF" />
                 )}
               </TouchableOpacity>
             ))}
@@ -133,7 +135,7 @@ export default function FilterBottomSheet({
                   <View style={styles.sortOptionContent}>
                     <MaterialIcons
                       name={sort.icon as any}
-                      size={24}
+                      size={20}
                       color={selectedSort === sort.id ? '#007AFF' : '#666'}
                     />
                     <Text style={[
@@ -144,54 +146,63 @@ export default function FilterBottomSheet({
                     </Text>
                   </View>
                   {selectedSort === sort.id && (
-                    <MaterialIcons name="check" size={20} color="#007AFF" />
+                    <MaterialIcons name="check" size={16} color="#007AFF" />
                   )}
                 </TouchableOpacity>
               ))}
             </View>
           </View>
         )}
-      </ScrollView>
+      </View>
     </BottomSheet>
   );
 }
 
 const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+  },
   section: {
-    marginBottom: 24,
+    marginBottom: 20,
   },
   sectionTitle: {
-    fontSize: 16,
+    fontSize: 14,
     fontWeight: '600',
     color: '#1A1A1A',
     marginBottom: 12,
   },
   optionsGrid: {
-    gap: 8,
+    gap: 6,
   },
   filterOption: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingVertical: 12,
-    paddingHorizontal: 16,
-    borderRadius: 12,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    borderRadius: 8,
     backgroundColor: '#F8F9FA',
     borderWidth: 1,
-    borderColor: 'transparent',
+    borderColor: '#E5E5E5',
+    marginBottom: 6,
   },
   filterOptionActive: {
-    backgroundColor: '#E3F2FD',
+    backgroundColor: '#FFF',
     borderColor: '#007AFF',
+    shadowColor: '#007AFF',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.1,
+    shadowRadius: 2,
+    elevation: 2,
   },
   filterOptionContent: {
     flexDirection: 'row',
     alignItems: 'center',
     flex: 1,
-    gap: 12,
+    gap: 8,
   },
   filterOptionText: {
-    fontSize: 14,
+    fontSize: 13,
     fontWeight: '500',
     color: '#666',
     flex: 1,
@@ -200,7 +211,7 @@ const styles = StyleSheet.create({
     color: '#007AFF',
   },
   filterBadge: {
-    backgroundColor: '#FF3B30',
+    backgroundColor: '#E5E5E5',
     borderRadius: 10,
     paddingHorizontal: 6,
     paddingVertical: 2,
@@ -213,7 +224,7 @@ const styles = StyleSheet.create({
   filterBadgeText: {
     fontSize: 10,
     fontWeight: '600',
-    color: '#FFF',
+    color: '#666',
   },
   filterBadgeTextActive: {
     color: '#FFF',

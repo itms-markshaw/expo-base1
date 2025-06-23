@@ -13,34 +13,18 @@ import {
 } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
 import SalesOrderComponent from '../components/SalesOrderComponent';
-import NavigationDrawer from '../components/NavigationDrawer';
-import { NavigationService, NavigationItem } from '../navigation/NavigationConfig';
 
 export default function SalesOrderScreen() {
-  const [showNavigationDrawer, setShowNavigationDrawer] = useState(false);
-
-  const handleNavigate = (item: NavigationItem) => {
-    console.log('Navigate to:', item.name);
-    // In a real app, this would use React Navigation
-    // navigation.navigate(item.component);
-  };
 
   return (
     <SafeAreaView style={styles.container}>
-      {/* Header with Navigation */}
+      {/* Header */}
       <View style={styles.header}>
-        <TouchableOpacity 
-          style={styles.menuButton}
-          onPress={() => setShowNavigationDrawer(true)}
-        >
-          <MaterialIcons name="menu" size={24} color="#007AFF" />
-        </TouchableOpacity>
-        
         <View style={styles.headerCenter}>
           <Text style={styles.headerTitle}>Sales Orders</Text>
           <Text style={styles.headerSubtitle}>Manage your sales pipeline</Text>
         </View>
-        
+
         <View style={styles.headerActions}>
           <TouchableOpacity style={styles.headerButton}>
             <MaterialIcons name="search" size={20} color="#666" />
@@ -64,14 +48,6 @@ export default function SalesOrderScreen() {
 
       {/* Sales Order Component */}
       <SalesOrderComponent />
-
-      {/* Navigation Drawer */}
-      <NavigationDrawer
-        visible={showNavigationDrawer}
-        onClose={() => setShowNavigationDrawer(false)}
-        onNavigate={handleNavigate}
-        currentRoute="sales-orders"
-      />
     </SafeAreaView>
   );
 }
@@ -90,10 +66,7 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: '#E5E5E5',
   },
-  menuButton: {
-    padding: 8,
-    marginRight: 12,
-  },
+
   headerCenter: {
     flex: 1,
   },

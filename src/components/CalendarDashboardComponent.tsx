@@ -93,14 +93,26 @@ export default function CalendarDashboardComponent() {
 
       const dateStr = selectedDate.toISOString().split('T')[0];
       
-      const activities = await client.searchRead('mail.activity',
-        [
-          ['user_id', '=', client.uid],
-          ['date_deadline', '=', dateStr]
-        ],
-        ['id', 'summary', 'note', 'date_deadline', 'activity_type_id'],
-        { order: 'date_deadline asc' }
-      );
+      // Load both activities and calendar events
+      const [activities, calendarEvents] = await Promise.all([
+        client.searchRead('mail.activity',
+          [
+            ['user_id', '=', client.uid],
+            ['date_deadline', '=', dateStr]
+          ],
+          ['id', 'summary', 'note', 'date_deadline', 'activity_type_id'],
+          { order: 'date_deadline asc' }
+        ),
+        client.searchRead('calendar.event',
+          [
+            '|',
+            ['start', '>=', dateStr + ' 00:00:00'],
+            ['start', '<=', dateStr + ' 23:59:59']
+          ],
+          ['id', 'name', 'start', 'stop', 'description', 'location', 'partner_ids', 'user_id', 'allday'],
+          { order: 'start asc' }
+        )
+      ]);
 
       const activityItems: CalendarItem[] = activities.map(activity => {
         const deadline = new Date(activity.date_deadline + 'T09:00:00'); // Default to 9 AM
@@ -115,9 +127,26 @@ export default function CalendarDashboardComponent() {
         };
       });
 
+      const eventItems: CalendarItem[] = calendarEvents.map(event => {
+        const startTime = new Date(event.start);
+        const endTime = new Date(event.stop);
+        return {
+          id: `event_${event.id}`,
+          title: event.name,
+          startTime,
+          endTime,
+          type: 'event',
+          notes: event.description,
+          location: event.location,
+          isAllDay: event.allday,
+          color: '#007AFF', // Default blue for calendar events
+        };
+      });
+
       setItems(prevItems => [
-        ...prevItems.filter(item => item.type !== 'activity'),
+        ...prevItems.filter(item => item.type !== 'activity' && item.type !== 'event'),
         ...activityItems,
+        ...eventItems,
       ]);
 
     } catch (error) {

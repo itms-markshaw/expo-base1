@@ -18,14 +18,15 @@ import {
 
 // Import screens and store
 import LoginScreen from './src/screens/LoginScreen';
-import NavigationDashboardScreen from './src/screens/NavigationDashboardScreen';
+import CleanNavigationScreen from './src/screens/CleanNavigationScreen';
+import MoreTabScreen from './src/screens/MoreTabScreen';
 import ContactsScreen from './src/screens/ContactsScreen';
 import ActivitiesScreen from './src/screens/ActivitiesScreen';
 import CalendarScreen from './src/screens/CalendarScreen';
 import SyncScreen from './src/screens/SyncScreen';
 import CRMLeadsScreen from './src/screens/CRMLeadsScreen';
 import SalesOrderScreen from './src/screens/SalesOrderScreen';
-import MoreScreen from './src/screens/MoreScreen';
+
 import EmployeesScreen from './src/screens/EmployeesScreen';
 import MobileScreen from './src/screens/MobileScreen';
 import MessagesScreen from './src/screens/MessagesScreen';
@@ -34,14 +35,26 @@ import ProjectsScreen from './src/screens/ProjectsScreen';
 import HelpdeskScreen from './src/screens/HelpdeskScreen';
 import HelpdeskTeamsScreen from './src/screens/HelpdeskTeamsScreen';
 import SettingsScreen from './src/screens/SettingsScreen';
+import DataScreen from './src/screens/DataScreen';
+import TestScreen from './src/screens/TestScreen';
 import { useAppStore } from './src/store';
 import AppStoreProvider from './src/store/AppStoreProvider';
 import AppNavigationProvider from './src/components/AppNavigationProvider';
 import LoadingScreen from './src/components/LoadingScreen';
+import ScreenWrapper from './src/components/ScreenWrapper';
 
 // Navigators
 const Tab = createBottomTabNavigator();
 const Stack = createStackNavigator();
+
+// Wrapper function to add bottom navigation to screens
+const withBottomNav = (Component: React.ComponentType<any>, screenName: string) => {
+  return (props: any) => (
+    <ScreenWrapper currentScreen={screenName}>
+      <Component {...props} />
+    </ScreenWrapper>
+  );
+};
 
 // Stack Navigator for all screens
 function AllScreensStack() {
@@ -70,56 +83,81 @@ function AllScreensStack() {
         options={{ headerShown: false }}
       />
 
-      {/* Secondary Screens - With headers and back buttons */}
+      {/* Secondary Screens - With headers, back buttons, and bottom navigation */}
       <Stack.Screen
         name="SalesOrders"
-        component={SalesOrderScreen}
+        component={withBottomNav(SalesOrderScreen, 'Sales Orders')}
         options={{ title: 'Sales Orders' }}
       />
       <Stack.Screen
         name="Employees"
-        component={EmployeesScreen}
+        component={withBottomNav(EmployeesScreen, 'Employees')}
         options={{ title: 'Employees' }}
       />
       <Stack.Screen
         name="CRMLeads"
-        component={CRMLeadsScreen}
+        component={withBottomNav(CRMLeadsScreen, 'CRM Leads')}
         options={{ title: 'CRM Leads' }}
       />
       <Stack.Screen
         name="Messages"
-        component={MessagesScreen}
+        component={withBottomNav(MessagesScreen, 'Messages')}
         options={{ title: 'Messages' }}
       />
       <Stack.Screen
         name="Attachments"
-        component={AttachmentsScreen}
+        component={withBottomNav(AttachmentsScreen, 'Attachments')}
         options={{ title: 'Attachments' }}
       />
       <Stack.Screen
         name="Projects"
-        component={ProjectsScreen}
+        component={withBottomNav(ProjectsScreen, 'Projects')}
         options={{ title: 'Projects' }}
       />
       <Stack.Screen
         name="Helpdesk"
-        component={HelpdeskScreen}
+        component={withBottomNav(HelpdeskScreen, 'Helpdesk')}
         options={{ title: 'Helpdesk' }}
       />
       <Stack.Screen
         name="HelpdeskTeams"
-        component={HelpdeskTeamsScreen}
+        component={withBottomNav(HelpdeskTeamsScreen, 'Helpdesk Teams')}
         options={{ title: 'Helpdesk Teams' }}
       />
       <Stack.Screen
         name="Mobile"
-        component={MobileScreen}
+        component={withBottomNav(MobileScreen, 'Mobile')}
         options={{ title: 'Mobile' }}
       />
       <Stack.Screen
         name="Settings"
-        component={SettingsScreen}
+        component={withBottomNav(SettingsScreen, 'Settings')}
         options={{ title: 'Settings' }}
+      />
+      <Stack.Screen
+        name="SyncStack"
+        component={withBottomNav(SyncScreen, 'Sync')}
+        options={{ title: 'Data Sync' }}
+      />
+      <Stack.Screen
+        name="Data"
+        component={withBottomNav(DataScreen, 'Data')}
+        options={{ title: 'Data Management' }}
+      />
+      <Stack.Screen
+        name="Testing"
+        component={withBottomNav(TestScreen, 'Testing')}
+        options={{ title: 'Testing & Diagnostics' }}
+      />
+      <Stack.Screen
+        name="Documentation"
+        component={withBottomNav(MobileScreen, 'Documentation')}
+        options={{ title: 'Documentation' }}
+      />
+      <Stack.Screen
+        name="Activities"
+        component={withBottomNav(ActivitiesScreen, 'Activities')}
+        options={{ title: 'Activities' }}
       />
     </Stack.Navigator>
   );
@@ -127,25 +165,30 @@ function AllScreensStack() {
 
 // Main Tab Navigator
 function MainTabs() {
-
   return (
     <Tab.Navigator
       screenOptions={({ route }) => ({
         tabBarIcon: ({ focused, color, size }) => {
           let iconName: string;
 
-          if (route.name === 'Dashboard') {
-            iconName = 'dashboard';
-          } else if (route.name === 'CRM') {
-            iconName = 'trending-up';
-          } else if (route.name === 'Sales') {
-            iconName = 'shopping-cart';
-          } else if (route.name === 'Activities') {
-            iconName = 'event-note';
-          } else if (route.name === 'More') {
-            iconName = 'more-horiz';
-          } else {
-            iconName = 'help';
+          switch (route.name) {
+            case 'Dashboard':
+              iconName = 'dashboard';
+              break;
+            case 'Sales':
+              iconName = 'shopping-cart';
+              break;
+            case 'Contacts':
+              iconName = 'people';
+              break;
+            case 'Calendar':
+              iconName = 'calendar-today';
+              break;
+            case 'More':
+              iconName = 'more-horiz';
+              break;
+            default:
+              iconName = 'help';
           }
 
           return <MaterialIcons name={iconName} size={size} color={color} />;
@@ -162,11 +205,11 @@ function MainTabs() {
         headerShown: false,
       })}
     >
-        <Tab.Screen name="Dashboard" component={NavigationDashboardScreen} />
-        <Tab.Screen name="CRM" component={CRMLeadsScreen} />
+        <Tab.Screen name="Dashboard" component={CleanNavigationScreen} />
         <Tab.Screen name="Sales" component={SalesOrderScreen} />
-        <Tab.Screen name="Activities" component={ActivitiesScreen} />
-        <Tab.Screen name="More" component={MoreScreen} />
+        <Tab.Screen name="Contacts" component={ContactsScreen} />
+        <Tab.Screen name="Calendar" component={CalendarScreen} />
+        <Tab.Screen name="More" component={MoreTabScreen} />
       </Tab.Navigator>
   );
 }

@@ -152,17 +152,7 @@ export const navigationItems: NavigationItem[] = [
   },
 
   // Operations Category
-  {
-    id: 'sync',
-    name: 'Data Sync',
-    shortName: 'Sync',
-    icon: 'sync',
-    component: 'SyncScreen',
-    category: 'operations',
-    available: true,
-    description: 'Data synchronization with Odoo',
-    color: '#FF9500',
-  },
+
   {
     id: 'activities',
     name: 'Activities',
@@ -218,6 +208,17 @@ export const navigationItems: NavigationItem[] = [
     description: 'Project management and tracking',
     color: '#FF9500',
   },
+  {
+    id: 'helpdesk',
+    name: 'Helpdesk',
+    shortName: 'Helpdesk',
+    icon: 'support',
+    component: 'HelpdeskScreen',
+    category: 'operations',
+    available: true,
+    description: 'Support tickets and customer service',
+    color: '#FF6B35',
+  },
 
   // Mobile Category
   {
@@ -266,6 +267,28 @@ export const navigationItems: NavigationItem[] = [
   },
 
   // Tools Category
+  {
+    id: 'sync',
+    name: 'Sync',
+    shortName: 'Sync',
+    icon: 'sync',
+    component: 'SyncScreen',
+    category: 'tools',
+    available: true,
+    description: 'Data synchronization with Odoo',
+    color: '#666',
+  },
+  {
+    id: 'data',
+    name: 'Data',
+    shortName: 'Data',
+    icon: 'storage',
+    component: 'DataScreen',
+    category: 'tools',
+    available: true,
+    description: 'View and manage synced data',
+    color: '#666',
+  },
   {
     id: 'test',
     name: 'Testing',
