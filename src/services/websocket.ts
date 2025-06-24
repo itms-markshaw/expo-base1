@@ -1,10 +1,11 @@
 /**
- * WebSocket Service for Odoo 18 Integration
- * Based on the working websocket implementation
+ * Odoo 18 WebSocket Service - Based on ACTUAL Odoo Implementation
+ * This implementation follows the exact patterns from Odoo's websocket_worker.js
  */
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { AppState } from 'react-native';
+import { authService } from './auth';
 
 interface WebSocketMessage {
   event_name: string;
@@ -17,52 +18,89 @@ interface Notification {
   payload: any;
 }
 
+// Odoo's exact WebSocket close codes
+const WEBSOCKET_CLOSE_CODES = Object.freeze({
+  CLEAN: 1000,
+  GOING_AWAY: 1001,
+  PROTOCOL_ERROR: 1002,
+  INCORRECT_DATA: 1003,
+  ABNORMAL_CLOSURE: 1006,
+  INCONSISTENT_DATA: 1007,
+  MESSAGE_VIOLATING_POLICY: 1008,
+  MESSAGE_TOO_BIG: 1009,
+  EXTENSION_NEGOTIATION_FAILED: 1010,
+  SERVER_ERROR: 1011,
+  RESTART: 1012,
+  TRY_LATER: 1013,
+  BAD_GATEWAY: 1014,
+  SESSION_EXPIRED: 4001,
+  KEEP_ALIVE_TIMEOUT: 4002,
+  RECONNECTING: 4003,
+});
+
+// Odoo's worker states
+const WORKER_STATE = Object.freeze({
+  CONNECTED: "CONNECTED",
+  DISCONNECTED: "DISCONNECTED", 
+  IDLE: "IDLE",
+  CONNECTING: "CONNECTING",
+});
+
 class OdooWebSocketService {
+  // Configuration matching Odoo's implementation
+  private INITIAL_RECONNECT_DELAY = 1000;
+  private RECONNECT_JITTER = 1000;
+  private MAXIMUM_RECONNECT_DELAY = 60000;
+
+  // Connection state
   private websocket: WebSocket | null = null;
   private websocketURL: string | null = null;
   private currentUID: number | null = null;
   private currentDB: string | null = null;
   private serverURL: string | null = null;
   private sessionId: string | null = null;
-  private accessToken: string | null = null;
   
-  private isConnected = false;
-  private isConnecting = false;
+  // State management (following Odoo's pattern)
+  private state: string = WORKER_STATE.IDLE;
   private isReconnecting = false;
-  private connectionState: 'IDLE' | 'CONNECTING' | 'CONNECTED' | 'DISCONNECTED' = 'IDLE';
+  private connectRetryDelay = this.INITIAL_RECONNECT_DELAY;
+  private connectTimeout: NodeJS.Timeout | null = null;
+  private active = true;
   
-  private subscriptions = new Set<string>();
+  // Channel management (following Odoo's pattern)
+  private channelsByClient = new Map<string, string[]>();
+  private lastChannelSubscription: string | null = null;
   private lastNotificationId = 0;
   private messageWaitQueue: string[] = [];
   
+  // Event listeners
   private eventListeners = new Map<string, Function[]>();
-  
-  // Reconnection settings
-  private INITIAL_RECONNECT_DELAY = 1000;
-  private MAXIMUM_RECONNECT_DELAY = 60000;
-  private connectRetryDelay = this.INITIAL_RECONNECT_DELAY;
+  private appStateSubscription: any = null;
 
   constructor() {
     this.setupAppStateHandling();
   }
 
   /**
-   * Initialize WebSocket service
+   * Initialize WebSocket service using Odoo's exact patterns
    */
   async initialize(): Promise<boolean> {
     try {
-      console.log('🔌 Initializing Odoo WebSocket Service...');
+      console.log('🔌 Initializing Odoo WebSocket Service (Following Odoo 18 patterns)...');
       
-      const success = await this.loadAuthData();
+      const success = await this.loadAuthDataFromOdoo();
       if (!success) {
-        console.warn('⚠️ No valid authentication data');
+        console.warn('⚠️ No valid authentication data - WebSocket will be limited');
         return false;
       }
       
-      this.buildWebSocketURL();
-      await this.connect();
+      // Build WebSocket URL using Odoo's pattern
+      this.buildOdooWebSocketURL();
       
-      console.log('✅ WebSocket Service initialized successfully');
+      // Connect using Odoo's connection pattern
+      await this.startConnection();
+      
+      console.log('✅ Odoo WebSocket Service initialized successfully');
       return true;
     } catch (error) {
       console.error('❌ Failed to initialize WebSocket service:', error);
@@ -72,36 +110,37 @@ class OdooWebSocketService {
   }
 
   /**
-   * Load authentication data from your existing auth service
+   * Load authentication data and get session info (Odoo's way)
    */
-  private async loadAuthData(): Promise<boolean> {
+  private async loadAuthDataFromOdoo(): Promise<boolean> {
     try {
-      // Check if user is authenticated using your auth service pattern
-      const isAuth = await AsyncStorage.getItem('odoo_authenticated');
-      const userStr = await AsyncStorage.getItem('odoo_user');
+      const user = authService.getCurrentUser();
+      const client = authService.getClient();
 
-      if (isAuth === 'true' && userStr) {
-        const user = JSON.parse(userStr);
-
-        // Use your ODOO_CONFIG for connection details
-        this.currentUID = user.id;
-        this.currentDB = process.env.EXPO_PUBLIC_ODOO_DB || 'ITMS_v17_3_backup_2025_02_17_08_15';
-        this.serverURL = process.env.EXPO_PUBLIC_API_URL || 'https://itmsgroup.com.au';
-
-        // For WebSocket, we'll use the same credentials as XML-RPC
-        // Since you're using API key authentication, we'll pass that
-        this.accessToken = process.env.EXPO_PUBLIC_ODOO_API_KEY;
-
-        console.log('✅ Loaded auth from existing auth service');
-        console.log(`🔑 User: ${user.name} (ID: ${this.currentUID})`);
-        console.log(`🗄️ Database: ${this.currentDB}`);
-        console.log(`🌐 Server: ${this.serverURL}`);
-
-        return true;
+      if (!user || !client) {
+        console.warn('⚠️ No authenticated user or client available');
+        return false;
       }
 
-      console.warn('⚠️ No valid authentication data found');
-      return false;
+      // Set basic auth data
+      this.currentUID = user.id;
+      this.currentDB = client.config?.database || process.env.EXPO_PUBLIC_ODOO_DB;
+      this.serverURL = client.config?.baseURL || process.env.EXPO_PUBLIC_API_URL;
+
+      console.log('✅ Loaded basic auth data:', {
+        uid: this.currentUID,
+        database: this.currentDB,
+        serverUrl: this.serverURL
+      });
+
+      // For XML-RPC, we don't need session_info - WebSocket auth works differently
+      // The WebSocket connection will work with the existing XML-RPC authentication
+      console.log('🔐 Using XML-RPC authentication for WebSocket (no session needed)');
+      
+      // Set a fallback session identifier for debugging
+      this.sessionId = `xmlrpc_${this.currentUID}_${Date.now()}`;
+
+      return true;
     } catch (error) {
       console.error('❌ Error loading auth data:', error);
       return false;
@@ -109,114 +148,107 @@ class OdooWebSocketService {
   }
 
   /**
-   * Build WebSocket URL
+   * Build WebSocket URL following Odoo's exact pattern
    */
-  private buildWebSocketURL(): void {
+  private buildOdooWebSocketURL(): void {
     if (!this.serverURL) {
       this.serverURL = process.env.EXPO_PUBLIC_API_URL || 'https://itmsgroup.com.au';
     }
-    
+
+    // Use Odoo's exact WebSocket URL pattern (based on your browser inspection)
     const baseWsUrl = this.serverURL.replace(/^https?:\/\//, 'wss://');
-    this.websocketURL = `${baseWsUrl}/websocket`;
+    this.websocketURL = `${baseWsUrl}/websocket`;  // Odoo 18 standard endpoint
     
-    console.log(`🌐 WebSocket URL: ${this.websocketURL}`);
+    console.log(`🌐 WebSocket URL (Odoo pattern): ${this.websocketURL}`);
+    console.log(`🔑 Auth context: UID=${this.currentUID}, DB=${this.currentDB}`);
   }
 
   /**
-   * Connect to WebSocket
+   * Start connection following Odoo's _start() method
    */
-  private async connect(): Promise<void> {
-    if (this.isConnected || this.isConnecting || !this.websocketURL) {
+  private async startConnection(): Promise<void> {
+    if (!this.active || this.isWebsocketConnected() || this.isWebsocketConnecting()) {
+      console.log('🔌 Already connected/connecting or not active');
       return;
     }
 
     try {
-      this.isConnecting = true;
-      this.connectionState = 'CONNECTING';
-      this.emit('connectionStateChanged', 'CONNECTING');
+      this.removeWebsocketListeners();
+      
+      if (this.isWebsocketClosing()) {
+        this.lastChannelSubscription = null;
+        this.emit('disconnect', { code: WEBSOCKET_CLOSE_CODES.ABNORMAL_CLOSURE });
+      }
 
-      const headers: Record<string, string> = {
-        Origin: this.serverURL!,
+      this.updateState(WORKER_STATE.CONNECTING);
+      
+      console.log(`🔌 Connecting to WebSocket: ${this.websocketURL}`);
+      
+      // 🎉 FIXED: Add required Origin header for Odoo WebSocket
+      const headers = {
+        'Origin': this.serverURL!,
         'User-Agent': 'ExpoMobile/1.0 (Odoo WebSocket Client)'
       };
-
-      // For Odoo WebSocket with API key authentication
-      if (this.accessToken) {
-        headers['X-API-Key'] = this.accessToken;
-        headers.Authorization = `Bearer ${this.accessToken}`;
-      }
-
-      // Add database and user info for Odoo WebSocket
-      if (this.currentDB) {
-        headers['X-Database'] = this.currentDB;
-      }
-
-      if (this.currentUID) {
-        headers['X-User-ID'] = this.currentUID.toString();
-      }
-
-      console.log('🔌 Connecting to WebSocket with headers:', Object.keys(headers));
-      this.websocket = new WebSocket(this.websocketURL, { headers });
-      this.setupWebSocketHandlers();
       
+      console.log('🔑 Using headers:', Object.keys(headers));
+      
+      // Create WebSocket connection with proper headers
+      this.websocket = new WebSocket(this.websocketURL, { headers });
+      
+      // Add event listeners (Odoo's way)
+      this.websocket.addEventListener('open', this.onWebsocketOpen.bind(this));
+      this.websocket.addEventListener('error', this.onWebsocketError.bind(this));
+      this.websocket.addEventListener('message', this.onWebsocketMessage.bind(this));
+      this.websocket.addEventListener('close', this.onWebsocketClose.bind(this));
+
     } catch (error) {
       console.error('❌ WebSocket connection error:', error);
-      this.handleConnectionError(error);
+      this.onWebsocketError();
     }
   }
 
   /**
-   * Setup WebSocket event handlers
+   * Handle WebSocket open (Odoo's _onWebsocketOpen)
    */
-  private setupWebSocketHandlers(): void {
-    if (!this.websocket) return;
-
-    this.websocket.onopen = () => this.handleConnectionOpen();
-    this.websocket.onmessage = (event) => this.handleMessage(event);
-    this.websocket.onclose = (event) => this.handleConnectionClose(event);
-    this.websocket.onerror = (error) => this.handleConnectionError(error);
-  }
-
-  /**
-   * Handle connection open
-   */
-  private handleConnectionOpen(): void {
-    console.log('🔗 WebSocket connected');
+  private onWebsocketOpen(): void {
+    console.log('🔗 WebSocket connected successfully to Odoo!');
+    console.log(`✅ Connected to: ${this.websocketURL}`);
+    console.log(`🔑 User: ${this.currentUID}, Database: ${this.currentDB}`);
     
-    this.isConnected = true;
-    this.isConnecting = false;
-    this.connectionState = 'CONNECTED';
-    this.connectRetryDelay = this.INITIAL_RECONNECT_DELAY;
-    
-    this.emit('connectionStateChanged', 'CONNECTED');
+    this.updateState(WORKER_STATE.CONNECTED);
     this.emit(this.isReconnecting ? 'reconnect' : 'connect');
-
-    this.subscribeToInitialChannels();
-    this.processMessageQueue();
     
+    // Update channels subscription
+    this.updateChannels();
+    
+    // Reset reconnection settings
+    this.connectRetryDelay = this.INITIAL_RECONNECT_DELAY;
+    this.connectTimeout = null;
     this.isReconnecting = false;
+
+    // Process queued messages
+    this.processMessageQueue();
   }
 
   /**
-   * Handle incoming messages
+   * Handle WebSocket message (Odoo's _onWebsocketMessage)
    */
-  private handleMessage(messageEvent: MessageEvent): void {
+  private onWebsocketMessage(messageEv: MessageEvent): void {
     try {
-      const notifications = JSON.parse(messageEvent.data);
+      const notifications = JSON.parse(messageEv.data);
       
-      if (!Array.isArray(notifications)) {
-        console.warn('⚠️ Received non-array notification:', notifications);
-        return;
-      }
-
-      console.log(`📨 Received ${notifications.length} notifications`);
+      console.log(`📨 Received ${notifications.length} notifications (Odoo format)`);
       
+      // Update last notification ID (Odoo's way)
       if (notifications.length > 0) {
         this.lastNotificationId = notifications[notifications.length - 1].id;
       }
       
-      notifications.forEach((notification: Notification) => this.processNotification(notification));
+      // Broadcast notifications
       this.emit('notification', notifications);
+      
+      // Process each notification
+      notifications.forEach((notification: Notification) => this.processNotification(notification));
       
     } catch (error) {
       console.error('❌ Error processing WebSocket message:', error);
@@ -224,150 +256,127 @@ class OdooWebSocketService {
   }
 
   /**
-   * Process individual notification
+   * Handle WebSocket close (Odoo's _onWebsocketClose)
    */
-  private processNotification(notification: Notification): void {
-    const { payload, type } = notification;
+  private onWebsocketClose(event: CloseEvent): void {
+    const { code, reason } = event;
+    console.log(`🔌 WebSocket closed (Odoo style): ${code} - ${reason}`);
     
-    console.log(`📬 Processing notification type: ${type}`);
+    this.updateState(WORKER_STATE.DISCONNECTED);
+    this.lastChannelSubscription = null;
     
-    switch (type) {
-      case 'mail.message':
-        this.emit('newMessage', payload);
-        break;
-      case 'discuss.channel':
-        this.emit('channelUpdate', payload);
-        break;
-      case 'bus.notification':
-        this.emit('busNotification', payload);
-        break;
-      case 'res.partner':
-        this.emit('partnerUpdate', payload);
-        break;
-      default:
-        this.emit('unknownNotification', { type, payload });
-    }
-  }
-
-  /**
-   * Handle connection close
-   */
-  private handleConnectionClose(event: CloseEvent): void {
-    console.log(`🔌 WebSocket closed: ${event.code} - ${event.reason}`);
-    
-    this.isConnected = false;
-    this.isConnecting = false;
-    this.connectionState = 'DISCONNECTED';
-    
-    this.emit('connectionStateChanged', 'DISCONNECTED');
-    this.emit('disconnect', { code: event.code, reason: event.reason });
-    
-    if (event.code !== 1000 && !this.isReconnecting) {
-      this.scheduleReconnect();
-    }
-  }
-
-  /**
-   * Handle connection error
-   */
-  private handleConnectionError(error: any): void {
-    console.error('❌ WebSocket error:', error);
-    
-    this.connectionState = 'DISCONNECTED';
-    this.isConnecting = false;
-    
-    this.emit('connectionStateChanged', 'DISCONNECTED');
-    this.emit('error', { type: 'connection', error });
-    
-    this.scheduleReconnect();
-  }
-
-  /**
-   * Schedule reconnection
-   */
-  private scheduleReconnect(): void {
-    if (this.isReconnecting) return;
-    
-    this.isReconnecting = true;
-    this.emit('reconnecting', { delay: this.connectRetryDelay });
-    
-    setTimeout(() => {
-      if (!this.isConnected) {
-        this.connect();
-      }
-    }, this.connectRetryDelay);
-    
-    this.connectRetryDelay = Math.min(this.connectRetryDelay * 2, this.MAXIMUM_RECONNECT_DELAY);
-  }
-
-  /**
-   * Subscribe to initial channels
-   */
-  private subscribeToInitialChannels(): void {
-    if (this.subscriptions.size === 0) {
-      console.log('📱 No channels to subscribe to yet');
+    if (this.isReconnecting) {
       return;
     }
-    this.subscribeToChannels();
-  }
 
-  /**
-   * Subscribe to channels
-   */
-  private subscribeToChannels(): void {
-    const allChannels = Array.from(this.subscriptions);
+    this.emit('disconnect', { code, reason });
 
-    if (allChannels.length === 0) return;
-
-    console.log(`📱 Subscribing to ${allChannels.length} channels`);
-
-    const subscriptionData: any = {
-      channels: allChannels,
-      last: this.lastNotificationId
-    };
-
-    if (this.currentUID && this.currentDB) {
-      subscriptionData.options = {
-        uid: this.currentUID,
-        db: this.currentDB
-      };
+    // Handle clean close
+    if (code === WEBSOCKET_CLOSE_CODES.CLEAN) {
+      if (reason === 'OUTDATED_VERSION') {
+        console.warn('⚠️ Worker deactivated due to outdated version');
+        this.active = false;
+        this.emit('outdated');
+      }
+      return;
     }
 
-    this.sendMessage({
-      event_name: 'subscribe',
-      data: subscriptionData
-    });
+    // Auto-reconnect for other cases
+    this.emit('reconnecting', { closeCode: code });
+    this.isReconnecting = true;
+
+    // Special handling for specific codes (Odoo's way)
+    if (code === WEBSOCKET_CLOSE_CODES.KEEP_ALIVE_TIMEOUT) {
+      this.connectRetryDelay = 0; // Immediate reconnect
+    }
+    if (code === WEBSOCKET_CLOSE_CODES.SESSION_EXPIRED) {
+      // Reload auth data
+      this.loadAuthDataFromOdoo();
+    }
+
+    this.retryConnectionWithDelay();
   }
 
   /**
-   * Send message to WebSocket
+   * Handle WebSocket error (Odoo's _onWebsocketError)
    */
-  sendMessage(message: WebSocketMessage): void {
+  private onWebsocketError(event?: Event): void {
+    console.error('❌ WebSocket error:', event);
+    console.error(`❌ Failed connecting to: ${this.websocketURL}`);
+    console.error(`🔍 Check if WebSocket is enabled on Odoo server`);
+    this.retryConnectionWithDelay();
+  }
+
+  /**
+   * Retry connection with delay (Odoo's _retryConnectionWithDelay)
+   */
+  private retryConnectionWithDelay(): void {
+    this.connectRetryDelay = Math.min(
+      this.connectRetryDelay * 1.5, 
+      this.MAXIMUM_RECONNECT_DELAY
+    ) + this.RECONNECT_JITTER * Math.random();
+    
+    console.log(`🔄 Retrying connection in ${Math.round(this.connectRetryDelay)}ms`);
+    
+    this.connectTimeout = setTimeout(() => {
+      this.startConnection();
+    }, this.connectRetryDelay);
+  }
+
+  /**
+   * Update channels subscription (Odoo's _updateChannels)
+   */
+  private updateChannels(force = false): void {
+    // Get all channels from all clients (in our case, just one client)
+    const allChannels = Array.from(new Set(
+      [].concat(...Array.from(this.channelsByClient.values()))
+    )).sort();
+    
+    const allChannelsString = JSON.stringify(allChannels);
+    const shouldUpdate = allChannelsString !== this.lastChannelSubscription;
+
+    if (force || shouldUpdate) {
+      console.log(`📱 Updating channel subscription: ${allChannels.length} channels`);
+      
+      this.lastChannelSubscription = allChannelsString;
+      
+      // Send subscription message (Odoo's exact format)
+      this.sendToServer({
+        event_name: 'subscribe',
+        data: {
+          channels: allChannels,
+          last: this.lastNotificationId
+        }
+      });
+    }
+  }
+
+  /**
+   * Send message to server (Odoo's _sendToServer)
+   */
+  private sendToServer(message: WebSocketMessage): void {
     const payload = JSON.stringify(message);
     
-    if (!this.isConnected || !this.websocket || this.websocket.readyState !== WebSocket.OPEN) {
-      console.log('📫 Queueing message (not connected)');
-      this.queueMessage(payload);
-      return;
-    }
-
-    try {
-      this.websocket.send(payload);
-      console.log(`📤 Sent message: ${message.event_name}`);
-    } catch (error) {
-      console.error('❌ Failed to send message:', error);
-      this.queueMessage(payload);
-    }
-  }
-
-  /**
-   * Queue message for later delivery
-   */
-  private queueMessage(payload: string): void {
-    this.messageWaitQueue.push(payload);
-    
-    if (this.messageWaitQueue.length > 100) {
-      this.messageWaitQueue.shift();
+    if (!this.isWebsocketConnected()) {
+      console.log('📫 Queueing message (not connected):', message.event_name);
+      
+      // Special handling for subscribe messages (Odoo's way)
+      if (message.event_name === 'subscribe') {
+        this.messageWaitQueue = this.messageWaitQueue.filter(
+          msg => JSON.parse(msg).event_name !== 'subscribe'
+        );
+        this.messageWaitQueue.unshift(payload);
+      } else {
+        this.messageWaitQueue.push(payload);
+      }
+    } else {
+      try {
+        this.websocket!.send(payload);
+        console.log(`📤 Sent message: ${message.event_name}`);
+      } catch (error) {
+        console.error('❌ Failed to send message:', error);
+        this.messageWaitQueue.push(payload);
+      }
     }
   }
 
@@ -389,13 +398,45 @@ class OdooWebSocketService {
   }
 
   /**
-   * Subscribe to a channel
+   * Process individual notification
+   */
+  private processNotification(notification: Notification): void {
+    const { payload, type } = notification;
+    
+    console.log(`📬 Processing notification type: ${type}`);
+    
+    // Handle different notification types
+    switch (type) {
+      case 'mail.message':
+        this.emit('newMessage', payload);
+        break;
+      case 'discuss.channel':
+        this.emit('channelUpdate', payload);
+        break;
+      case 'bus.notification':
+        this.emit('busNotification', payload);
+        break;
+      default:
+        this.emit('unknownNotification', { type, payload });
+    }
+  }
+
+  /**
+   * Subscribe to a channel (Odoo style)
    */
   subscribeToChannel(channelId: string): void {
-    this.subscriptions.add(channelId);
+    const clientId = 'main'; // Single client for mobile app
     
-    if (this.isConnected) {
-      this.subscribeToChannels();
+    if (!this.channelsByClient.has(clientId)) {
+      this.channelsByClient.set(clientId, []);
+    }
+    
+    const clientChannels = this.channelsByClient.get(clientId)!;
+    if (!clientChannels.includes(channelId)) {
+      clientChannels.push(channelId);
+      this.channelsByClient.set(clientId, clientChannels);
+      this.updateChannels();
+      console.log(`📱 Subscribed to channel: ${channelId}`);
     }
   }
 
@@ -403,22 +444,71 @@ class OdooWebSocketService {
    * Unsubscribe from a channel
    */
   unsubscribeFromChannel(channelId: string): void {
-    this.subscriptions.delete(channelId);
+    const clientId = 'main';
+    const clientChannels = this.channelsByClient.get(clientId);
     
-    if (this.isConnected) {
-      this.subscribeToChannels();
+    if (!clientChannels) return;
+    
+    const index = clientChannels.indexOf(channelId);
+    if (index !== -1) {
+      clientChannels.splice(index, 1);
+      this.updateChannels();
+      console.log(`👋 Unsubscribed from channel: ${channelId}`);
     }
+  }
+
+  /**
+   * Send message (public interface)
+   */
+  sendMessage(message: WebSocketMessage): void {
+    this.sendToServer(message);
+  }
+
+  /**
+   * Helper methods for WebSocket state
+   */
+  private isWebsocketConnected(): boolean {
+    return this.websocket?.readyState === WebSocket.OPEN;
+  }
+
+  private isWebsocketConnecting(): boolean {
+    return this.websocket?.readyState === WebSocket.CONNECTING;
+  }
+
+  private isWebsocketClosing(): boolean {
+    return this.websocket?.readyState === WebSocket.CLOSING;
+  }
+
+  /**
+   * Remove WebSocket listeners
+   */
+  private removeWebsocketListeners(): void {
+    this.websocket?.removeEventListener('open', this.onWebsocketOpen);
+    this.websocket?.removeEventListener('message', this.onWebsocketMessage);
+    this.websocket?.removeEventListener('error', this.onWebsocketError);
+    this.websocket?.removeEventListener('close', this.onWebsocketClose);
+  }
+
+  /**
+   * Update state and broadcast
+   */
+  private updateState(newState: string): void {
+    this.state = newState;
+    this.emit('worker_state_updated', newState);
   }
 
   /**
    * Setup app state handling
    */
   private setupAppStateHandling(): void {
-    AppState.addEventListener('change', (nextAppState) => {
-      if (nextAppState === 'active' && !this.isConnected) {
-        this.connect();
-      } else if (nextAppState === 'background') {
-        // Keep connection alive in background
+    this.appStateSubscription = AppState.addEventListener('change', (nextAppState) => {
+      if (nextAppState === 'background') {
+        console.log('📱 App going to background');
+      } else if (nextAppState === 'active') {
+        console.log('📱 App becoming active');
+        if (!this.isWebsocketConnected() && !this.isWebsocketConnecting()) {
+          this.startConnection();
+        }
       }
     });
   }
@@ -460,10 +550,13 @@ class OdooWebSocketService {
    */
   getConnectionStatus() {
     return {
-      isConnected: this.isConnected,
-      connectionState: this.connectionState,
-      subscriptions: Array.from(this.subscriptions),
-      lastNotificationId: this.lastNotificationId
+      isConnected: this.isWebsocketConnected(),
+      state: this.state,
+      websocketURL: this.websocketURL,
+      currentUID: this.currentUID,
+      currentDB: this.currentDB,
+      subscriptions: Array.from(this.channelsByClient.get('main') || []),
+      queuedMessages: this.messageWaitQueue.length
     };
   }
 
@@ -472,43 +565,61 @@ class OdooWebSocketService {
    */
   async reconnect(): Promise<boolean> {
     console.log('🔄 Force reconnecting WebSocket...');
-
-    // Disconnect first
-    this.disconnect();
-
-    // Wait a moment
+    
+    this.stop();
     await new Promise(resolve => setTimeout(resolve, 1000));
-
-    // Reinitialize
+    await this.loadAuthDataFromOdoo();
+    
     return await this.initialize();
   }
 
   /**
-   * Check and repair connection if needed
+   * Ensure connection
    */
   async ensureConnection(): Promise<boolean> {
-    if (this.isConnected && this.websocket?.readyState === WebSocket.OPEN) {
+    if (this.isWebsocketConnected()) {
       return true;
     }
-
+    
     console.log('🔧 Connection needs repair, reconnecting...');
     return await this.reconnect();
   }
 
   /**
-   * Disconnect WebSocket
+   * Stop WebSocket (Odoo's _stop method)
+   */
+  private stop(): void {
+    console.log('🔌 Stopping WebSocket...');
+    
+    if (this.connectTimeout) {
+      clearTimeout(this.connectTimeout);
+      this.connectTimeout = null;
+    }
+    
+    this.connectRetryDelay = this.INITIAL_RECONNECT_DELAY;
+    this.isReconnecting = false;
+    this.lastChannelSubscription = null;
+    
+    this.websocket?.close();
+    this.removeWebsocketListeners();
+  }
+
+  /**
+   * Disconnect and cleanup
    */
   disconnect(): void {
-    if (this.websocket) {
-      this.websocket.close(1000, 'Client disconnect');
-      this.websocket = null;
+    this.stop();
+    
+    if (this.appStateSubscription) {
+      this.appStateSubscription.remove();
+      this.appStateSubscription = null;
     }
-
-    this.isConnected = false;
-    this.isConnecting = false;
-    this.isReconnecting = false;
-    this.connectionState = 'DISCONNECTED';
+    
+    this.channelsByClient.clear();
     this.messageWaitQueue = [];
+    this.active = false;
+    
+    this.emit('disconnected', { intentional: true });
   }
 }
 

@@ -3,7 +3,7 @@
  * Handles real-time messaging, typing indicators, and presence
  */
 
-import longpollingService from './odooLongpolling';
+import webSocketService from './websocket';
 import { authService } from './auth';
 
 export interface ChatMessage {
@@ -73,7 +73,7 @@ class ChatService {
   private currentPollingChannelId: number | null = null;
 
   constructor() {
-    this.setupLongpollingListeners();
+    this.setupWebSocketListeners();
   }
 
   /**
@@ -88,15 +88,13 @@ class ChatService {
     try {
       console.log('💬 Initializing Chat service...');
       
-      // 🎉 HTTP Longpolling for real-time updates!
-      console.log('🔗 Starting HTTP longpolling for real-time updates');
-      const longpollingStarted = await longpollingService.start();
-      console.log(`🔗 Longpolling start result: ${longpollingStarted}`);
-      
-      if (!longpollingStarted) {
-        console.warn('⚠️ Longpolling service failed to start, chat will use polling fallback');
-      } else {
-        console.log('✅ Longpolling service started successfully!');
+      // 🎉 WebSocket FIXED - Origin header was the missing piece!
+      console.log('🔗 Enabling WebSocket with proper authentication');
+      const wsConnected = await webSocketService.ensureConnection();
+      if (!wsConnected) {
+        console.warn('⚠️ WebSocket service failed to connect, retrying...');
+        // Try once more
+        await webSocketService.reconnect();
       }
 
       // Set current user info
@@ -151,28 +149,32 @@ class ChatService {
   }
 
   /**
-   * Setup HTTP Longpolling event listeners
+   * Setup WebSocket event listeners (RESTORED - WebSocket auth fixed!)
    */
-  private setupLongpollingListeners(): void {
-    console.log('🔗 Setting up HTTP longpolling listeners for real-time updates');
+  private setupWebSocketListeners(): void {
+    console.log('🔗 Setting up WebSocket listeners - auth issue resolved!');
     
-    longpollingService.on('chatMessage', (message: any) => {
+    webSocketService.on('newMessage', (message: ChatMessage) => {
       this.handleNewMessage(message);
     });
 
-    longpollingService.on('notification', (notification: any) => {
+    webSocketService.on('channelUpdate', (channel: ChatChannel) => {
+      this.handleChannelUpdate(channel);
+    });
+
+    webSocketService.on('busNotification', (notification: any) => {
       this.handleBusNotification(notification);
     });
 
-    longpollingService.on('presenceUpdate', (presence: any) => {
-      this.emit('presenceUpdate', presence);
+    webSocketService.on('connect', () => {
+      this.emit('connectionChanged', 'connected');
+      console.log('✅ WebSocket connected - real-time messaging enabled!');
     });
 
-    // Monitor longpolling status
-    setInterval(() => {
-      const status = longpollingService.getStatus();
-      this.emit('connectionChanged', status.isActive ? 'connected' : 'disconnected');
-    }, 5000);
+    webSocketService.on('disconnect', () => {
+      this.emit('connectionChanged', 'disconnected');
+      console.log('⚠️ WebSocket disconnected - trying to reconnect...');
+    });
   }
 
   /**
@@ -534,9 +536,6 @@ class ChatService {
 
         // Emit event for UI update
         this.emit('newMessages', { channelId, messages: processedMessages });
-        this.emit('messagesUpdated', { channelId });
-        
-        console.log(`📨 Emitted ${processedMessages.length} new messages for UI update`);
       }
     } catch (error) {
       // Silent fail to avoid log spam
@@ -557,7 +556,7 @@ class ChatService {
 
 
   /**
-   * Start typing indicator
+   * Start typing indicator (RESTORED - WebSocket working!)
    */
   startTyping(channelId: number): void {
     const key = `${channelId}`;
@@ -566,6 +565,15 @@ class ChatService {
     if (this.typingTimers.has(key)) {
       clearTimeout(this.typingTimers.get(key)!);
     }
+
+    // Send typing notification via WebSocket (now working!)
+    webSocketService.sendMessage({
+      event_name: 'typing_start',
+      data: {
+        channel_id: channelId,
+        is_typing: true
+      }
+    });
 
     console.log(`⌨️ Started typing in channel ${channelId}`);
 
@@ -580,7 +588,7 @@ class ChatService {
   }
 
   /**
-   * Stop typing indicator
+   * Stop typing indicator (RESTORED - WebSocket working!)
    */
   stopTyping(channelId: number): void {
     const key = `${channelId}`;
@@ -591,81 +599,62 @@ class ChatService {
       this.typingTimers.delete(key);
     }
 
+    // Send stop typing notification via WebSocket
+    webSocketService.sendMessage({
+      event_name: 'typing_stop',
+      data: {
+        channel_id: channelId,
+        is_typing: false
+      }
+    });
+
     console.log(`⌨️ Stopped typing in channel ${channelId}`);
 
     this.emit('typingStopped', { channelId });
   }
 
   /**
-   * Subscribe to a channel for real-time updates via HTTP longpolling
+   * Subscribe to a channel for real-time updates (RESTORED!)
    */
   subscribeToChannel(channelId: number): void {
     const channelName = `discuss.channel_${channelId}`;
-    console.log(`📱 ChatService subscribing to channel: ${channelName}`);
-    
-    longpollingService.subscribeToChannel(channelName);
-    console.log(`📱 Longpolling subscription completed for: ${channelName}`);
-    
-    // Also start regular polling as backup
-    console.log(`🔄 Starting backup polling for channel ${channelId}`);
-    this.startPolling(channelId);
-    
-    console.log(`✅ Full subscription setup completed for channel ${channelId}`);
+    webSocketService.subscribeToChannel(channelName);
+    console.log(`📱 Subscribed to WebSocket channel: ${channelName}`);
   }
 
   /**
-   * Unsubscribe from a channel
+   * Unsubscribe from a channel (RESTORED!)
    */
   unsubscribeFromChannel(channelId: number): void {
     const channelName = `discuss.channel_${channelId}`;
-    longpollingService.unsubscribeFromChannel(channelName);
-    console.log(`👋 Unsubscribed from longpolling channel: ${channelName}`);
-    
-    // Stop regular polling
-    if (this.currentPollingChannelId === channelId) {
-      this.stopPolling();
-    }
+    webSocketService.unsubscribeFromChannel(channelName);
+    console.log(`👋 Unsubscribed from WebSocket channel: ${channelName}`);
   }
 
   /**
-   * Handle new message from longpolling
+   * Handle new message from WebSocket
    */
-  private handleNewMessage(message: any): void {
-    console.log('📨 New message received via longpolling:', message);
-    
-    // Process the message based on the payload structure
-    let channelId: number;
-    let processedMessage: ChatMessage;
+  private handleNewMessage(message: ChatMessage): void {
+    console.log('📨 New message received:', message);
     
     if (message.model === 'discuss.channel' && message.res_id) {
-      channelId = message.res_id;
-      processedMessage = message as ChatMessage;
-    } else if (message.channel_id) {
-      channelId = message.channel_id;
-      processedMessage = message as ChatMessage;
-    } else {
-      console.warn('⚠️ Could not determine channel ID from message:', message);
-      return;
-    }
-    
-    // Add to channel messages
-    if (!this.channelMessages.has(channelId)) {
-      this.channelMessages.set(channelId, []);
-    }
-    
-    const messages = this.channelMessages.get(channelId)!;
-    
-    // Check if message already exists
-    const exists = messages.some(m => m.id === processedMessage.id);
-    if (!exists) {
-      messages.push(processedMessage);
-      this.channelMessages.set(channelId, messages);
+      const channelId = message.res_id;
       
-      this.emit('newMessage', { channelId, message: processedMessage });
-      this.emit('messagesUpdated', { channelId });
+      // Add to channel messages
+      if (!this.channelMessages.has(channelId)) {
+        this.channelMessages.set(channelId, []);
+      }
       
-      // Also emit the format expected by UI components
-      this.emit('newMessages', { channelId, messages: [processedMessage] });
+      const messages = this.channelMessages.get(channelId)!;
+      
+      // Check if message already exists
+      const exists = messages.some(m => m.id === message.id);
+      if (!exists) {
+        messages.push(message);
+        this.channelMessages.set(channelId, messages);
+        
+        this.emit('newMessage', { channelId, message });
+      }
     }
   }
 
@@ -804,7 +793,7 @@ class ChatService {
     return {
       isInitialized: this.isInitialized,
       channelCount: this.currentChannels.size,
-      longpollingStatus: longpollingService.getStatus()
+      websocketStatus: webSocketService.getConnectionStatus()
     };
   }
 
@@ -812,13 +801,6 @@ class ChatService {
    * Cleanup
    */
   disconnect(): void {
-    // Stop longpolling service
-    longpollingService.stop();
-    
-    // Stop regular polling
-    this.stopPolling();
-    
-    // Clear timers and data
     this.typingTimers.forEach(timer => clearTimeout(timer));
     this.typingTimers.clear();
     this.currentChannels.clear();

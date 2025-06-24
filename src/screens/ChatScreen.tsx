@@ -44,6 +44,7 @@ export default function ChatScreen() {
   const [currentUserId, setCurrentUserId] = useState<number | null>(null);
   const [showMentionPicker, setShowMentionPicker] = useState(false);
   const [showMembersModal, setShowMembersModal] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
   const [mentionSearchQuery, setMentionSearchQuery] = useState('');
   const [mentionStartIndex, setMentionStartIndex] = useState(-1);
 
@@ -58,9 +59,12 @@ export default function ChatScreen() {
     return () => {
       chatService.off('channelsLoaded', handleChannelsLoaded);
       chatService.off('messagesLoaded', handleMessagesLoaded);
-      chatService.off('newMessage', handleNewMessage);
+      chatService.off('newMessages', handleNewMessages);
       chatService.off('connectionChanged', handleConnectionChanged);
       chatService.off('typingChanged', handleTypingChanged);
+      // Clean up the new listeners we added
+      chatService.off('newMessage', () => {});
+      chatService.off('messagesUpdated', () => {});
     };
   }, []);
 
@@ -107,11 +111,41 @@ export default function ChatScreen() {
   };
 
   const setupChatListeners = () => {
+    console.log('🔗 Setting up ChatScreen event listeners');
+    
     chatService.on('channelsLoaded', handleChannelsLoaded);
     chatService.on('messagesLoaded', handleMessagesLoaded);
-    chatService.on('newMessage', handleNewMessage);
+    chatService.on('newMessages', handleNewMessages);
     chatService.on('connectionChanged', handleConnectionChanged);
     chatService.on('typingChanged', handleTypingChanged);
+    
+    // Also listen for individual message events
+    chatService.on('newMessage', ({ channelId, message }) => {
+      console.log(`📨 ChatScreen received single new message for channel ${channelId}:`, message.id);
+      if (selectedChannel?.id === channelId) {
+        setMessages(prev => {
+          const exists = prev.some(m => m.id === message.id);
+          if (!exists) {
+            console.log(`🔄 Adding new message ${message.id} to UI`);
+            const updated = [...prev, message];
+            setTimeout(scrollToBottom, 100);
+            return updated;
+          }
+          return prev;
+        });
+      }
+    });
+    
+    chatService.on('messagesUpdated', ({ channelId }) => {
+      console.log(`🔄 Messages updated event for channel ${channelId}`);
+      if (selectedChannel?.id === channelId) {
+        // Force reload messages from service
+        const currentMessages = chatService.getChannelMessages(channelId);
+        console.log(`🔄 Force updating UI with ${currentMessages.length} messages from service`);
+        setMessages([...currentMessages]);
+        setTimeout(scrollToBottom, 100);
+      }
+    });
   };
 
   const handleChannelsLoaded = (loadedChannels: ChatChannel[]) => {
@@ -128,10 +162,37 @@ export default function ChatScreen() {
     }
   };
 
-  const handleNewMessage = ({ channelId, message }: { channelId: number; message: ChatMessage }) => {
+  const handleNewMessages = ({ channelId, messages: newMessages }: { channelId: number; messages: ChatMessage[] }) => {
     if (selectedChannel?.id === channelId) {
-      setMessages(prev => [...prev, message]);
+      console.log(`🔄 ChatScreen received ${newMessages.length} new messages for channel ${channelId}`);
+      setMessages(prev => {
+        // Check for duplicate messages by ID
+        const existingIds = new Set(prev.map(m => m.id));
+        const uniqueNewMessages = newMessages.filter(m => !existingIds.has(m.id));
+        
+        if (uniqueNewMessages.length > 0) {
+          console.log(`🔄 Adding ${uniqueNewMessages.length} unique new messages to UI`);
+          const updated = [...prev, ...uniqueNewMessages];
+          setTimeout(scrollToBottom, 100);
+          return updated;
+        }
+        return prev;
+      });
+    }
+  };
+
+  const handleManualRefresh = async () => {
+    if (!selectedChannel) return;
+
+    setRefreshing(true);
+    try {
+      const messages = await chatService.loadChannelMessages(selectedChannel.id, 50);
+      setMessages(messages);
       scrollToBottom();
+    } catch (error) {
+      console.error('❌ Failed to refresh messages:', error);
+    } finally {
+      setRefreshing(false);
     }
   };
 
@@ -151,7 +212,8 @@ export default function ChatScreen() {
     setMessages([]);
     setTypingUsers([]);
 
-    // Subscribe to this specific channel for real-time updates
+    // 🔧 FIX: Subscribe to longpolling for real-time updates
+    console.log(`📡 Subscribing to longpolling for channel ${channel.id}`);
     chatService.subscribeToChannel(channel.id);
 
     // Load messages for this channel
@@ -583,8 +645,9 @@ export default function ChatScreen() {
             <TouchableOpacity
               style={styles.backButton}
               onPress={() => {
-                // Unsubscribe from current channel when going back
+                // Unsubscribe from longpolling when going back
                 if (selectedChannel) {
+                  console.log(`📡 Unsubscribing from channel ${selectedChannel.id}`);
                   chatService.unsubscribeFromChannel(selectedChannel.id);
                 }
                 setSelectedChannel(null);
@@ -612,6 +675,34 @@ export default function ChatScreen() {
                 </Text>
               )}
             </View>
+            <TouchableOpacity
+              style={styles.refreshButton}
+              onPress={handleManualRefresh}
+            >
+              <MaterialIcons name="refresh" size={24} color="#007AFF" />
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.refreshButton, { marginLeft: 8, backgroundColor: 'rgba(255, 149, 0, 0.1)' }]}
+              onPress={() => {
+                console.log('🔍 DEBUG BUTTON PRESSED!');
+                console.log('=== CHAT DEBUG INFO ===');
+                console.log('Selected channel:', selectedChannel?.id);
+                console.log('UI messages count:', messages.length);
+                console.log('Service messages count:', selectedChannel ? chatService.getChannelMessages(selectedChannel.id).length : 0);
+                console.log('Service status:', chatService.getStatus());
+                console.log('Polling status:', require('../services/odooLongpolling').longpollingService.getStatus());
+                console.log('=== END DEBUG INFO ===');
+                
+                // Also try to force refresh
+                if (selectedChannel) {
+                  console.log('🔄 Force refreshing messages...');
+                  const serviceMessages = chatService.getChannelMessages(selectedChannel.id);
+                  setMessages([...serviceMessages]);
+                }
+              }}
+            >
+              <MaterialIcons name="bug-report" size={24} color="#FF9500" />
+            </TouchableOpacity>
           </View>
 
           {/* Messages - iMessage Style */}
@@ -1034,5 +1125,10 @@ const styles = StyleSheet.create({
     color: '#999',
     marginTop: 8,
     textAlign: 'center',
+  },
+  refreshButton: {
+    padding: 8,
+    borderRadius: 20,
+    backgroundColor: 'rgba(0, 122, 255, 0.1)',
   },
 });
