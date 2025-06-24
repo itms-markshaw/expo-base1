@@ -61,6 +61,7 @@ export default function AppNavigationProvider({ children }: AppNavigationProvide
       'Calendar': 'MainTabs',
       'More': 'MainTabs',
       'Activities': 'Activities',
+      'Chat': 'Chat',
       'Messages': 'Messages',
       'Projects': 'Projects',
       'Attachments': 'Attachments',

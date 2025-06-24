@@ -48,6 +48,14 @@ export default function MoreTabScreen() {
       screenName: 'CRM Leads',
     },
     {
+      id: 'chat',
+      name: 'Chat',
+      description: 'Real-time messaging and communication',
+      icon: 'chat',
+      color: '#00C851',
+      screenName: 'Chat',
+    },
+    {
       id: 'messages',
       name: 'Messages',
       description: 'Email and communication history',

@@ -23,6 +23,7 @@ import MoreTabScreen from './src/screens/MoreTabScreen';
 import ContactsScreen from './src/screens/ContactsScreen';
 import ActivitiesScreen from './src/screens/ActivitiesScreen';
 import CalendarScreen from './src/screens/CalendarScreen';
+import ChatScreen from './src/screens/ChatScreen';
 import SyncScreen from './src/screens/SyncScreen';
 import CRMLeadsScreen from './src/screens/CRMLeadsScreen';
 import SalesOrderScreen from './src/screens/SalesOrderScreen';
@@ -158,6 +159,11 @@ function AllScreensStack() {
         name="Activities"
         component={withBottomNav(ActivitiesScreen, 'Activities')}
         options={{ title: 'Activities' }}
+      />
+      <Stack.Screen
+        name="Chat"
+        component={withBottomNav(ChatScreen, 'Chat')}
+        options={{ title: 'Chat' }}
       />
     </Stack.Navigator>
   );

@@ -82,6 +82,8 @@ export default function CustomBottomNavigation({ currentScreen }: CustomBottomNa
       // All other screens map to 'more'
       'Activities': 'more',
       'ActivitiesScreen': 'more',
+      'Chat': 'more',
+      'ChatScreen': 'more',
       'Messages': 'more',
       'MessagesScreen': 'more',
       'Attachments': 'more',
