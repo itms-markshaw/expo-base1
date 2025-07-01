@@ -2,7 +2,7 @@
  * Sync Screen - Actually functional sync interface
  */
 
-import React from 'react';
+import React, { useState, useRef, useMemo, useCallback } from 'react';
 import {
   View,
   Text,
@@ -14,17 +14,34 @@ import {
   Alert,
 } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
+import BottomSheet, { BottomSheetView, BottomSheetScrollView } from '@gorhom/bottom-sheet';
 import { useAppStore } from '../store';
+import { syncService } from '../services/sync';
+import { TimePeriod } from '../types';
 
 export default function SyncScreen() {
   const {
     availableModels,
     selectedModels,
     syncStatus,
+    syncSettings,
     toggleModel,
     startSync,
     cancelSync,
+    updateSyncSettings,
+    updateModelTimePeriod,
   } = useAppStore();
+
+  const [selectedModelForTimePeriod, setSelectedModelForTimePeriod] = useState<string | null>(null);
+
+  // Bottom sheet refs and snap points
+  const bottomSheetRef = useRef<BottomSheet>(null);
+  const snapPoints = useMemo(() => ['50%', '90%'], []); // Start at 50% as requested
+
+  const timePeriodOptions = syncService.getTimePeriodOptions();
+
+  // Filter out mail.thread from available models
+  const filteredModels = availableModels.filter(model => model.name !== 'mail.thread');
 
   const handleStartSync = async () => {
     if (selectedModels.length === 0) {
@@ -49,6 +66,38 @@ export default function SyncScreen() {
         { text: 'Yes', onPress: () => cancelSync() },
       ]
     );
+  };
+
+  const handleGlobalTimePeriodChange = (timePeriod: TimePeriod) => {
+    updateSyncSettings({ globalTimePeriod: timePeriod });
+  };
+
+  // Bottom sheet callbacks
+  const handleSheetChanges = useCallback((index: number) => {
+    if (index === -1) {
+      setSelectedModelForTimePeriod(null);
+    }
+  }, []);
+
+  const handleModelTimePeriodPress = useCallback((modelName: string) => {
+    setSelectedModelForTimePeriod(modelName);
+    bottomSheetRef.current?.snapToIndex(0); // Open to first snap point (30%)
+  }, []);
+
+  const handleModelTimePeriodSelect = useCallback((timePeriod: TimePeriod) => {
+    if (selectedModelForTimePeriod) {
+      updateModelTimePeriod(selectedModelForTimePeriod, timePeriod);
+    }
+    bottomSheetRef.current?.close();
+  }, [selectedModelForTimePeriod, updateModelTimePeriod]);
+
+  const getEffectiveTimePeriod = (modelName: string): TimePeriod => {
+    return syncSettings.modelOverrides[modelName] || syncSettings.globalTimePeriod;
+  };
+
+  const getTimePeriodLabel = (timePeriod: TimePeriod): string => {
+    const option = timePeriodOptions.find(opt => opt.value === timePeriod);
+    return option?.label || timePeriod;
   };
 
   return (
@@ -99,31 +148,82 @@ export default function SyncScreen() {
           </View>
         ) : null}
 
+        {/* Global Time Period */}
+        <View style={styles.timePeriodContainer}>
+          <Text style={styles.sectionTitle}>Sync Time Period</Text>
+          <Text style={styles.sectionSubtitle}>
+            Choose how far back to sync records (master data like contacts always syncs all)
+          </Text>
+
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.timePeriodScroll}>
+            {timePeriodOptions.map((option) => (
+              <TouchableOpacity
+                key={option.value}
+                style={[
+                  styles.timePeriodChip,
+                  syncSettings.globalTimePeriod === option.value && styles.timePeriodChipSelected
+                ]}
+                onPress={() => handleGlobalTimePeriodChange(option.value)}
+                disabled={syncStatus.isRunning}
+              >
+                <Text style={[
+                  styles.timePeriodChipText,
+                  syncSettings.globalTimePeriod === option.value && styles.timePeriodChipTextSelected
+                ]}>
+                  {option.label}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </ScrollView>
+        </View>
+
         {/* Model Selection */}
         <View style={styles.modelsContainer}>
           <Text style={styles.sectionTitle}>Select Models to Sync</Text>
-          
-          {availableModels.map((model) => (
-            <View key={model.name} style={styles.modelCard}>
-              <View style={styles.modelInfo}>
-                <MaterialIcons 
-                  name={model.name === 'res.partner' ? 'contacts' : 'people'} 
-                  size={24} 
-                  color="#007AFF" 
-                />
-                <View style={styles.modelText}>
-                  <Text style={styles.modelName}>{model.displayName}</Text>
-                  <Text style={styles.modelDescription}>{model.description}</Text>
+
+          {filteredModels.map((model) => {
+            const effectiveTimePeriod = getEffectiveTimePeriod(model.name);
+            const isOverridden = syncSettings.modelOverrides[model.name] !== undefined;
+
+            return (
+              <View key={model.name} style={styles.modelCard}>
+                <View style={styles.modelInfo}>
+                  <MaterialIcons
+                    name={model.name === 'res.partner' ? 'contacts' : 'people'}
+                    size={24}
+                    color="#007AFF"
+                  />
+                  <View style={styles.modelText}>
+                    <Text style={styles.modelName}>{model.displayName}</Text>
+                    <Text style={styles.modelDescription}>{model.description}</Text>
+
+                    {/* Time Period Info */}
+                    <TouchableOpacity
+                      style={styles.timePeriodInfo}
+                      onPress={() => handleModelTimePeriodPress(model.name)}
+                      disabled={syncStatus.isRunning}
+                    >
+                      <MaterialIcons name="schedule" size={14} color="#666" />
+                      <Text style={[
+                        styles.timePeriodInfoText,
+                        isOverridden && styles.timePeriodInfoTextOverridden
+                      ]}>
+                        {getTimePeriodLabel(effectiveTimePeriod)}
+                        {isOverridden && ' (custom)'}
+                      </Text>
+                      <MaterialIcons name="edit" size={14} color="#666" />
+                    </TouchableOpacity>
+                  </View>
                 </View>
+
+                <Switch
+                  value={selectedModels.includes(model.name)}
+                  onValueChange={() => toggleModel(model.name)}
+                  disabled={syncStatus.isRunning}
+                />
               </View>
-              
-              <Switch
-                value={selectedModels.includes(model.name)}
-                onValueChange={() => toggleModel(model.name)}
-                disabled={syncStatus.isRunning}
-              />
-            </View>
-          ))}
+            );
+          })}
         </View>
 
         {/* Sync Button */}
@@ -159,7 +259,53 @@ export default function SyncScreen() {
             ))}
           </View>
         ) : null}
+
       </ScrollView>
+
+      {/* Bottom Sheet - Outside ScrollView for proper overlay */}
+      <BottomSheet
+        ref={bottomSheetRef}
+        index={-1} // Start closed
+        snapPoints={snapPoints}
+        onChange={handleSheetChanges}
+        enablePanDownToClose={true}
+        backgroundStyle={styles.bottomSheetBackground}
+        handleIndicatorStyle={styles.bottomSheetHandle}
+      >
+        <BottomSheetView style={styles.bottomSheetContainer}>
+          {/* Header */}
+          <View style={styles.bottomSheetHeader}>
+            <Text style={styles.bottomSheetTitle}>
+              Select Time Period for {selectedModelForTimePeriod ?
+                filteredModels.find(m => m.name === selectedModelForTimePeriod)?.displayName : ''
+              }
+            </Text>
+            <TouchableOpacity
+              onPress={() => bottomSheetRef.current?.close()}
+              style={styles.bottomSheetCloseButton}
+            >
+              <MaterialIcons name="close" size={24} color="#666" />
+            </TouchableOpacity>
+          </View>
+
+          {/* Content */}
+          <BottomSheetScrollView style={styles.bottomSheetContent}>
+            {timePeriodOptions.map((option) => (
+              <TouchableOpacity
+                key={option.value}
+                style={styles.bottomSheetOption}
+                onPress={() => handleModelTimePeriodSelect(option.value)}
+              >
+                <View style={styles.bottomSheetOptionContent}>
+                  <Text style={styles.bottomSheetOptionTitle}>{option.label}</Text>
+                  <Text style={styles.bottomSheetOptionDescription}>{option.description}</Text>
+                </View>
+                <MaterialIcons name="chevron-right" size={24} color="#C7C7CC" />
+              </TouchableOpacity>
+            ))}
+          </BottomSheetScrollView>
+        </BottomSheetView>
+      </BottomSheet>
     </SafeAreaView>
   );
 }
@@ -297,6 +443,55 @@ const styles = StyleSheet.create({
   modelDescription: {
     fontSize: 14,
     color: '#666',
+    marginBottom: 8,
+  },
+  timePeriodContainer: {
+    paddingHorizontal: 20,
+    marginBottom: 24,
+  },
+  sectionSubtitle: {
+    fontSize: 14,
+    color: '#666',
+    marginBottom: 16,
+  },
+  timePeriodScroll: {
+    flexDirection: 'row',
+  },
+  timePeriodChip: {
+    backgroundColor: '#F0F0F0',
+    borderRadius: 20,
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    marginRight: 12,
+    borderWidth: 1,
+    borderColor: '#E0E0E0',
+  },
+  timePeriodChipSelected: {
+    backgroundColor: '#007AFF',
+    borderColor: '#007AFF',
+  },
+  timePeriodChipText: {
+    fontSize: 14,
+    fontWeight: '500',
+    color: '#666',
+  },
+  timePeriodChipTextSelected: {
+    color: '#FFF',
+  },
+  timePeriodInfo: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 4,
+  },
+  timePeriodInfoText: {
+    fontSize: 12,
+    color: '#666',
+    marginLeft: 4,
+    marginRight: 4,
+  },
+  timePeriodInfoTextOverridden: {
+    color: '#007AFF',
+    fontWeight: '500',
   },
   buttonContainer: {
     paddingHorizontal: 20,
@@ -342,5 +537,59 @@ const styles = StyleSheet.create({
     color: '#D32F2F',
     marginLeft: 8,
     flex: 1,
+  },
+  bottomSheetBackground: {
+    backgroundColor: '#FFF',
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+  },
+  bottomSheetHandle: {
+    backgroundColor: '#C7C7CC',
+    width: 40,
+  },
+  bottomSheetContainer: {
+    flex: 1,
+  },
+  bottomSheetHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 20,
+    paddingVertical: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: '#E0E0E0',
+  },
+  bottomSheetTitle: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#1A1A1A',
+    flex: 1,
+  },
+  bottomSheetCloseButton: {
+    padding: 4,
+  },
+  bottomSheetContent: {
+    flex: 1,
+  },
+  bottomSheetOption: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 20,
+    paddingVertical: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: '#F0F0F0',
+  },
+  bottomSheetOptionContent: {
+    flex: 1,
+  },
+  bottomSheetOptionTitle: {
+    fontSize: 16,
+    fontWeight: '500',
+    color: '#1A1A1A',
+    marginBottom: 4,
+  },
+  bottomSheetOptionDescription: {
+    fontSize: 14,
+    color: '#666',
   },
 });

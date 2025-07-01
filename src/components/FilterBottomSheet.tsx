@@ -3,16 +3,15 @@
  * Reusable filter interface for lists
  */
 
-import React from 'react';
+import React, { useRef, useMemo, useCallback, useEffect } from 'react';
 import {
   View,
   Text,
   StyleSheet,
   TouchableOpacity,
-  ScrollView,
 } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
-import BottomSheet from './BottomSheet';
+import BottomSheet, { BottomSheetView, BottomSheetScrollView } from '@gorhom/bottom-sheet';
 
 interface FilterOption {
   id: string;
@@ -51,116 +50,184 @@ export default function FilterBottomSheet({
 
   console.log('FilterBottomSheet render:', { visible, title, filtersCount: filters.length });
 
-  const handleFilterSelect = (filterId: string) => {
-    onFilterSelect(filterId);
-    onClose();
-  };
+  // Bottom sheet refs and snap points
+  const bottomSheetRef = useRef<BottomSheet>(null);
+  const snapPoints = useMemo(() => ['50%', '80%'], []); // Start at 50%, expand to 80%
 
-  const handleSortSelect = (sortId: string) => {
+  // Handle visibility changes
+  useEffect(() => {
+    if (visible) {
+      bottomSheetRef.current?.snapToIndex(0); // Open to first snap point (50%)
+    } else {
+      bottomSheetRef.current?.close();
+    }
+  }, [visible]);
+
+  // Bottom sheet callbacks
+  const handleSheetChanges = useCallback((index: number) => {
+    if (index === -1) {
+      onClose();
+    }
+  }, [onClose]);
+
+  const handleFilterSelect = useCallback((filterId: string) => {
+    onFilterSelect(filterId);
+    bottomSheetRef.current?.close();
+  }, [onFilterSelect]);
+
+  const handleSortSelect = useCallback((sortId: string) => {
     if (onSortSelect) {
       onSortSelect(sortId);
     }
-    onClose();
-  };
+    bottomSheetRef.current?.close();
+  }, [onSortSelect]);
 
   return (
     <BottomSheet
-      visible={visible}
-      onClose={onClose}
-      title={title}
-      height={60}
+      ref={bottomSheetRef}
+      index={-1} // Start closed
+      snapPoints={snapPoints}
+      onChange={handleSheetChanges}
+      enablePanDownToClose={true}
+      backgroundStyle={styles.bottomSheetBackground}
+      handleIndicatorStyle={styles.bottomSheetHandle}
     >
-      <View style={styles.container}>
-        {/* Filters Section */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Filter by</Text>
-          <View style={styles.optionsGrid}>
-            {filters.map((filter) => (
-              <TouchableOpacity
-                key={filter.id}
-                style={[
-                  styles.filterOption,
-                  selectedFilter === filter.id && styles.filterOptionActive
-                ]}
-                onPress={() => handleFilterSelect(filter.id)}
-              >
-                <View style={styles.filterOptionContent}>
-                  <MaterialIcons
-                    name={filter.icon as any}
-                    size={20}
-                    color={selectedFilter === filter.id ? '#007AFF' : '#666'}
-                  />
-                  <Text style={[
-                    styles.filterOptionText,
-                    selectedFilter === filter.id && styles.filterOptionTextActive
-                  ]}>
-                    {filter.name}
-                  </Text>
-                  {filter.count > 0 && (
-                    <View style={[
-                      styles.filterBadge,
-                      selectedFilter === filter.id && styles.filterBadgeActive
-                    ]}>
-                      <Text style={[
-                        styles.filterBadgeText,
-                        selectedFilter === filter.id && styles.filterBadgeTextActive
-                      ]}>
-                        {filter.count}
-                      </Text>
-                    </View>
-                  )}
-                </View>
-                {selectedFilter === filter.id && (
-                  <MaterialIcons name="check" size={16} color="#007AFF" />
-                )}
-              </TouchableOpacity>
-            ))}
-          </View>
+      <BottomSheetView style={styles.bottomSheetContainer}>
+        {/* Header */}
+        <View style={styles.header}>
+          <Text style={styles.title}>{title}</Text>
+          <TouchableOpacity
+            onPress={() => bottomSheetRef.current?.close()}
+            style={styles.closeButton}
+          >
+            <MaterialIcons name="close" size={24} color="#666" />
+          </TouchableOpacity>
         </View>
 
-        {/* Sort Section */}
-        {sortOptions && sortOptions.length > 0 && (
+        {/* Content */}
+        <BottomSheetScrollView style={styles.content}>
+          {/* Filters Section */}
           <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Sort by</Text>
+            <Text style={styles.sectionTitle}>Filter by</Text>
             <View style={styles.optionsGrid}>
-              {sortOptions.map((sort) => (
+              {filters.map((filter) => (
                 <TouchableOpacity
-                  key={sort.id}
+                  key={filter.id}
                   style={[
-                    styles.sortOption,
-                    selectedSort === sort.id && styles.sortOptionActive
+                    styles.filterOption,
+                    selectedFilter === filter.id && styles.filterOptionActive
                   ]}
-                  onPress={() => handleSortSelect(sort.id)}
+                  onPress={() => handleFilterSelect(filter.id)}
                 >
-                  <View style={styles.sortOptionContent}>
+                  <View style={styles.filterOptionContent}>
                     <MaterialIcons
-                      name={sort.icon as any}
+                      name={filter.icon as any}
                       size={20}
-                      color={selectedSort === sort.id ? '#007AFF' : '#666'}
+                      color={selectedFilter === filter.id ? '#007AFF' : '#666'}
                     />
                     <Text style={[
-                      styles.sortOptionText,
-                      selectedSort === sort.id && styles.sortOptionTextActive
+                      styles.filterOptionText,
+                      selectedFilter === filter.id && styles.filterOptionTextActive
                     ]}>
-                      {sort.name}
+                      {filter.name}
                     </Text>
+                    {filter.count > 0 && (
+                      <View style={[
+                        styles.filterBadge,
+                        selectedFilter === filter.id && styles.filterBadgeActive
+                      ]}>
+                        <Text style={[
+                          styles.filterBadgeText,
+                          selectedFilter === filter.id && styles.filterBadgeTextActive
+                        ]}>
+                          {filter.count}
+                        </Text>
+                      </View>
+                    )}
                   </View>
-                  {selectedSort === sort.id && (
+                  {selectedFilter === filter.id && (
                     <MaterialIcons name="check" size={16} color="#007AFF" />
                   )}
                 </TouchableOpacity>
               ))}
             </View>
           </View>
-        )}
-      </View>
+
+          {/* Sort Section */}
+          {sortOptions && sortOptions.length > 0 && (
+            <View style={styles.section}>
+              <Text style={styles.sectionTitle}>Sort by</Text>
+              <View style={styles.optionsGrid}>
+                {sortOptions.map((sort) => (
+                  <TouchableOpacity
+                    key={sort.id}
+                    style={[
+                      styles.sortOption,
+                      selectedSort === sort.id && styles.sortOptionActive
+                    ]}
+                    onPress={() => handleSortSelect(sort.id)}
+                  >
+                    <View style={styles.sortOptionContent}>
+                      <MaterialIcons
+                        name={sort.icon as any}
+                        size={20}
+                        color={selectedSort === sort.id ? '#007AFF' : '#666'}
+                      />
+                      <Text style={[
+                        styles.sortOptionText,
+                        selectedSort === sort.id && styles.sortOptionTextActive
+                      ]}>
+                        {sort.name}
+                      </Text>
+                    </View>
+                    {selectedSort === sort.id && (
+                      <MaterialIcons name="check" size={16} color="#007AFF" />
+                    )}
+                  </TouchableOpacity>
+                ))}
+              </View>
+            </View>
+          )}
+        </BottomSheetScrollView>
+      </BottomSheetView>
     </BottomSheet>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
+  bottomSheetBackground: {
+    backgroundColor: '#FFF',
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+  },
+  bottomSheetHandle: {
+    backgroundColor: '#C7C7CC',
+    width: 40,
+  },
+  bottomSheetContainer: {
     flex: 1,
+  },
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 20,
+    paddingVertical: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: '#E0E0E0',
+  },
+  title: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#1A1A1A',
+    flex: 1,
+  },
+  closeButton: {
+    padding: 4,
+  },
+  content: {
+    flex: 1,
+    paddingHorizontal: 20,
   },
   section: {
     marginBottom: 20,

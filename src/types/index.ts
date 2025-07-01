@@ -13,6 +13,7 @@ export interface OdooModel {
   description: string;
   enabled: boolean;
   recordCount?: number;
+  syncType?: 'all' | 'time_based'; // Whether to sync all records or use time filtering
 }
 
 export interface SyncStatus {
@@ -35,6 +36,20 @@ export interface AuthResult {
   success: boolean;
   user?: User;
   error?: string;
+}
+
+export type TimePeriod = 'all' | '1day' | '3days' | '1week' | '2weeks' | '1month' | '3months' | '6months';
+
+export interface SyncSettings {
+  globalTimePeriod: TimePeriod;
+  modelOverrides: { [modelName: string]: TimePeriod };
+}
+
+export interface TimePeriodOption {
+  value: TimePeriod;
+  label: string;
+  description: string;
+  days?: number; // Number of days to go back, undefined for 'all'
 }
 
 

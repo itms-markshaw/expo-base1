@@ -460,6 +460,37 @@ class DatabaseService {
     `);
 
     console.log('✅ Database tables created');
+
+    // Run migrations for existing tables
+    await this.runMigrations();
+  }
+
+  /**
+   * Run database migrations for schema updates
+   */
+  private async runMigrations(): Promise<void> {
+    if (!this.db) throw new Error('Database not initialized');
+
+    console.log('🔄 Running database migrations...');
+
+    try {
+      // Migration 1: Add name column to messages table if it doesn't exist
+      const tableInfo = await this.db.getAllAsync(`PRAGMA table_info(messages)`);
+      const hasNameColumn = tableInfo.some((column: any) => column.name === 'name');
+
+      if (!hasNameColumn) {
+        await this.db.execAsync(`
+          ALTER TABLE messages ADD COLUMN name TEXT DEFAULT '';
+        `);
+        console.log('✅ Added name column to messages table');
+      } else {
+        console.log('📋 Messages table already has name column');
+      }
+    } catch (error: any) {
+      console.warn('⚠️ Migration warning for messages.name:', error.message);
+    }
+
+    console.log('✅ Database migrations completed');
   }
 
   /**
@@ -502,7 +533,12 @@ class DatabaseService {
 
     // Add name field only for tables that have it (activities table doesn't have name column)
     if (tableName !== 'activities') {
-      filteredRecord.name = record.name || '';
+      // For messages, use subject as name since mail.message doesn't have a name field
+      if (tableName === 'messages') {
+        filteredRecord.name = record.subject || record.name || 'Message';
+      } else {
+        filteredRecord.name = record.name || '';
+      }
     }
 
     // Add table-specific fields
@@ -600,8 +636,7 @@ class DatabaseService {
       filteredRecord.activity_type_name = record.activity_type_id && Array.isArray(record.activity_type_id) ? record.activity_type_id[1] : null;
       filteredRecord.state = record.state || null;
     } else if (tableName === 'messages') {
-      // Messages specific fields
-      filteredRecord.name = record.subject || record.name || 'Message';
+      // Messages specific fields (name already set above)
       filteredRecord.subject = record.subject || null;
       filteredRecord.body = record.body || null;
       filteredRecord.date = record.date || null;

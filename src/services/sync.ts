@@ -5,7 +5,7 @@
 
 import { authService } from './auth';
 import { databaseService } from './database';
-import { OdooModel, SyncStatus } from '../types';
+import { OdooModel, SyncStatus, TimePeriod, TimePeriodOption, SyncSettings } from '../types';
 
 class SyncService {
   private isRunning = false;
@@ -19,6 +19,18 @@ class SyncService {
 
   private listeners: ((status: SyncStatus) => void)[] = [];
   private fieldCache: { [modelName: string]: string[] } = {};
+
+  // Default sync settings
+  private syncSettings: SyncSettings = {
+    globalTimePeriod: '1month',
+    modelOverrides: {
+      'res.partner': 'all',      // Contacts - sync all
+      'hr.employee': 'all',      // Employees - sync all
+      'res.users': 'all',        // Users - sync all
+      'product.product': 'all',  // Products - sync all
+      'product.template': 'all', // Product templates - sync all
+    }
+  };
 
   /**
    * Add status listener
@@ -49,6 +61,36 @@ class SyncService {
   }
 
   /**
+   * Get available time period options
+   */
+  getTimePeriodOptions(): TimePeriodOption[] {
+    return [
+      { value: 'all', label: 'All Records', description: 'Sync all available records' },
+      { value: '1day', label: '1 Day', description: 'Records from last 24 hours', days: 1 },
+      { value: '3days', label: '3 Days', description: 'Records from last 3 days', days: 3 },
+      { value: '1week', label: '1 Week', description: 'Records from last 7 days', days: 7 },
+      { value: '2weeks', label: '2 Weeks', description: 'Records from last 14 days', days: 14 },
+      { value: '1month', label: '1 Month', description: 'Records from last 30 days', days: 30 },
+      { value: '3months', label: '3 Months', description: 'Records from last 90 days', days: 90 },
+      { value: '6months', label: '6 Months', description: 'Records from last 180 days', days: 180 },
+    ];
+  }
+
+  /**
+   * Get current sync settings
+   */
+  getSyncSettings(): SyncSettings {
+    return { ...this.syncSettings };
+  }
+
+  /**
+   * Update sync settings
+   */
+  updateSyncSettings(settings: Partial<SyncSettings>): void {
+    this.syncSettings = { ...this.syncSettings, ...settings };
+  }
+
+  /**
    * Get available models to sync
    */
   getAvailableModels(): OdooModel[] {
@@ -58,30 +100,35 @@ class SyncService {
         displayName: 'Contacts',
         description: 'Customers, vendors, and companies',
         enabled: true,
+        syncType: 'all', // Always sync all contacts
       },
       {
         name: 'sale.order',
         displayName: 'Sales Orders',
         description: 'Sales orders and quotations',
         enabled: true,
+        syncType: 'time_based', // Use time filtering for sales orders
       },
       {
         name: 'crm.lead',
         displayName: 'CRM Leads',
         description: 'Sales leads and opportunities',
         enabled: true,
+        syncType: 'time_based', // Use time filtering for leads
       },
       {
         name: 'hr.employee',
         displayName: 'Employees',
         description: 'Company employees and HR data',
         enabled: true,
+        syncType: 'all', // Always sync all employees
       },
       {
         name: 'mail.activity',
         displayName: 'Activities',
         description: 'Tasks, reminders, and activities',
         enabled: true,
+        syncType: 'time_based', // Use time filtering for activities
       },
       {
         name: 'mail.message',
@@ -89,6 +136,7 @@ class SyncService {
         description: 'Chatter messages and communications',
         enabled: true,
         priority: 1, // High priority for chat
+        syncType: 'time_based', // Use time filtering for messages
       },
       {
         name: 'discuss.channel',
@@ -96,6 +144,7 @@ class SyncService {
         description: 'Chat channels and conversations',
         enabled: true,
         priority: 1, // High priority for chat
+        syncType: 'all', // Sync all channels
       },
 
       {
@@ -255,8 +304,11 @@ class SyncService {
       let totalRecords = 0;
       for (const modelName of selectedModels) {
         try {
-          const count = await client.searchCount(modelName);
-          totalRecords += Math.min(count, 1000); // Limit to 1000 records per model
+          // Build domain for counting (respects time period settings)
+          const domain = this.buildDomainForModel(modelName);
+          const count = await client.searchCount(modelName, domain);
+          const limit = this.getLimitForModel(modelName);
+          totalRecords += Math.min(count, limit); // Use dynamic limit based on model type
         } catch (error) {
           console.warn(`⚠️ Could not count records for ${modelName}:`, error.message);
         }
@@ -336,8 +388,15 @@ class SyncService {
       // Get fields to sync using auto-detection
       const fields = await this.getFieldsForModel(modelName);
 
-      // Fetch records (limit to 1000 for now)
-      const records = await client.searchRead(modelName, [], fields, { limit: 1000 });
+      // Build domain based on time period settings
+      const domain = this.buildDomainForModel(modelName);
+
+      // Fetch records with time filtering and smart limits
+      const limit = this.getLimitForModel(modelName);
+      const records = await client.searchRead(modelName, domain, fields, {
+        limit,
+        order: 'write_date desc' // Get most recent records first
+      });
 
       if (records.length === 0) {
         console.log(`📭 No records found for ${modelName}`);
@@ -540,8 +599,14 @@ class SyncService {
    * Get fallback fields when auto-detection fails
    */
   private getFallbackFields(modelName: string): string[] {
-    // Safe fallback fields that exist in most models
-    return ['name', 'create_date', 'write_date'];
+    // Model-specific fallback fields
+    const fallbackMap: { [key: string]: string[] } = {
+      'mail.message': ['subject', 'body', 'date', 'author_id', 'create_date', 'write_date'],
+      'mail.activity': ['summary', 'note', 'date_deadline', 'user_id', 'res_model', 'res_id', 'create_date', 'write_date'],
+    };
+
+    // Return model-specific fallback or safe default
+    return fallbackMap[modelName] || ['name', 'create_date', 'write_date'];
   }
 
   /**
@@ -630,6 +695,59 @@ class SyncService {
     } catch (error) {
       return true;
     }
+  }
+
+  /**
+   * Build domain filter for model based on time period settings
+   */
+  private buildDomainForModel(modelName: string): any[] {
+    // Get time period for this model (override or global)
+    const timePeriod = this.syncSettings.modelOverrides[modelName] || this.syncSettings.globalTimePeriod;
+
+    // If 'all', return empty domain (no filtering)
+    if (timePeriod === 'all') {
+      return [];
+    }
+
+    // Get days to go back
+    const timePeriodOption = this.getTimePeriodOptions().find(opt => opt.value === timePeriod);
+    if (!timePeriodOption?.days) {
+      return [];
+    }
+
+    // Calculate date threshold
+    const daysAgo = new Date();
+    daysAgo.setDate(daysAgo.getDate() - timePeriodOption.days);
+    const dateThreshold = daysAgo.toISOString().split('T')[0] + ' 00:00:00';
+
+    // Build domain based on available date fields
+    // Try write_date first (most common), then create_date, then date_order, etc.
+    const dateFields = ['write_date', 'create_date', 'date_order', 'date', 'invoice_date'];
+
+    for (const dateField of dateFields) {
+      // We'll use write_date as the most universal field
+      if (dateField === 'write_date') {
+        return [[dateField, '>=', dateThreshold]];
+      }
+    }
+
+    // Fallback to write_date
+    return [['write_date', '>=', dateThreshold]];
+  }
+
+  /**
+   * Get record limit for model based on sync type
+   */
+  private getLimitForModel(modelName: string): number {
+    const model = this.getAvailableModels().find(m => m.name === modelName);
+
+    // Models that sync 'all' get higher limits
+    if (model?.syncType === 'all') {
+      return 5000; // Higher limit for master data
+    }
+
+    // Time-based models get reasonable limits
+    return 1000;
   }
 
   /**

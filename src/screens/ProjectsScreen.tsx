@@ -18,6 +18,7 @@ import {
 import { MaterialIcons } from '@expo/vector-icons';
 import { authService } from '../services/auth';
 import { useAppNavigation } from '../components/AppNavigationProvider';
+import FilterBottomSheet from '../components/FilterBottomSheet';
 
 interface Project {
   id: number;
@@ -40,6 +41,7 @@ export default function ProjectsScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [filter, setFilter] = useState<'all' | 'active' | 'open' | 'closed' | 'draft'>('all');
+  const [showFilterSheet, setShowFilterSheet] = useState(false);
 
   const { showNavigationDrawer, showUniversalSearch } = useAppNavigation();
 
@@ -246,47 +248,24 @@ export default function ProjectsScreen() {
         </View>
       </View>
 
-      {/* Filter Tabs */}
-      <ScrollView 
-        horizontal 
-        showsHorizontalScrollIndicator={false}
-        style={styles.filterContainer}
-        contentContainerStyle={styles.filterContent}
-      >
-        {filters.map((filterItem) => (
-          <TouchableOpacity
-            key={filterItem.id}
-            style={[
-              styles.filterTab,
-              filter === filterItem.id && styles.filterTabActive
-            ]}
-            onPress={() => setFilter(filterItem.id as any)}
-          >
-            <MaterialIcons
-              name={filterItem.icon as any}
-              size={16}
-              color={filter === filterItem.id ? '#FFF' : '#666'}
-            />
-            <Text style={[
-              styles.filterTabText,
-              filter === filterItem.id && styles.filterTabTextActive
-            ]}>
-              {filterItem.name}
-            </Text>
-            <View style={[
-              styles.filterBadge,
-              filter === filterItem.id && styles.filterBadgeActive
-            ]}>
-              <Text style={[
-                styles.filterBadgeText,
-                filter === filterItem.id && styles.filterBadgeTextActive
-              ]}>
-                {filterItem.count}
-              </Text>
-            </View>
-          </TouchableOpacity>
-        ))}
-      </ScrollView>
+      {/* Compact Header */}
+      <View style={styles.compactHeader}>
+        <View style={styles.headerLeft}>
+          <Text style={styles.headerTitle}>Projects</Text>
+          <Text style={styles.headerSubtitle}>
+            {filter === 'all' ? 'All projects' :
+             filter === 'active' ? 'Active projects' :
+             filter === 'inactive' ? 'Inactive projects' :
+             'Recent projects'} • {filteredProjects.length}
+          </Text>
+        </View>
+        <TouchableOpacity
+          style={styles.filterButton}
+          onPress={() => setShowFilterSheet(true)}
+        >
+          <MaterialIcons name="filter-list" size={20} color="#007AFF" />
+        </TouchableOpacity>
+      </View>
 
       {/* Projects List */}
       <ScrollView
@@ -305,6 +284,16 @@ export default function ProjectsScreen() {
           </View>
         )}
       </ScrollView>
+
+      {/* Filter Bottom Sheet */}
+      <FilterBottomSheet
+        visible={showFilterSheet}
+        onClose={() => setShowFilterSheet(false)}
+        title="Filter Projects"
+        filters={filters}
+        selectedFilter={filter}
+        onFilterSelect={(filterId) => setFilter(filterId as any)}
+      />
     </SafeAreaView>
   );
 }
@@ -323,6 +312,34 @@ const styles = StyleSheet.create({
     marginTop: 16,
     fontSize: 16,
     color: '#666',
+  },
+  compactHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    backgroundColor: '#FFF',
+    borderBottomWidth: 1,
+    borderBottomColor: '#E5E5E5',
+  },
+  headerLeft: {
+    flex: 1,
+  },
+  headerTitle: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#1A1A1A',
+    marginBottom: 2,
+  },
+  headerSubtitle: {
+    fontSize: 14,
+    color: '#666',
+  },
+  filterButton: {
+    padding: 8,
+    borderRadius: 8,
+    backgroundColor: '#F0F8FF',
   },
   header: {
     flexDirection: 'row',

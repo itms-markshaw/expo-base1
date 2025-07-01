@@ -19,6 +19,7 @@ import {
 import { MaterialIcons } from '@expo/vector-icons';
 import { authService } from '../services/auth';
 import WorkflowActionsComponent from './WorkflowActionsComponent';
+import FilterBottomSheet from './FilterBottomSheet';
 
 interface SalesOrder {
   id: number;
@@ -56,6 +57,7 @@ export default function SalesOrderComponent() {
   const [showOrderDetail, setShowOrderDetail] = useState(false);
   const [showWorkflowActions, setShowWorkflowActions] = useState(false);
   const [showCreateModal, setShowCreateModal] = useState(false);
+  const [showFilterSheet, setShowFilterSheet] = useState(false);
 
   const filters = [
     { id: 'all', name: 'All', icon: 'list', color: '#666' },

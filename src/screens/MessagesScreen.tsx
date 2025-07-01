@@ -18,6 +18,7 @@ import {
 import { MaterialIcons } from '@expo/vector-icons';
 import { authService } from '../services/auth';
 import { useAppNavigation } from '../components/AppNavigationProvider';
+import FilterBottomSheet from '../components/FilterBottomSheet';
 import CustomBottomNavigation from '../components/CustomBottomNavigation';
 
 interface Message {
@@ -40,6 +41,7 @@ export default function MessagesScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [filter, setFilter] = useState<'all' | 'emails' | 'comments' | 'notifications'>('all');
+  const [showFilterSheet, setShowFilterSheet] = useState(false);
 
   const { showNavigationDrawer, showUniversalSearch } = useAppNavigation();
 
@@ -231,47 +233,24 @@ export default function MessagesScreen() {
         </View>
       </View>
 
-      {/* Filter Tabs */}
-      <ScrollView 
-        horizontal 
-        showsHorizontalScrollIndicator={false}
-        style={styles.filterContainer}
-        contentContainerStyle={styles.filterContent}
-      >
-        {filters.map((filterItem) => (
-          <TouchableOpacity
-            key={filterItem.id}
-            style={[
-              styles.filterTab,
-              filter === filterItem.id && styles.filterTabActive
-            ]}
-            onPress={() => setFilter(filterItem.id as any)}
-          >
-            <MaterialIcons
-              name={filterItem.icon as any}
-              size={16}
-              color={filter === filterItem.id ? '#FFF' : '#666'}
-            />
-            <Text style={[
-              styles.filterTabText,
-              filter === filterItem.id && styles.filterTabTextActive
-            ]}>
-              {filterItem.name}
-            </Text>
-            <View style={[
-              styles.filterBadge,
-              filter === filterItem.id && styles.filterBadgeActive
-            ]}>
-              <Text style={[
-                styles.filterBadgeText,
-                filter === filterItem.id && styles.filterBadgeTextActive
-              ]}>
-                {filterItem.count}
-              </Text>
-            </View>
-          </TouchableOpacity>
-        ))}
-      </ScrollView>
+      {/* Compact Header */}
+      <View style={styles.compactHeader}>
+        <View style={styles.headerLeft}>
+          <Text style={styles.headerTitle}>Messages</Text>
+          <Text style={styles.headerSubtitle}>
+            {filter === 'all' ? 'All messages' :
+             filter === 'emails' ? 'Email messages' :
+             filter === 'comments' ? 'Comments' :
+             'Notifications'} • {filteredMessages.length}
+          </Text>
+        </View>
+        <TouchableOpacity
+          style={styles.filterButton}
+          onPress={() => setShowFilterSheet(true)}
+        >
+          <MaterialIcons name="filter-list" size={20} color="#007AFF" />
+        </TouchableOpacity>
+      </View>
 
       {/* Messages List */}
       <ScrollView
@@ -290,6 +269,16 @@ export default function MessagesScreen() {
           </View>
         )}
       </ScrollView>
+
+      {/* Filter Bottom Sheet */}
+      <FilterBottomSheet
+        visible={showFilterSheet}
+        onClose={() => setShowFilterSheet(false)}
+        title="Filter Messages"
+        filters={filters}
+        selectedFilter={filter}
+        onFilterSelect={(filterId) => setFilter(filterId as any)}
+      />
 
       {/* Custom Bottom Navigation */}
       <CustomBottomNavigation currentScreen="Messages" />

@@ -4,7 +4,7 @@
  */
 
 import { create } from 'zustand';
-import { User, SyncStatus, OdooModel } from '../types';
+import { User, SyncStatus, OdooModel, SyncSettings, TimePeriod } from '../types';
 import { authService } from '../services/auth';
 import { syncService } from '../services/sync';
 import { databaseService } from '../services/database';
@@ -19,6 +19,7 @@ interface AppStore {
   syncStatus: SyncStatus;
   availableModels: OdooModel[];
   selectedModels: string[];
+  syncSettings: SyncSettings;
 
   // Database state
   databaseStats: any;
@@ -30,6 +31,8 @@ interface AppStore {
   startSync: () => Promise<void>;
   cancelSync: () => Promise<void>;
   toggleModel: (modelName: string) => void;
+  updateSyncSettings: (settings: Partial<SyncSettings>) => void;
+  updateModelTimePeriod: (modelName: string, timePeriod: TimePeriod) => void;
   loadDatabaseStats: () => Promise<void>;
 }
 
@@ -67,6 +70,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
     'helpdesk.ticket',
     'helpdesk.team'
   ],
+  syncSettings: syncService.getSyncSettings(),
   databaseStats: null,
 
   // Actions
@@ -157,8 +161,23 @@ export const useAppStore = create<AppStore>((set, get) => ({
     const newSelected = selectedModels.includes(modelName)
       ? selectedModels.filter(m => m !== modelName)
       : [...selectedModels, modelName];
-    
+
     set({ selectedModels: newSelected });
+  },
+
+  updateSyncSettings: (settings: Partial<SyncSettings>) => {
+    const { syncSettings } = get();
+    const newSettings = { ...syncSettings, ...settings };
+    set({ syncSettings: newSettings });
+    syncService.updateSyncSettings(newSettings);
+  },
+
+  updateModelTimePeriod: (modelName: string, timePeriod: TimePeriod) => {
+    const { syncSettings } = get();
+    const newOverrides = { ...syncSettings.modelOverrides, [modelName]: timePeriod };
+    const newSettings = { ...syncSettings, modelOverrides: newOverrides };
+    set({ syncSettings: newSettings });
+    syncService.updateSyncSettings(newSettings);
   },
 
   loadDatabaseStats: async () => {

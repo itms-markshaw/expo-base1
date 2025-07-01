@@ -3,17 +3,16 @@
  * Shows detailed employee information and actions
  */
 
-import React from 'react';
+import React, { useRef, useMemo, useCallback, useEffect } from 'react';
 import {
   View,
   Text,
   StyleSheet,
   TouchableOpacity,
-  ScrollView,
   Linking,
 } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
-import BottomSheet from './BottomSheet';
+import BottomSheet, { BottomSheetView, BottomSheetScrollView } from '@gorhom/bottom-sheet';
 
 interface Employee {
   id: number;
@@ -38,34 +37,70 @@ export default function EmployeeDetailBottomSheet({
   onClose,
   employee,
 }: EmployeeDetailBottomSheetProps) {
-  if (!employee) return null;
+  // Bottom sheet refs and snap points
+  const bottomSheetRef = useRef<BottomSheet>(null);
+  const snapPoints = useMemo(() => ['60%', '90%'], []); // Start at 60%, expand to 90%
 
-  const handleCall = () => {
-    if (employee.work_phone) {
+  // Handle visibility changes
+  useEffect(() => {
+    if (visible && employee) {
+      bottomSheetRef.current?.snapToIndex(0); // Open to first snap point (60%)
+    } else {
+      bottomSheetRef.current?.close();
+    }
+  }, [visible, employee]);
+
+  // Bottom sheet callbacks
+  const handleSheetChanges = useCallback((index: number) => {
+    if (index === -1) {
+      onClose();
+    }
+  }, [onClose]);
+
+  const handleCall = useCallback(() => {
+    if (employee?.work_phone) {
       Linking.openURL(`tel:${employee.work_phone}`);
     }
-  };
+  }, [employee?.work_phone]);
 
-  const handleEmail = () => {
-    if (employee.work_email) {
+  const handleEmail = useCallback(() => {
+    if (employee?.work_email) {
       Linking.openURL(`mailto:${employee.work_email}`);
     }
-  };
+  }, [employee?.work_email]);
 
-  const handleMessage = () => {
-    if (employee.work_phone) {
+  const handleMessage = useCallback(() => {
+    if (employee?.work_phone) {
       Linking.openURL(`sms:${employee.work_phone}`);
     }
-  };
+  }, [employee?.work_phone]);
+
+  if (!employee) return null;
 
   return (
     <BottomSheet
-      visible={visible}
-      onClose={onClose}
-      title="Employee Details"
-      height={75}
+      ref={bottomSheetRef}
+      index={-1} // Start closed
+      snapPoints={snapPoints}
+      onChange={handleSheetChanges}
+      enablePanDownToClose={true}
+      backgroundStyle={styles.bottomSheetBackground}
+      handleIndicatorStyle={styles.bottomSheetHandle}
     >
-      <ScrollView showsVerticalScrollIndicator={false}>
+      <BottomSheetView style={styles.bottomSheetContainer}>
+        {/* Header */}
+        <View style={styles.header}>
+          <Text style={styles.title}>Employee Details</Text>
+          <TouchableOpacity
+            onPress={() => bottomSheetRef.current?.close()}
+            style={styles.closeButton}
+          >
+            <MaterialIcons name="close" size={24} color="#666" />
+          </TouchableOpacity>
+        </View>
+
+        {/* Content */}
+        <BottomSheetScrollView style={styles.content} showsVerticalScrollIndicator={false}>
         {/* Employee Header */}
         <View style={styles.employeeHeader}>
           <View style={[styles.avatar, { backgroundColor: employee.active ? '#34C759' : '#999' }]}>
@@ -176,12 +211,48 @@ export default function EmployeeDetailBottomSheet({
             <MaterialIcons name="chevron-right" size={20} color="#C7C7CC" />
           </TouchableOpacity>
         </View>
-      </ScrollView>
+        </BottomSheetScrollView>
+      </BottomSheetView>
     </BottomSheet>
   );
 }
 
 const styles = StyleSheet.create({
+  bottomSheetBackground: {
+    backgroundColor: '#FFF',
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+  },
+  bottomSheetHandle: {
+    backgroundColor: '#C7C7CC',
+    width: 40,
+  },
+  bottomSheetContainer: {
+    flex: 1,
+  },
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 20,
+    paddingVertical: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: '#E0E0E0',
+  },
+  title: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#1A1A1A',
+    flex: 1,
+  },
+  closeButton: {
+    padding: 4,
+  },
+  content: {
+    flex: 1,
+    paddingHorizontal: 20,
+    paddingTop: 16,
+  },
   employeeHeader: {
     flexDirection: 'row',
     alignItems: 'center',

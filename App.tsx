@@ -8,6 +8,7 @@ import { NavigationContainer } from '@react-navigation/native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { createStackNavigator } from '@react-navigation/stack';
 import { MaterialIcons } from '@expo/vector-icons';
+import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import {
   View,
   Text,
@@ -245,8 +246,10 @@ function AppContent() {
 // Main App Component
 export default function App() {
   return (
-    <AppStoreProvider>
-      <AppContent />
-    </AppStoreProvider>
+    <GestureHandlerRootView style={{ flex: 1 }}>
+      <AppStoreProvider>
+        <AppContent />
+      </AppStoreProvider>
+    </GestureHandlerRootView>
   );
 }
