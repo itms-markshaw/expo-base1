@@ -3,9 +3,9 @@
  * Run this to test the new longpolling service
  */
 
-import { longpollingService } from './src/services/odooLongpolling';
-import { chatService } from './src/services/chat';
-import { authService } from './src/services/auth';
+import { longpollingService } from '../src/services/odooLongpolling';
+import { chatService } from '../src/services/chat';
+import { authService } from '../src/services/auth';
 
 async function testLongpolling() {
   console.log('🧪 Testing HTTP Longpolling Implementation...');

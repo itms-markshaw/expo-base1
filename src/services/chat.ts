@@ -5,6 +5,7 @@
 
 import longpollingService from './odooLongpolling';
 import { authService } from './auth';
+import { syncService } from './sync';
 
 export interface ChatMessage {
   id: number;
@@ -69,7 +70,7 @@ class ChatService {
   // Polling for new messages
   private pollingInterval: NodeJS.Timeout | null = null;
   private lastMessageIds: { [channelId: number]: number } = {};
-  private POLLING_INTERVAL = 1500; // 1.5 seconds for faster updates
+  private POLLING_INTERVAL = 3000; // 3 seconds - reduced frequency
   private currentPollingChannelId: number | null = null;
 
   constructor() {
@@ -135,6 +136,15 @@ class ChatService {
         }
       }
 
+      // Trigger sync for chat data to ensure offline availability
+      try {
+        console.log('📱 Triggering sync for chat data...');
+        await syncService.startSync(['discuss.channel', 'mail.message']);
+        console.log('✅ Chat data sync completed');
+      } catch (syncError) {
+        console.warn('⚠️ Chat data sync failed, continuing with cached data:', syncError);
+      }
+
       // Load initial chat data
       await this.loadChannels();
 
@@ -168,15 +178,20 @@ class ChatService {
       this.emit('presenceUpdate', presence);
     });
 
-    // Monitor longpolling status
+    // Monitor longpolling status (reduced frequency)
     setInterval(() => {
       const status = longpollingService.getStatus();
       this.emit('connectionChanged', status.isActive ? 'connected' : 'disconnected');
-    }, 5000);
+
+      // Debug: Log status occasionally
+      if (Math.random() < 0.1) { // Only 10% of the time
+        console.log(`📡 Longpolling status: ${status.isActive ? 'Active' : 'Inactive'}, Channels: ${status.channelCount}`);
+      }
+    }, 10000); // Reduced to every 10 seconds
   }
 
   /**
-   * Load chat channels from Odoo 18 (both direct messages and channels)
+   * Load chat channels from cache first, then from Odoo (sorted by last activity)
    */
   private async loadChannels(): Promise<void> {
     try {
@@ -185,13 +200,43 @@ class ChatService {
         throw new Error('No authenticated client available');
       }
 
-      // Load discuss channels for Odoo 18 - Try different approaches
-      console.log('📱 Loading chat channels from discuss.channel...');
+      console.log('📱 Loading chat channels (cache first, then live data)...');
       console.log(`👤 Current user ID: ${client.uid}`);
 
       let channels = [];
 
+      // Try to load from cache first for faster loading
       try {
+        const cachedChannels = await syncService.getCachedData('discuss.channel');
+        if (cachedChannels && cachedChannels.length > 0) {
+          console.log(`📱 Found ${cachedChannels.length} cached channels - using offline data`);
+          channels = cachedChannels;
+
+          // Process and emit cached channels immediately for fast UI
+          const processedChannels = [];
+          for (const channel of channels) {
+            const processedChannel = await this.processChannel(channel);
+            this.currentChannels.set(processedChannel.id, processedChannel);
+            processedChannels.push(processedChannel);
+          }
+
+          // Sort and emit cached data immediately
+          const sortedChannels = await this.sortChannelsByLastActivity(processedChannels);
+          this.emit('channelsLoaded', sortedChannels);
+
+          // Continue to load fresh data in background but don't block UI
+          console.log('📱 Cached channels loaded, fetching fresh data in background...');
+        }
+      } catch (cacheError) {
+        console.warn('⚠️ Failed to load cached channels:', cacheError);
+      }
+
+      // Always try to get fresh data (but don't block if we have cache)
+      const shouldLoadFresh = true; // Always refresh for real-time chat
+      if (shouldLoadFresh) {
+        console.log('📱 Loading channels from server...');
+
+        try {
         // First, try to get the current user's partner ID
         const currentUser = await client.searchRead('res.users',
           [['id', '=', client.uid]],
@@ -264,21 +309,88 @@ class ChatService {
           console.log(`📱 Found ${channels.length} total channels (unfiltered)`);
         }
       }
+      } // Close the if (channels.length === 0) block
 
       console.log(`📱 Loaded ${channels.length} chat channels`);
 
       // Process channels and detect direct messages (but don't auto-subscribe)
+      const processedChannels = [];
       for (const channel of channels) {
         const processedChannel = await this.processChannel(channel);
         this.currentChannels.set(processedChannel.id, processedChannel);
+        processedChannels.push(processedChannel);
         // Don't auto-subscribe to all channels - only subscribe when user opens a chat
       }
 
-      this.emit('channelsLoaded', Array.from(this.currentChannels.values()));
+      // Sort channels by last activity (most recent first)
+      const sortedChannels = await this.sortChannelsByLastActivity(processedChannels);
+
+      this.emit('channelsLoaded', sortedChannels);
 
     } catch (error) {
       console.error('❌ Failed to load channels:', error);
       this.emit('error', { type: 'loadChannels', error });
+    }
+  }
+
+  /**
+   * Sort channels by last activity (most recent first)
+   */
+  private async sortChannelsByLastActivity(channels: ChatChannel[]): Promise<ChatChannel[]> {
+    try {
+      const client = authService.getClient();
+      if (!client) return channels;
+
+      // Get last message for each channel to sort by activity
+      const channelsWithActivity = await Promise.all(
+        channels.map(async (channel) => {
+          try {
+            // Try to get cached messages first
+            let lastMessage = null;
+            try {
+              const cachedMessages = await syncService.getCachedData('mail.message', {
+                model: 'discuss.channel',
+                res_id: channel.id
+              });
+              if (cachedMessages && cachedMessages.length > 0) {
+                lastMessage = cachedMessages.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())[0];
+              }
+            } catch (cacheError) {
+              // Fallback to live data
+              const messages = await client.searchRead('mail.message',
+                [
+                  ['model', '=', 'discuss.channel'],
+                  ['res_id', '=', channel.id]
+                ],
+                ['id', 'date'],
+                { order: 'date desc', limit: 1 }
+              );
+              if (messages.length > 0) {
+                lastMessage = messages[0];
+              }
+            }
+
+            return {
+              ...channel,
+              lastActivity: lastMessage ? new Date(lastMessage.date) : new Date(channel.write_date || channel.create_date || 0),
+              lastMessageId: lastMessage?.id || 0
+            };
+          } catch (error) {
+            // If we can't get last message, use channel creation date
+            return {
+              ...channel,
+              lastActivity: new Date(channel.write_date || channel.create_date || 0),
+              lastMessageId: 0
+            };
+          }
+        })
+      );
+
+      // Sort by last activity (most recent first)
+      return channelsWithActivity.sort((a, b) => b.lastActivity.getTime() - a.lastActivity.getTime());
+    } catch (error) {
+      console.warn('⚠️ Failed to sort channels by activity:', error);
+      return channels;
     }
   }
 
@@ -320,32 +432,90 @@ class ChatService {
   }
 
   /**
-   * Load messages for a specific channel
+   * Load messages for a specific channel (cache first, then live data)
+   * Limited to last 50 messages by default for performance
    */
-  async loadChannelMessages(channelId: number, limit = 50): Promise<ChatMessage[]> {
+  async loadChannelMessages(channelId: number, limit = 50, offset = 0): Promise<ChatMessage[]> {
     try {
-      console.log(`📨 Loading messages for channel ${channelId} with limit ${limit}...`);
+      console.log(`📨 Loading messages for channel ${channelId} (cache first)...`);
 
       const client = authService.getClient();
       if (!client) {
         throw new Error('No authenticated client available');
       }
 
-      const messages = await client.searchRead('mail.message',
-        [
-          ['model', '=', 'discuss.channel'],
-          ['res_id', '=', channelId]
-        ],
-        ['id', 'body', 'author_id', 'date', 'message_type', 'attachment_ids', 'partner_ids', 'email_from'],
-        { order: 'date desc', limit }
-      );
+      let messages = [];
+
+      // Try to load from cache first for instant loading
+      try {
+        const cachedMessages = await syncService.getCachedData('mail.message', {
+          model: 'discuss.channel',
+          res_id: channelId
+        });
+        if (cachedMessages && cachedMessages.length > 0) {
+          console.log(`📨 Found ${cachedMessages.length} cached messages for channel ${channelId} - using offline data`);
+          messages = cachedMessages
+            .filter(msg => msg.model === 'discuss.channel' && msg.res_id === channelId)
+            .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
+            .slice(0, limit);
+
+          // Process and emit cached messages immediately
+          if (messages.length > 0) {
+            const processedMessages = messages.map(msg => {
+              let authorName = 'Unknown User';
+              if (msg.author_id && Array.isArray(msg.author_id) && msg.author_id.length > 1) {
+                authorName = msg.author_id[1];
+                if (authorName.includes(',')) {
+                  const parts = authorName.split(',').map(part => part.trim());
+                  if (parts.length > 1) {
+                    authorName = parts[parts.length - 1];
+                  }
+                }
+              }
+              return { ...msg, authorName, cleanAuthorName: authorName };
+            }).reverse(); // Chronological order
+
+            this.channelMessages.set(channelId, processedMessages);
+            this.emit('messagesLoaded', { channelId, messages: processedMessages });
+
+            console.log(`📨 Cached messages loaded, fetching fresh data in background...`);
+          }
+        }
+      } catch (cacheError) {
+        console.warn('⚠️ Failed to load cached messages:', cacheError);
+      }
+
+      // Always try to get fresh data in background for real-time updates
+      try {
+        console.log(`📨 Loading fresh messages from server for channel ${channelId} (limit: ${limit}, offset: ${offset})...`);
+        const freshMessages = await client.searchRead('mail.message',
+          [
+            ['model', '=', 'discuss.channel'],
+            ['res_id', '=', channelId]
+          ],
+          ['id', 'body', 'author_id', 'date', 'message_type', 'attachment_ids', 'partner_ids', 'email_from'],
+          { order: 'date desc', limit, offset }
+        );
+
+        // Only update if we got fresh data
+        if (freshMessages.length > 0) {
+          messages = freshMessages;
+        }
+      } catch (serverError) {
+        console.warn('⚠️ Failed to load fresh messages, using cached data:', serverError);
+        // If we have cached messages, that's fine - we already emitted them
+        if (messages.length > 0) {
+          return messages.map(msg => ({ ...msg, authorName: 'Cached User', cleanAuthorName: 'Cached User' }));
+        }
+        throw serverError; // Only throw if we have no cached data
+      }
 
       console.log(`📨 Found ${messages.length} messages for channel ${channelId}`);
 
-      // Debug: Log first few messages to see the data structure
-      if (messages.length > 0) {
-        console.log('📨 Sample message data:', JSON.stringify(messages[0], null, 2));
-      }
+      // Debug: Log first few messages to see the data structure (reduced logging)
+      // if (messages.length > 0) {
+      //   console.log('📨 Sample message data:', JSON.stringify(messages[0], null, 2));
+      // }
 
       // Process messages to ensure proper author names
       const processedMessages = messages.map(msg => {
@@ -441,10 +611,33 @@ class ChatService {
       // Stop typing indicator
       this.stopTyping(channelId);
 
-      // Trigger immediate message refresh for better UX
+      // Immediately add optimistic message to UI
+      const optimisticMessage = {
+        id: -Math.floor(Date.now() / 1000), // Negative timestamp to avoid conflicts with real IDs
+        body: cleanBody,
+        author_id: [this.currentUserId, 'You'],
+        date: new Date().toISOString(),
+        message_type: 'comment',
+        model: 'discuss.channel',
+        res_id: channelId,
+        authorName: 'You',
+        cleanAuthorName: 'You',
+        isOptimistic: true // Flag to identify optimistic messages
+      };
+
+      // Add to local messages immediately
+      const existingMessages = this.channelMessages.get(channelId) || [];
+      const updatedMessages = [...existingMessages, optimisticMessage];
+      this.channelMessages.set(channelId, updatedMessages);
+
+      // Emit immediately for instant UI update
+      this.emit('newMessages', { channelId, messages: [optimisticMessage] });
+      this.emit('messagesUpdated', { channelId });
+
+      // Trigger message refresh to get the real message and replace optimistic one
       setTimeout(() => {
         this.checkForNewMessages(channelId);
-      }, 300);
+      }, 500);
 
       this.emit('messageSent', { channelId, body: cleanBody });
       return true;
@@ -453,6 +646,34 @@ class ChatService {
       console.error(`❌ Failed to send message:`, error);
       this.emit('error', { type: 'sendMessage', error, channelId });
       return false;
+    }
+  }
+
+  /**
+   * Load more messages for a channel (pagination)
+   */
+  async loadMoreMessages(channelId: number, limit = 50): Promise<ChatMessage[]> {
+    try {
+      const existingMessages = this.channelMessages.get(channelId) || [];
+      const offset = existingMessages.length;
+
+      console.log(`📨 Loading more messages for channel ${channelId} (offset: ${offset})...`);
+
+      const olderMessages = await this.loadChannelMessages(channelId, limit, offset);
+
+      if (olderMessages.length > 0) {
+        // Prepend older messages to existing ones
+        const allMessages = [...olderMessages, ...existingMessages];
+        this.channelMessages.set(channelId, allMessages);
+        this.emit('messagesLoaded', { channelId, messages: allMessages });
+
+        console.log(`📨 Loaded ${olderMessages.length} more messages for channel ${channelId}`);
+      }
+
+      return olderMessages;
+    } catch (error) {
+      console.error(`❌ Failed to load more messages:`, error);
+      return [];
     }
   }
 
@@ -477,10 +698,10 @@ class ChatService {
     // Set current polling channel
     this.currentPollingChannelId = channelId;
 
-    // More aggressive polling - every 1 second
+    // Backup polling - every 3 seconds (reduced frequency)
     this.pollingInterval = setInterval(async () => {
       await this.checkForNewMessages(channelId);
-    }, 1000);
+    }, 3000);
   }
 
   /**
@@ -528,15 +749,20 @@ class ChatService {
           };
         });
 
-        // Add to existing messages
-        const updatedMessages = [...existingMessages, ...processedMessages];
+        // Remove optimistic messages and add real messages
+        const filteredExisting = existingMessages.filter(msg => !msg.isOptimistic);
+        const updatedMessages = [...filteredExisting, ...processedMessages];
+
+        // Sort by date to maintain order
+        updatedMessages.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+
         this.channelMessages.set(channelId, updatedMessages);
 
         // Emit event for UI update
         this.emit('newMessages', { channelId, messages: processedMessages });
         this.emit('messagesUpdated', { channelId });
-        
-        console.log(`📨 Emitted ${processedMessages.length} new messages for UI update`);
+
+        console.log(`📨 Added ${processedMessages.length} new messages, removed optimistic messages`);
       }
     } catch (error) {
       // Silent fail to avoid log spam

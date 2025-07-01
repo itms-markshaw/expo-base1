@@ -44,7 +44,6 @@ export default function ChatScreen() {
   const [currentUserId, setCurrentUserId] = useState<number | null>(null);
   const [showMentionPicker, setShowMentionPicker] = useState(false);
   const [showMembersModal, setShowMembersModal] = useState(false);
-  const [refreshing, setRefreshing] = useState(false);
   const [mentionSearchQuery, setMentionSearchQuery] = useState('');
   const [mentionStartIndex, setMentionStartIndex] = useState(-1);
 
@@ -98,10 +97,7 @@ export default function ChatScreen() {
           }
         }
 
-        // Auto-select first channel
-        if (loadedChannels.length > 0) {
-          selectChannel(loadedChannels[0]);
-        }
+        // Don't auto-select - stay on chat list
       }
     } catch (error) {
       console.error('Failed to initialize chat:', error);
@@ -150,9 +146,7 @@ export default function ChatScreen() {
 
   const handleChannelsLoaded = (loadedChannels: ChatChannel[]) => {
     setChannels(loadedChannels);
-    if (loadedChannels.length > 0 && !selectedChannel) {
-      selectChannel(loadedChannels[0]);
-    }
+    // Don't auto-select - let user choose from list
   };
 
   const handleMessagesLoaded = ({ channelId, messages: loadedMessages }: { channelId: number; messages: ChatMessage[] }) => {
@@ -181,20 +175,7 @@ export default function ChatScreen() {
     }
   };
 
-  const handleManualRefresh = async () => {
-    if (!selectedChannel) return;
 
-    setRefreshing(true);
-    try {
-      const messages = await chatService.loadChannelMessages(selectedChannel.id, 50);
-      setMessages(messages);
-      scrollToBottom();
-    } catch (error) {
-      console.error('❌ Failed to refresh messages:', error);
-    } finally {
-      setRefreshing(false);
-    }
-  };
 
   const handleConnectionChanged = (status: 'connected' | 'disconnected') => {
     setConnectionStatus(status);
@@ -525,7 +506,22 @@ export default function ChatScreen() {
       {/* Header */}
       <View style={styles.header}>
         <View style={styles.headerLeft}>
-          <Text style={styles.headerTitle}>
+          {selectedChannel && (
+            <TouchableOpacity
+              style={styles.backToListButton}
+              onPress={() => {
+                // Unsubscribe from longpolling when going back to list
+                if (selectedChannel) {
+                  console.log(`📡 Unsubscribing from channel ${selectedChannel.id}`);
+                  chatService.unsubscribeFromChannel(selectedChannel.id);
+                }
+                setSelectedChannel(null);
+              }}
+            >
+              <MaterialIcons name="arrow-back" size={24} color="#007AFF" />
+            </TouchableOpacity>
+          )}
+          <Text style={[styles.headerTitle, selectedChannel && styles.headerTitleWithBack]}>
             {selectedChannel ? selectedChannel.name : 'Chat'}
           </Text>
           <View style={styles.statusContainer}>
@@ -640,70 +636,7 @@ export default function ChatScreen() {
           behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
           keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
         >
-          {/* Chat Header with Back Button */}
-          <View style={styles.chatHeaderContainer}>
-            <TouchableOpacity
-              style={styles.backButton}
-              onPress={() => {
-                // Unsubscribe from longpolling when going back
-                if (selectedChannel) {
-                  console.log(`📡 Unsubscribing from channel ${selectedChannel.id}`);
-                  chatService.unsubscribeFromChannel(selectedChannel.id);
-                }
-                setSelectedChannel(null);
-              }}
-            >
-              <MaterialIcons name="arrow-back" size={24} color="#007AFF" />
-            </TouchableOpacity>
-            <View style={styles.chatHeaderInfo}>
-              <Text style={styles.chatHeaderTitle} numberOfLines={1}>
-                {selectedChannel.name}
-              </Text>
-              {selectedChannel.channel_type === 'chat' ? (
-                <Text style={styles.chatHeaderSubtitle}>
-                  💬 Direct message
-                </Text>
-              ) : selectedChannel.channel_type === 'channel' ? (
-                <TouchableOpacity onPress={handleShowMembers}>
-                  <Text style={[styles.chatHeaderSubtitle, styles.clickableSubtitle]}>
-                    👥 Group chat • {selectedChannel.member_count || 0} members
-                  </Text>
-                </TouchableOpacity>
-              ) : (
-                <Text style={styles.chatHeaderSubtitle}>
-                  📢 {selectedChannel.channel_type || 'Channel'}
-                </Text>
-              )}
-            </View>
-            <TouchableOpacity
-              style={styles.refreshButton}
-              onPress={handleManualRefresh}
-            >
-              <MaterialIcons name="refresh" size={24} color="#007AFF" />
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={[styles.refreshButton, { marginLeft: 8, backgroundColor: 'rgba(255, 149, 0, 0.1)' }]}
-              onPress={() => {
-                console.log('🔍 DEBUG BUTTON PRESSED!');
-                console.log('=== CHAT DEBUG INFO ===');
-                console.log('Selected channel:', selectedChannel?.id);
-                console.log('UI messages count:', messages.length);
-                console.log('Service messages count:', selectedChannel ? chatService.getChannelMessages(selectedChannel.id).length : 0);
-                console.log('Service status:', chatService.getStatus());
-                console.log('Polling status:', require('../services/odooLongpolling').longpollingService.getStatus());
-                console.log('=== END DEBUG INFO ===');
-                
-                // Also try to force refresh
-                if (selectedChannel) {
-                  console.log('🔄 Force refreshing messages...');
-                  const serviceMessages = chatService.getChannelMessages(selectedChannel.id);
-                  setMessages([...serviceMessages]);
-                }
-              }}
-            >
-              <MaterialIcons name="bug-report" size={24} color="#FF9500" />
-            </TouchableOpacity>
-          </View>
+
 
           {/* Messages - iMessage Style */}
           {messages.length === 0 ? (
@@ -823,11 +756,20 @@ const styles = StyleSheet.create({
   },
   headerLeft: {
     flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  backToListButton: {
+    padding: 4,
+    marginRight: 12,
   },
   headerTitle: {
     fontSize: 18,
     fontWeight: '600',
     color: '#1A1A1A',
+  },
+  headerTitleWithBack: {
+    flex: 1,
   },
   statusContainer: {
     flexDirection: 'row',
@@ -985,33 +927,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  // Chat Header Styles
-  chatHeaderContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    backgroundColor: '#FFF',
-    borderBottomWidth: 0.5,
-    borderBottomColor: '#E5E5E5',
-  },
-  backButton: {
-    padding: 4,
-    marginRight: 12,
-  },
-  chatHeaderInfo: {
-    flex: 1,
-  },
-  chatHeaderTitle: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: '#1A1A1A',
-  },
-  chatHeaderSubtitle: {
-    fontSize: 14,
-    color: '#666',
-    marginTop: 2,
-  },
+
   clickableSubtitle: {
     color: '#007AFF',
   },
@@ -1126,9 +1042,5 @@ const styles = StyleSheet.create({
     marginTop: 8,
     textAlign: 'center',
   },
-  refreshButton: {
-    padding: 8,
-    borderRadius: 20,
-    backgroundColor: 'rgba(0, 122, 255, 0.1)',
-  },
+
 });

@@ -64,20 +64,12 @@ class OdooPollingService {
    * Subscribe to a channel for real-time updates
    */
   subscribeToChannel(channelName: string): void {
-    console.log(`📡 Longpolling service subscribing to: ${channelName}`);
-    console.log(`📡 Current channels before: [${Array.from(this.channels).join(', ')}]`);
-    
+    console.log(`📡 Subscribed to: ${channelName}`);
     this.channels.add(channelName);
-    
-    console.log(`📡 Current channels after: [${Array.from(this.channels).join(', ')}]`);
-    console.log(`📡 Total subscribed channels: ${this.channels.size}`);
-    
+
     // If already polling, restart to include new channel
     if (this.isActive) {
-      console.log(`🔄 Polling service is active, restarting to include new channel`);
       this.restartPolling();
-    } else {
-      console.log(`⚠️ Polling service is NOT active yet`);
     }
   }
 
@@ -85,7 +77,7 @@ class OdooPollingService {
    * Unsubscribe from a channel
    */
   unsubscribeFromChannel(channelName: string): void {
-    console.log(`📡 Unsubscribing from longpolling channel: ${channelName}`);
+    console.log(`📡 Unsubscribed from: ${channelName}`);
     this.channels.delete(channelName);
   }
 
@@ -93,25 +85,19 @@ class OdooPollingService {
    * Main polling loop - keeps polling active
    */
   private async startPollingLoop(): Promise<void> {
-    console.log('🔄 Starting polling loop...');
-    
     while (this.isActive) {
       try {
-        console.log(`🔄 Polling cycle - Active: ${this.isActive}, Channels: ${this.channels.size}`);
         await this.performLongpoll();
         this.reconnectDelay = 1000; // Reset delay on success
       } catch (error) {
         console.error('❌ Polling error:', error);
-        
+
         if (this.isActive) {
-          console.log(`⏳ Retrying polling in ${this.reconnectDelay}ms...`);
           await this.sleep(this.reconnectDelay);
           this.reconnectDelay = Math.min(this.reconnectDelay * 2, this.maxReconnectDelay);
         }
       }
     }
-    
-    console.log('🛑 Polling loop ended');
   }
 
   /**
@@ -158,8 +144,6 @@ class OdooPollingService {
     try {
       const lastId = this.lastMessageIds[channelId] || 0;
       
-      console.log(`🔄 Polling channel ${channelId} for messages > ${lastId}`);
-      
       // Use the EXACT same call as the web interface (from server logs)
       const messages = await client.callModel('mail.message', 'search_read', [
         [
@@ -173,22 +157,16 @@ class OdooPollingService {
         offset: 0,
         order: 'id asc'
       });
-      
-      console.log(`📨 Polling result for channel ${channelId}: ${messages ? messages.length : 0} messages`);
-      
+
       if (messages && messages.length > 0) {
-        console.log(`📨 Found ${messages.length} new messages in channel ${channelId}!`);
-        console.log('📨 Message IDs:', messages.map(m => m.id));
-        
+        console.log(`📨 ${messages.length} new messages in channel ${channelId}`);
+
         // Update last message ID for this channel
         const maxId = Math.max(...messages.map(m => m.id));
         this.lastMessageIds[channelId] = maxId;
-        console.log(`🔄 Updated last message ID for channel ${channelId} to ${maxId}`);
-        
+
         // Process each new message
         for (const message of messages) {
-          console.log(`📥 Processing message ${message.id}: ${message.body?.substring(0, 50)}...`);
-          
           this.processMessage({
             id: Date.now() + Math.random(), // Unique notification ID
             type: 'mail.message',
@@ -200,8 +178,6 @@ class OdooPollingService {
             }
           });
         }
-      } else {
-        console.log(`📡 No new messages found in channel ${channelId}`);
       }
       
     } catch (error) {
@@ -213,35 +189,22 @@ class OdooPollingService {
    * Process incoming message notification
    */
   private processMessage(message: LongpollingMessage): void {
-    console.log(`📥 Processing message notification:`, {
-      id: message.id,
-      type: message.type,
-      messageId: message.payload?.id,
-      channelId: message.payload?.channel_id,
-      body: message.payload?.body?.substring(0, 50)
-    });
-    
     // Emit generic message event
-    console.log('📤 Emitting generic "message" event');
     this.emit('message', message);
-    
+
     // Handle specific message types
     switch (message.type) {
       case 'mail.message':
       case 'discuss.channel':
-        console.log('📤 Emitting "chatMessage" event for UI');
         this.emit('chatMessage', message.payload);
         break;
       case 'bus.presence':
-        console.log('📤 Emitting "presenceUpdate" event');
         this.emit('presenceUpdate', message.payload);
         break;
       case 'mail.activity':
-        console.log('📤 Emitting "activityUpdate" event');
         this.emit('activityUpdate', message.payload);
         break;
       default:
-        console.log(`📤 Emitting "notification" event for type: ${message.type}`);
         this.emit('notification', message);
     }
   }
@@ -250,7 +213,6 @@ class OdooPollingService {
    * Restart polling (used when channels change)
    */
   private restartPolling(): void {
-    console.log('🔄 Restarting polling with updated channels...');
     // Just continue the polling loop - it will pick up new channels
   }
 
@@ -339,7 +301,6 @@ class OdooPollingService {
    * Force reconnection
    */
   reconnect(): void {
-    console.log('🔄 Forcing longpolling reconnection...');
     this.restartPolling();
   }
 }

@@ -49,7 +49,8 @@ export class OdooXMLRPCClient {
    */
   async authenticate(): Promise<{ uid: number; session: any; database: string }> {
     if (this.uid && this.sessionInfo) {
-      console.log('✅ Using cached authentication');
+      // Reduced logging
+      // console.log('✅ Using cached authentication');
       return { uid: this.uid, session: this.sessionInfo, database: this.database };
     }
 
@@ -152,7 +153,8 @@ export class OdooXMLRPCClient {
     const url = `${this.baseURL}/xmlrpc/2/${service}`;
     const xmlPayload = this.buildXMLRPCCall(method, params);
 
-    console.log(`📡 XML-RPC: ${service}.${method}(${params.length} params)`);
+    // Reduced logging - only log errors
+    // console.log(`📡 XML-RPC: ${service}.${method}(${params.length} params)`);
 
     try {
       const response = await fetch(url, {
@@ -172,7 +174,8 @@ export class OdooXMLRPCClient {
       }
 
       const xmlText = await response.text();
-      console.log(`📨 Response preview: ${xmlText.substring(0, 200)}...`);
+      // Reduced logging - only log errors
+      // console.log(`📨 Response preview: ${xmlText.substring(0, 200)}...`);
 
       return this.parseXMLRPCResponse(xmlText);
     } catch (error) {
@@ -341,7 +344,8 @@ export class OdooXMLRPCClient {
       }
 
       const result = this.parseValue(valueMatch[1]);
-      console.log('✅ Parsed result type:', typeof result, Array.isArray(result) ? `(array[${result.length}])` : '');
+      // Reduced logging - only log errors
+      // console.log('✅ Parsed result type:', typeof result, Array.isArray(result) ? `(array[${result.length}])` : '');
       return result;
     } catch (error) {
       console.error('❌ XML-RPC parse error:', error.message);

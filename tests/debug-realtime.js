@@ -3,8 +3,8 @@
  * Run this to test if the polling is finding new messages
  */
 
-import { chatService } from './src/services/chat';
-import { longpollingService } from './src/services/odooLongpolling';
+import { chatService } from '../src/services/chat';
+import { longpollingService } from '../src/services/odooLongpolling';
 
 async function testRealTimeUpdates() {
   console.log('🧪 Testing Real-time Chat Updates...');

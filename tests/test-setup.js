@@ -6,7 +6,7 @@ console.log('🧪 Testing Odoo Sync App Setup...');
 
 // Test 1: Check if we can import our config
 try {
-  const config = require('./src/config/odoo.ts');
+  const config = require('../src/config/odoo.ts');
   console.log('✅ Config loaded successfully');
   console.log('   Server:', config.ODOO_CONFIG?.baseURL || 'Not found');
 } catch (error) {
@@ -15,7 +15,7 @@ try {
 
 // Test 2: Check if we can import our services
 try {
-  const { OdooXMLRPCClient } = require('./src/services/OdooXMLRPCClient.ts');
+  const { OdooXMLRPCClient } = require('../src/services/OdooXMLRPCClient.ts');
   console.log('✅ OdooXMLRPCClient imported successfully');
 } catch (error) {
   console.log('❌ OdooXMLRPCClient import failed:', error.message);

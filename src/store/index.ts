@@ -47,21 +47,25 @@ export const useAppStore = create<AppStore>((set, get) => ({
   },
   availableModels: syncService.getAvailableModels(),
   selectedModels: [
+    'discuss.channel',
+    'mail.message',
+    // mail.thread removed - it's an abstract model, not directly accessible
     'res.partner',
     'sale.order',
     'crm.lead',
     'hr.employee',
     'mail.activity',
-    'mail.message',
-    'mail.thread',
     'ir.attachment',
     'calendar.event',
     'res.users',
     'product.product',
     'product.template',
     'account.move',
+    'stock.picking',      // Deliveries - now included
     'project.project',
-    'project.task'
+    'project.task',
+    'helpdesk.ticket',
+    'helpdesk.team'
   ],
   databaseStats: null,
 
