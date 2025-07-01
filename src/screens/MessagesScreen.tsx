@@ -19,7 +19,8 @@ import { MaterialIcons } from '@expo/vector-icons';
 import { authService } from '../services/auth';
 import { useAppNavigation } from '../components/AppNavigationProvider';
 import FilterBottomSheet from '../components/FilterBottomSheet';
-import CustomBottomNavigation from '../components/CustomBottomNavigation';
+
+import { formatRelationalField } from '../utils/relationalFieldUtils';
 
 interface Message {
   id: number;
@@ -144,7 +145,7 @@ export default function MessagesScreen() {
             {message.subject || 'No Subject'}
           </Text>
           <Text style={styles.messageAuthor} numberOfLines={1}>
-            {message.author_id?.[1] || message.email_from || 'System'}
+            {formatRelationalField(message.author_id, message.email_from || 'System')}
           </Text>
           <Text style={styles.messageDate}>
             {new Date(message.date).toLocaleDateString()} {new Date(message.date).toLocaleTimeString()}
@@ -199,13 +200,13 @@ export default function MessagesScreen() {
           <Text style={styles.headerSubtitle}>Communications & notifications</Text>
         </View>
         <View style={styles.headerActions}>
-          <TouchableOpacity 
+          <TouchableOpacity
             style={styles.searchButton}
             onPress={showUniversalSearch}
           >
             <MaterialIcons name="search" size={24} color="#666" />
           </TouchableOpacity>
-          <TouchableOpacity 
+          <TouchableOpacity
             style={styles.profileButton}
             onPress={showNavigationDrawer}
           >
@@ -231,25 +232,22 @@ export default function MessagesScreen() {
             </TouchableOpacity>
           )}
         </View>
-      </View>
-
-      {/* Compact Header */}
-      <View style={styles.compactHeader}>
-        <View style={styles.headerLeft}>
-          <Text style={styles.headerTitle}>Messages</Text>
-          <Text style={styles.headerSubtitle}>
-            {filter === 'all' ? 'All messages' :
-             filter === 'emails' ? 'Email messages' :
-             filter === 'comments' ? 'Comments' :
-             'Notifications'} • {filteredMessages.length}
-          </Text>
-        </View>
         <TouchableOpacity
           style={styles.filterButton}
           onPress={() => setShowFilterSheet(true)}
         >
           <MaterialIcons name="filter-list" size={20} color="#007AFF" />
         </TouchableOpacity>
+      </View>
+
+      {/* Filter Summary */}
+      <View style={styles.filterSummary}>
+        <Text style={styles.filterSummaryText}>
+          {filter === 'all' ? 'All messages' :
+           filter === 'emails' ? 'Email messages' :
+           filter === 'comments' ? 'Comments' :
+           'Notifications'} • {filteredMessages.length}
+        </Text>
       </View>
 
       {/* Messages List */}
@@ -280,8 +278,7 @@ export default function MessagesScreen() {
         onFilterSelect={(filterId) => setFilter(filterId as any)}
       />
 
-      {/* Custom Bottom Navigation */}
-      <CustomBottomNavigation currentScreen="Messages" />
+
     </SafeAreaView>
   );
 }
@@ -336,13 +333,27 @@ const styles = StyleSheet.create({
     padding: 4,
   },
   searchContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
     paddingHorizontal: 16,
     paddingVertical: 12,
     backgroundColor: '#FFF',
     borderBottomWidth: 1,
     borderBottomColor: '#E5E5E5',
   },
+  filterSummary: {
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    backgroundColor: '#F8F9FA',
+    borderBottomWidth: 1,
+    borderBottomColor: '#F0F0F0',
+  },
+  filterSummaryText: {
+    fontSize: 12,
+    color: '#666',
+  },
   searchBox: {
+    flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: '#F8F9FA',
@@ -350,6 +361,12 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 8,
     gap: 8,
+    marginRight: 12,
+  },
+  filterButton: {
+    padding: 8,
+    borderRadius: 8,
+    backgroundColor: '#F8F9FA',
   },
   searchInput: {
     flex: 1,

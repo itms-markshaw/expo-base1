@@ -19,6 +19,7 @@ import { MaterialIcons } from '@expo/vector-icons';
 import { authService } from '../services/auth';
 import { useAppNavigation } from '../components/AppNavigationProvider';
 import FilterBottomSheet from '../components/FilterBottomSheet';
+import { formatRelationalField } from '../utils/relationalFieldUtils';
 
 interface HelpdeskTicket {
   id: number;
@@ -108,7 +109,7 @@ export default function HelpdeskScreen() {
       filtered = filtered.filter(ticket =>
         ticket.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
         ticket.description?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        ticket.partner_id?.[1]?.toLowerCase().includes(searchQuery.toLowerCase())
+        formatRelationalField(ticket.partner_id)?.toLowerCase().includes(searchQuery.toLowerCase())
       );
     }
 
@@ -175,12 +176,12 @@ export default function HelpdeskScreen() {
           </Text>
           {ticket.partner_id && (
             <Text style={styles.ticketCustomer} numberOfLines={1}>
-              Customer: {ticket.partner_id[1]}
+              Customer: {formatRelationalField(ticket.partner_id)}
             </Text>
           )}
           {ticket.user_id && (
             <Text style={styles.ticketAssignee} numberOfLines={1}>
-              Assigned: {ticket.user_id[1]}
+              Assigned: {formatRelationalField(ticket.user_id)}
             </Text>
           )}
         </View>
@@ -209,7 +210,7 @@ export default function HelpdeskScreen() {
         </Text>
         {ticket.team_id && (
           <Text style={styles.ticketTeam}>
-            Team: {ticket.team_id[1]}
+            Team: {formatRelationalField(ticket.team_id)}
           </Text>
         )}
         <MaterialIcons name="chevron-right" size={20} color="#C7C7CC" />

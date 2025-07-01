@@ -13,6 +13,7 @@ import {
 } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
 import BottomSheet, { BottomSheetView, BottomSheetScrollView } from '@gorhom/bottom-sheet';
+import { formatRelationalField } from '../utils/relationalFieldUtils';
 
 interface Employee {
   id: number;
@@ -39,12 +40,12 @@ export default function EmployeeDetailBottomSheet({
 }: EmployeeDetailBottomSheetProps) {
   // Bottom sheet refs and snap points
   const bottomSheetRef = useRef<BottomSheet>(null);
-  const snapPoints = useMemo(() => ['60%', '90%'], []); // Start at 60%, expand to 90%
+  const snapPoints = useMemo(() => ['50%', '85%'], []); // Start at 50%, expand to 85%
 
   // Handle visibility changes
   useEffect(() => {
     if (visible && employee) {
-      bottomSheetRef.current?.snapToIndex(0); // Open to first snap point (60%)
+      bottomSheetRef.current?.snapToIndex(0); // Open to first snap point (50%)
     } else {
       bottomSheetRef.current?.close();
     }
@@ -112,7 +113,7 @@ export default function EmployeeDetailBottomSheet({
               <Text style={styles.jobTitle}>{employee.job_title}</Text>
             )}
             {employee.department_id && (
-              <Text style={styles.department}>{employee.department_id[1]}</Text>
+              <Text style={styles.department}>{formatRelationalField(employee.department_id)}</Text>
             )}
             <View style={[styles.statusBadge, { backgroundColor: employee.active ? '#34C759' : '#999' }]}>
               <Text style={styles.statusText}>
@@ -178,7 +179,7 @@ export default function EmployeeDetailBottomSheet({
             <View style={styles.infoRow}>
               <MaterialIcons name="business" size={20} color="#666" />
               <Text style={styles.infoLabel}>Department</Text>
-              <Text style={styles.infoValue}>{employee.department_id[1]}</Text>
+              <Text style={styles.infoValue}>{formatRelationalField(employee.department_id)}</Text>
             </View>
           )}
           
@@ -192,25 +193,28 @@ export default function EmployeeDetailBottomSheet({
         {/* Quick Actions */}
         <View style={styles.quickActionsSection}>
           <Text style={styles.sectionTitle}>Quick Actions</Text>
-          
+
           <TouchableOpacity style={styles.quickAction}>
             <MaterialIcons name="event" size={20} color="#007AFF" />
             <Text style={styles.quickActionText}>Schedule Meeting</Text>
             <MaterialIcons name="chevron-right" size={20} color="#C7C7CC" />
           </TouchableOpacity>
-          
+
           <TouchableOpacity style={styles.quickAction}>
             <MaterialIcons name="assignment" size={20} color="#FF9500" />
             <Text style={styles.quickActionText}>Assign Task</Text>
             <MaterialIcons name="chevron-right" size={20} color="#C7C7CC" />
           </TouchableOpacity>
-          
+
           <TouchableOpacity style={styles.quickAction}>
             <MaterialIcons name="note-add" size={20} color="#34C759" />
             <Text style={styles.quickActionText}>Add Note</Text>
             <MaterialIcons name="chevron-right" size={20} color="#C7C7CC" />
           </TouchableOpacity>
         </View>
+
+        {/* Extra padding for better scrolling */}
+        <View style={styles.bottomPadding} />
         </BottomSheetScrollView>
       </BottomSheetView>
     </BottomSheet>
@@ -367,5 +371,8 @@ const styles = StyleSheet.create({
     fontWeight: '500',
     color: '#1A1A1A',
     flex: 1,
+  },
+  bottomPadding: {
+    height: 100, // Extra padding for better scrolling
   },
 });

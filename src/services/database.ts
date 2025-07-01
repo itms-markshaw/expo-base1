@@ -479,10 +479,15 @@ class DatabaseService {
       const hasNameColumn = tableInfo.some((column: any) => column.name === 'name');
 
       if (!hasNameColumn) {
-        await this.db.execAsync(`
-          ALTER TABLE messages ADD COLUMN name TEXT DEFAULT '';
-        `);
-        console.log('✅ Added name column to messages table');
+        try {
+          await this.db.execAsync(`
+            ALTER TABLE messages ADD COLUMN name TEXT DEFAULT '';
+          `);
+          console.log('✅ Added name column to messages table');
+        } catch (alterError: any) {
+          console.warn('⚠️ ALTER TABLE failed, recreating messages table:', alterError.message);
+          await this.recreateMessagesTable();
+        }
       } else {
         console.log('📋 Messages table already has name column');
       }
@@ -491,6 +496,51 @@ class DatabaseService {
     }
 
     console.log('✅ Database migrations completed');
+  }
+
+  /**
+   * Force recreate messages table with proper schema
+   */
+  async recreateMessagesTable(): Promise<void> {
+    if (!this.db) throw new Error('Database not initialized');
+
+    console.log('🔄 Recreating messages table...');
+
+    try {
+      // Drop existing table
+      await this.db.execAsync(`DROP TABLE IF EXISTS messages`);
+      console.log('🗑️ Dropped existing messages table');
+
+      // Recreate with proper schema
+      await this.db.execAsync(`
+        CREATE TABLE messages (
+          id INTEGER PRIMARY KEY,
+          name TEXT,
+          subject TEXT,
+          body TEXT,
+          date TEXT,
+          author_id INTEGER,
+          author_name TEXT,
+          email_from TEXT,
+          message_type TEXT,
+          subtype_id INTEGER,
+          subtype_name TEXT,
+          model TEXT,
+          res_id INTEGER,
+          record_name TEXT,
+          reply_to TEXT,
+          attachment_ids TEXT,
+          create_date TEXT,
+          write_date TEXT,
+          synced_at INTEGER DEFAULT (strftime('%s', 'now'))
+        );
+      `);
+      console.log('✅ Recreated messages table with proper schema');
+
+    } catch (error) {
+      console.error('❌ Failed to recreate messages table:', error);
+      throw error;
+    }
   }
 
   /**
@@ -517,6 +567,55 @@ class DatabaseService {
       console.error(`❌ Failed to save records to ${tableName}:`, error);
       throw error;
     }
+  }
+
+  /**
+   * Safely extract name from Odoo relational field array
+   * Handles cases where the name might be invalid (like "a")
+   */
+  private extractRelationalName(field: any, fallbackName?: string): string | null {
+    if (field && Array.isArray(field) && field.length > 1) {
+      let name = field[1];
+      if (name && typeof name === 'string') {
+        // Clean up company name from author (e.g., "ITMS Group Pty Ltd, Mark Shaw" -> "Mark Shaw")
+        if (name.includes(',')) {
+          const parts = name.split(',').map(part => part.trim());
+          if (parts.length > 1) {
+            name = parts[parts.length - 1];
+          }
+        }
+
+        // Ensure we have a valid name (not just "a" or other single/invalid characters)
+        if (name.length > 1 && !this.isInvalidName(name)) {
+          return name;
+        }
+      }
+    }
+    return fallbackName || null;
+  }
+
+  /**
+   * Check if a name is invalid (common Odoo data issues)
+   */
+  private isInvalidName(name: string): boolean {
+    if (!name || typeof name !== 'string') return true;
+
+    // Single character names are usually invalid
+    if (name.length === 1) return true;
+
+    // Common invalid patterns from Odoo
+    const invalidPatterns = [
+      /^a$/i,           // Just "a"
+      /^[a-z]$/i,       // Single letters
+      /^\d+$/,          // Just numbers
+      /^[\s\-_]+$/,     // Just whitespace/dashes/underscores
+      /^null$/i,        // "null" string
+      /^undefined$/i,   // "undefined" string
+      /^false$/i,       // "false" string
+      /^true$/i,        // "true" string
+    ];
+
+    return invalidPatterns.some(pattern => pattern.test(name.trim()));
   }
 
   /**
@@ -556,15 +655,15 @@ class DatabaseService {
       filteredRecord.mobile_phone = record.mobile_phone || null;
       filteredRecord.job_title = record.job_title || null;
       filteredRecord.department_id = record.department_id ? (Array.isArray(record.department_id) ? record.department_id[0] : record.department_id) : null;
-      filteredRecord.department_name = record.department_id && Array.isArray(record.department_id) ? record.department_id[1] : null;
+      filteredRecord.department_name = this.extractRelationalName(record.department_id, record.department_name);
       filteredRecord.parent_id = record.parent_id ? (Array.isArray(record.parent_id) ? record.parent_id[0] : record.parent_id) : null;
-      filteredRecord.parent_name = record.parent_id && Array.isArray(record.parent_id) ? record.parent_id[1] : null;
+      filteredRecord.parent_name = this.extractRelationalName(record.parent_id, record.parent_name);
       filteredRecord.coach_id = record.coach_id ? (Array.isArray(record.coach_id) ? record.coach_id[0] : record.coach_id) : null;
-      filteredRecord.coach_name = record.coach_id && Array.isArray(record.coach_id) ? record.coach_id[1] : null;
+      filteredRecord.coach_name = this.extractRelationalName(record.coach_id, record.coach_name);
       filteredRecord.company_id = record.company_id ? (Array.isArray(record.company_id) ? record.company_id[0] : record.company_id) : null;
-      filteredRecord.company_name = record.company_id && Array.isArray(record.company_id) ? record.company_id[1] : null;
+      filteredRecord.company_name = this.extractRelationalName(record.company_id, record.company_name);
       filteredRecord.user_id = record.user_id ? (Array.isArray(record.user_id) ? record.user_id[0] : record.user_id) : null;
-      filteredRecord.user_name = record.user_id && Array.isArray(record.user_id) ? record.user_id[1] : null;
+      filteredRecord.user_name = this.extractRelationalName(record.user_id, record.user_name);
       filteredRecord.resource_id = record.resource_id ? (Array.isArray(record.resource_id) ? record.resource_id[0] : record.resource_id) : null;
       filteredRecord.employee_type = record.employee_type || null;
       filteredRecord.active = record.active !== false ? 1 : 0;
@@ -582,11 +681,11 @@ class DatabaseService {
       filteredRecord.zip = record.zip || null;
       filteredRecord.country_id = record.country_id ? (Array.isArray(record.country_id) ? record.country_id[0] : record.country_id) : null;
       filteredRecord.stage_id = record.stage_id ? (Array.isArray(record.stage_id) ? record.stage_id[0] : record.stage_id) : null;
-      filteredRecord.stage_name = record.stage_id && Array.isArray(record.stage_id) ? record.stage_id[1] : null;
+      filteredRecord.stage_name = this.extractRelationalName(record.stage_id, record.stage_name);
       filteredRecord.user_id = record.user_id ? (Array.isArray(record.user_id) ? record.user_id[0] : record.user_id) : null;
-      filteredRecord.user_name = record.user_id && Array.isArray(record.user_id) ? record.user_id[1] : null;
+      filteredRecord.user_name = this.extractRelationalName(record.user_id, record.user_name);
       filteredRecord.team_id = record.team_id ? (Array.isArray(record.team_id) ? record.team_id[0] : record.team_id) : null;
-      filteredRecord.team_name = record.team_id && Array.isArray(record.team_id) ? record.team_id[1] : null;
+      filteredRecord.team_name = this.extractRelationalName(record.team_id, record.team_name);
       filteredRecord.company_id = record.company_id ? (Array.isArray(record.company_id) ? record.company_id[0] : record.company_id) : null;
       filteredRecord.source_id = record.source_id ? (Array.isArray(record.source_id) ? record.source_id[0] : record.source_id) : null;
       filteredRecord.medium_id = record.medium_id ? (Array.isArray(record.medium_id) ? record.medium_id[0] : record.medium_id) : null;
@@ -606,18 +705,18 @@ class DatabaseService {
     } else if (tableName === 'sale_orders') {
       // Sales Orders specific fields
       filteredRecord.partner_id = record.partner_id ? (Array.isArray(record.partner_id) ? record.partner_id[0] : record.partner_id) : null;
-      filteredRecord.partner_name = record.partner_id && Array.isArray(record.partner_id) ? record.partner_id[1] : null;
+      filteredRecord.partner_name = this.extractRelationalName(record.partner_id, record.partner_name);
       filteredRecord.date_order = record.date_order || null;
       filteredRecord.validity_date = record.validity_date || null;
       filteredRecord.user_id = record.user_id ? (Array.isArray(record.user_id) ? record.user_id[0] : record.user_id) : null;
-      filteredRecord.user_name = record.user_id && Array.isArray(record.user_id) ? record.user_id[1] : null;
+      filteredRecord.user_name = this.extractRelationalName(record.user_id, record.user_name);
       filteredRecord.team_id = record.team_id ? (Array.isArray(record.team_id) ? record.team_id[0] : record.team_id) : null;
-      filteredRecord.team_name = record.team_id && Array.isArray(record.team_id) ? record.team_id[1] : null;
+      filteredRecord.team_name = this.extractRelationalName(record.team_id, record.team_name);
       filteredRecord.amount_untaxed = record.amount_untaxed || 0;
       filteredRecord.amount_tax = record.amount_tax || 0;
       filteredRecord.amount_total = record.amount_total || 0;
       filteredRecord.currency_id = record.currency_id ? (Array.isArray(record.currency_id) ? record.currency_id[0] : record.currency_id) : null;
-      filteredRecord.currency_name = record.currency_id && Array.isArray(record.currency_id) ? record.currency_id[1] : null;
+      filteredRecord.currency_name = this.extractRelationalName(record.currency_id, record.currency_name);
       filteredRecord.state = record.state || null;
       filteredRecord.invoice_status = record.invoice_status || null;
       filteredRecord.delivery_status = record.delivery_status || null;
@@ -628,12 +727,12 @@ class DatabaseService {
       filteredRecord.note = record.note || null;
       filteredRecord.date_deadline = record.date_deadline || null;
       filteredRecord.user_id = record.user_id ? (Array.isArray(record.user_id) ? record.user_id[0] : record.user_id) : null;
-      filteredRecord.user_name = record.user_id && Array.isArray(record.user_id) ? record.user_id[1] : null;
+      filteredRecord.user_name = this.extractRelationalName(record.user_id, record.user_name);
       filteredRecord.res_model = record.res_model || null;
       filteredRecord.res_id = record.res_id || null;
       filteredRecord.res_name = record.res_name || null;
       filteredRecord.activity_type_id = record.activity_type_id ? (Array.isArray(record.activity_type_id) ? record.activity_type_id[0] : record.activity_type_id) : null;
-      filteredRecord.activity_type_name = record.activity_type_id && Array.isArray(record.activity_type_id) ? record.activity_type_id[1] : null;
+      filteredRecord.activity_type_name = this.extractRelationalName(record.activity_type_id, record.activity_type_name);
       filteredRecord.state = record.state || null;
     } else if (tableName === 'messages') {
       // Messages specific fields (name already set above)
@@ -641,11 +740,11 @@ class DatabaseService {
       filteredRecord.body = record.body || null;
       filteredRecord.date = record.date || null;
       filteredRecord.author_id = record.author_id ? (Array.isArray(record.author_id) ? record.author_id[0] : record.author_id) : null;
-      filteredRecord.author_name = record.author_id && Array.isArray(record.author_id) ? record.author_id[1] : null;
+      filteredRecord.author_name = this.extractRelationalName(record.author_id, record.author_name);
       filteredRecord.email_from = record.email_from || null;
       filteredRecord.message_type = record.message_type || null;
       filteredRecord.subtype_id = record.subtype_id ? (Array.isArray(record.subtype_id) ? record.subtype_id[0] : record.subtype_id) : null;
-      filteredRecord.subtype_name = record.subtype_id && Array.isArray(record.subtype_id) ? record.subtype_id[1] : null;
+      filteredRecord.subtype_name = this.extractRelationalName(record.subtype_id, record.subtype_name);
       filteredRecord.model = record.model || null;
       filteredRecord.res_id = record.res_id || null;
       filteredRecord.record_name = record.record_name || null;
@@ -666,13 +765,13 @@ class DatabaseService {
       filteredRecord.name = record.name || 'Task';
       filteredRecord.description = record.description || null;
       filteredRecord.project_id = record.project_id ? (Array.isArray(record.project_id) ? record.project_id[0] : record.project_id) : null;
-      filteredRecord.project_name = record.project_id && Array.isArray(record.project_id) ? record.project_id[1] : null;
+      filteredRecord.project_name = this.extractRelationalName(record.project_id, record.project_name);
       filteredRecord.user_ids = Array.isArray(record.user_ids) ? JSON.stringify(record.user_ids) : null;
       filteredRecord.partner_id = record.partner_id ? (Array.isArray(record.partner_id) ? record.partner_id[0] : record.partner_id) : null;
-      filteredRecord.partner_name = record.partner_id && Array.isArray(record.partner_id) ? record.partner_id[1] : null;
+      filteredRecord.partner_name = this.extractRelationalName(record.partner_id, record.partner_name);
       filteredRecord.date_deadline = record.date_deadline || null;
       filteredRecord.stage_id = record.stage_id ? (Array.isArray(record.stage_id) ? record.stage_id[0] : record.stage_id) : null;
-      filteredRecord.stage_name = record.stage_id && Array.isArray(record.stage_id) ? record.stage_id[1] : null;
+      filteredRecord.stage_name = this.extractRelationalName(record.stage_id, record.stage_name);
       filteredRecord.priority = record.priority || null;
       filteredRecord.active = record.active !== false ? 1 : 0;
     } else if (tableName === 'products') {
@@ -684,9 +783,9 @@ class DatabaseService {
       filteredRecord.list_price = record.list_price || 0;
       filteredRecord.standard_price = record.standard_price || 0;
       filteredRecord.categ_id = record.categ_id ? (Array.isArray(record.categ_id) ? record.categ_id[0] : record.categ_id) : null;
-      filteredRecord.categ_name = record.categ_id && Array.isArray(record.categ_id) ? record.categ_id[1] : null;
+      filteredRecord.categ_name = this.extractRelationalName(record.categ_id, record.categ_name);
       filteredRecord.uom_id = record.uom_id ? (Array.isArray(record.uom_id) ? record.uom_id[0] : record.uom_id) : null;
-      filteredRecord.uom_name = record.uom_id && Array.isArray(record.uom_id) ? record.uom_id[1] : null;
+      filteredRecord.uom_name = this.extractRelationalName(record.uom_id, record.uom_name);
       filteredRecord.active = record.active !== false ? 1 : 0;
     } else if (tableName === 'product_templates') {
       // Product Templates specific fields
@@ -695,11 +794,11 @@ class DatabaseService {
       filteredRecord.list_price = record.list_price || 0;
       filteredRecord.standard_price = record.standard_price || 0;
       filteredRecord.categ_id = record.categ_id ? (Array.isArray(record.categ_id) ? record.categ_id[0] : record.categ_id) : null;
-      filteredRecord.categ_name = record.categ_id && Array.isArray(record.categ_id) ? record.categ_id[1] : null;
+      filteredRecord.categ_name = this.extractRelationalName(record.categ_id, record.categ_name);
       filteredRecord.uom_id = record.uom_id ? (Array.isArray(record.uom_id) ? record.uom_id[0] : record.uom_id) : null;
-      filteredRecord.uom_name = record.uom_id && Array.isArray(record.uom_id) ? record.uom_id[1] : null;
+      filteredRecord.uom_name = this.extractRelationalName(record.uom_id, record.uom_name);
       filteredRecord.uom_po_id = record.uom_po_id ? (Array.isArray(record.uom_po_id) ? record.uom_po_id[0] : record.uom_po_id) : null;
-      filteredRecord.uom_po_name = record.uom_po_id && Array.isArray(record.uom_po_id) ? record.uom_po_id[1] : null;
+      filteredRecord.uom_po_name = this.extractRelationalName(record.uom_po_id, record.uom_po_name);
       filteredRecord.type = record.type || null;
       filteredRecord.sale_ok = record.sale_ok !== false ? 1 : 0;
       filteredRecord.purchase_ok = record.purchase_ok !== false ? 1 : 0;
@@ -708,14 +807,14 @@ class DatabaseService {
       // Invoices specific fields
       filteredRecord.name = record.name || 'Invoice';
       filteredRecord.partner_id = record.partner_id ? (Array.isArray(record.partner_id) ? record.partner_id[0] : record.partner_id) : null;
-      filteredRecord.partner_name = record.partner_id && Array.isArray(record.partner_id) ? record.partner_id[1] : null;
+      filteredRecord.partner_name = this.extractRelationalName(record.partner_id, record.partner_name);
       filteredRecord.invoice_date = record.invoice_date || null;
       filteredRecord.invoice_date_due = record.invoice_date_due || null;
       filteredRecord.amount_untaxed = record.amount_untaxed || 0;
       filteredRecord.amount_tax = record.amount_tax || 0;
       filteredRecord.amount_total = record.amount_total || 0;
       filteredRecord.currency_id = record.currency_id ? (Array.isArray(record.currency_id) ? record.currency_id[0] : record.currency_id) : null;
-      filteredRecord.currency_name = record.currency_id && Array.isArray(record.currency_id) ? record.currency_id[1] : null;
+      filteredRecord.currency_name = this.extractRelationalName(record.currency_id, record.currency_name);
       filteredRecord.state = record.state || null;
       filteredRecord.move_type = record.move_type || null;
       filteredRecord.ref = record.ref || null;
@@ -723,13 +822,13 @@ class DatabaseService {
       // Deliveries specific fields
       filteredRecord.name = record.name || 'Delivery';
       filteredRecord.partner_id = record.partner_id ? (Array.isArray(record.partner_id) ? record.partner_id[0] : record.partner_id) : null;
-      filteredRecord.partner_name = record.partner_id && Array.isArray(record.partner_id) ? record.partner_id[1] : null;
+      filteredRecord.partner_name = this.extractRelationalName(record.partner_id, record.partner_name);
       filteredRecord.picking_type_id = record.picking_type_id ? (Array.isArray(record.picking_type_id) ? record.picking_type_id[0] : record.picking_type_id) : null;
-      filteredRecord.picking_type_name = record.picking_type_id && Array.isArray(record.picking_type_id) ? record.picking_type_id[1] : null;
+      filteredRecord.picking_type_name = this.extractRelationalName(record.picking_type_id, record.picking_type_name);
       filteredRecord.location_id = record.location_id ? (Array.isArray(record.location_id) ? record.location_id[0] : record.location_id) : null;
-      filteredRecord.location_name = record.location_id && Array.isArray(record.location_id) ? record.location_id[1] : null;
+      filteredRecord.location_name = this.extractRelationalName(record.location_id, record.location_name);
       filteredRecord.location_dest_id = record.location_dest_id ? (Array.isArray(record.location_dest_id) ? record.location_dest_id[0] : record.location_dest_id) : null;
-      filteredRecord.location_dest_name = record.location_dest_id && Array.isArray(record.location_dest_id) ? record.location_dest_id[1] : null;
+      filteredRecord.location_dest_name = this.extractRelationalName(record.location_dest_id, record.location_dest_name);
       filteredRecord.scheduled_date = record.scheduled_date || null;
       filteredRecord.date_done = record.date_done || null;
       filteredRecord.state = record.state || null;
@@ -744,7 +843,7 @@ class DatabaseService {
       filteredRecord.allday = record.allday ? 1 : 0;
       filteredRecord.duration = record.duration || null;
       filteredRecord.user_id = record.user_id ? (Array.isArray(record.user_id) ? record.user_id[0] : record.user_id) : null;
-      filteredRecord.user_name = record.user_id && Array.isArray(record.user_id) ? record.user_id[1] : null;
+      filteredRecord.user_name = this.extractRelationalName(record.user_id, record.user_name);
       filteredRecord.partner_ids = Array.isArray(record.partner_ids) ? JSON.stringify(record.partner_ids) : null;
       filteredRecord.location = record.location || null;
       filteredRecord.privacy = record.privacy || null;

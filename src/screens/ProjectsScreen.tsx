@@ -19,6 +19,7 @@ import { MaterialIcons } from '@expo/vector-icons';
 import { authService } from '../services/auth';
 import { useAppNavigation } from '../components/AppNavigationProvider';
 import FilterBottomSheet from '../components/FilterBottomSheet';
+import { formatRelationalField } from '../utils/relationalFieldUtils';
 
 interface Project {
   id: number;
@@ -104,7 +105,7 @@ export default function ProjectsScreen() {
       filtered = filtered.filter(project =>
         project.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
         project.description?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        project.user_id?.[1]?.toLowerCase().includes(searchQuery.toLowerCase())
+        formatRelationalField(project.user_id)?.toLowerCase().includes(searchQuery.toLowerCase())
       );
     }
 
@@ -139,12 +140,12 @@ export default function ProjectsScreen() {
           </Text>
           {project.user_id && (
             <Text style={styles.projectManager} numberOfLines={1}>
-              Manager: {project.user_id[1]}
+              Manager: {formatRelationalField(project.user_id, 'Unassigned')}
             </Text>
           )}
           {project.partner_id && (
             <Text style={styles.projectCustomer} numberOfLines={1}>
-              Customer: {project.partner_id[1]}
+              Customer: {formatRelationalField(project.partner_id, 'No Customer')}
             </Text>
           )}
         </View>

@@ -18,6 +18,7 @@ import {
 import { MaterialIcons } from '@expo/vector-icons';
 import { authService } from '../services/auth';
 import FilterBottomSheet from '../components/FilterBottomSheet';
+import { formatRelationalField } from '../utils/relationalFieldUtils';
 
 interface CRMLead {
   id: number;
@@ -45,9 +46,9 @@ export default function CRMLeadsScreen() {
 
   const filters = [
     { id: 'all', name: 'All', icon: 'trending-up', count: leads.length },
-    { id: 'new', name: 'New', icon: 'fiber-new', count: leads.filter(l => l.stage_id[1]?.toLowerCase().includes('new')).length },
-    { id: 'qualified', name: 'Qualified', icon: 'verified', count: leads.filter(l => l.stage_id[1]?.toLowerCase().includes('qualified')).length },
-    { id: 'won', name: 'Won', icon: 'emoji-events', count: leads.filter(l => l.stage_id[1]?.toLowerCase().includes('won')).length },
+    { id: 'new', name: 'New', icon: 'fiber-new', count: leads.filter(l => formatRelationalField(l.stage_id)?.toLowerCase().includes('new')).length },
+    { id: 'qualified', name: 'Qualified', icon: 'verified', count: leads.filter(l => formatRelationalField(l.stage_id)?.toLowerCase().includes('qualified')).length },
+    { id: 'won', name: 'Won', icon: 'emoji-events', count: leads.filter(l => formatRelationalField(l.stage_id)?.toLowerCase().includes('won')).length },
   ];
 
   useEffect(() => {
@@ -86,16 +87,16 @@ export default function CRMLeadsScreen() {
     // Apply filter
     switch (filter) {
       case 'new':
-        filtered = filtered.filter(l => l.stage_id[1]?.toLowerCase().includes('new'));
+        filtered = filtered.filter(l => formatRelationalField(l.stage_id)?.toLowerCase().includes('new'));
         break;
       case 'qualified':
-        filtered = filtered.filter(l => l.stage_id[1]?.toLowerCase().includes('qualified'));
+        filtered = filtered.filter(l => formatRelationalField(l.stage_id)?.toLowerCase().includes('qualified'));
         break;
       case 'won':
-        filtered = filtered.filter(l => l.stage_id[1]?.toLowerCase().includes('won'));
+        filtered = filtered.filter(l => formatRelationalField(l.stage_id)?.toLowerCase().includes('won'));
         break;
       case 'lost':
-        filtered = filtered.filter(l => l.stage_id[1]?.toLowerCase().includes('lost'));
+        filtered = filtered.filter(l => formatRelationalField(l.stage_id)?.toLowerCase().includes('lost'));
         break;
     }
 
@@ -169,9 +170,9 @@ export default function CRMLeadsScreen() {
           )}
           
           <View style={styles.leadMeta}>
-            <View style={[styles.stageBadge, { backgroundColor: getStageColor(lead.stage_id[1]) + '15' }]}>
-              <Text style={[styles.stageText, { color: getStageColor(lead.stage_id[1]) }]}>
-                {lead.stage_id[1]}
+            <View style={[styles.stageBadge, { backgroundColor: getStageColor(formatRelationalField(lead.stage_id, 'New')) + '15' }]}>
+              <Text style={[styles.stageText, { color: getStageColor(formatRelationalField(lead.stage_id, 'New')) }]}>
+                {formatRelationalField(lead.stage_id, 'New')}
               </Text>
             </View>
           </View>
@@ -192,7 +193,7 @@ export default function CRMLeadsScreen() {
         {lead.user_id && (
           <View style={styles.assigneeInfo}>
             <MaterialIcons name="person" size={14} color="#666" />
-            <Text style={styles.assigneeText}>{lead.user_id[1]}</Text>
+            <Text style={styles.assigneeText}>{formatRelationalField(lead.user_id, 'Unassigned')}</Text>
           </View>
         )}
         

@@ -21,6 +21,7 @@ import { authService } from '../services/auth';
 import CalendarIntegrationComponent from './CalendarIntegrationComponent';
 import { calendarService } from '../services/calendarService';
 import FilterBottomSheet from './FilterBottomSheet';
+import { formatRelationalField } from '../utils/relationalFieldUtils';
 
 interface Activity {
   id: number;
@@ -397,7 +398,7 @@ export default function ActivitiesComponent() {
             </View>
             <View style={styles.activityMeta}>
               <Text style={styles.activityType}>
-                {activity.activity_type_id[1]}
+                {formatRelationalField(activity.activity_type_id)}
               </Text>
               <Text style={styles.activityRecord} numberOfLines={1}>
                 {activity.res_name}

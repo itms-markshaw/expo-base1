@@ -20,6 +20,7 @@ import { MaterialIcons } from '@expo/vector-icons';
 import { authService } from '../services/auth';
 import WorkflowActionsComponent from './WorkflowActionsComponent';
 import FilterBottomSheet from './FilterBottomSheet';
+import { formatRelationalField } from '../utils/relationalFieldUtils';
 
 interface SalesOrder {
   id: number;
@@ -59,12 +60,12 @@ export default function SalesOrderComponent() {
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [showFilterSheet, setShowFilterSheet] = useState(false);
 
-  const filters = [
-    { id: 'all', name: 'All', icon: 'list', color: '#666' },
-    { id: 'draft', name: 'Draft', icon: 'edit', color: '#FF9500' },
-    { id: 'sent', name: 'Sent', icon: 'send', color: '#007AFF' },
-    { id: 'sale', name: 'Confirmed', icon: 'check-circle', color: '#34C759' },
-    { id: 'done', name: 'Done', icon: 'done-all', color: '#666' },
+  const getFiltersWithCounts = () => [
+    { id: 'all', name: 'All', icon: 'list', count: salesOrders.length },
+    { id: 'draft', name: 'Draft', icon: 'edit', count: salesOrders.filter(o => o.state === 'draft').length },
+    { id: 'sent', name: 'Sent', icon: 'send', count: salesOrders.filter(o => o.state === 'sent').length },
+    { id: 'sale', name: 'Confirmed', icon: 'check-circle', count: salesOrders.filter(o => o.state === 'sale').length },
+    { id: 'done', name: 'Done', icon: 'done-all', count: salesOrders.filter(o => o.state === 'done').length },
   ];
 
   useEffect(() => {
@@ -156,7 +157,7 @@ export default function SalesOrderComponent() {
       <View style={styles.orderHeader}>
         <View style={styles.orderInfo}>
           <Text style={styles.orderNumber}>{order.name}</Text>
-          <Text style={styles.customerName}>{order.partner_id[1]}</Text>
+          <Text style={styles.customerName}>{formatRelationalField(order.partner_id, 'No Customer')}</Text>
         </View>
         
         <View style={styles.orderMeta}>
@@ -241,57 +242,18 @@ export default function SalesOrderComponent() {
         <View style={styles.headerActions}>
           <Text style={styles.orderCount}>{filteredOrders.length}</Text>
           <TouchableOpacity
+            style={styles.filterButton}
+            onPress={() => setShowFilterSheet(true)}
+          >
+            <MaterialIcons name="filter-list" size={20} color="#007AFF" />
+          </TouchableOpacity>
+          <TouchableOpacity
             style={styles.addButton}
             onPress={() => setShowCreateModal(true)}
           >
             <MaterialIcons name="add" size={20} color="#007AFF" />
           </TouchableOpacity>
         </View>
-      </View>
-
-      {/* Filter Bar */}
-      <View style={styles.filterBar}>
-        {filters.map((filter) => {
-          const count = filter.id === 'all' 
-            ? salesOrders.length 
-            : salesOrders.filter(o => o.state === filter.id).length;
-          
-          return (
-            <TouchableOpacity
-              key={filter.id}
-              style={[
-                styles.filterChip,
-                selectedFilter === filter.id && styles.filterChipActive
-              ]}
-              onPress={() => setSelectedFilter(filter.id as any)}
-            >
-              <MaterialIcons
-                name={filter.icon as any}
-                size={14}
-                color={selectedFilter === filter.id ? '#FFF' : filter.color}
-              />
-              <Text style={[
-                styles.filterChipText,
-                selectedFilter === filter.id && styles.filterChipTextActive
-              ]}>
-                {filter.name}
-              </Text>
-              {count > 0 && (
-                <View style={[
-                  styles.filterChipBadge,
-                  selectedFilter === filter.id && styles.filterChipBadgeActive
-                ]}>
-                  <Text style={[
-                    styles.filterChipBadgeText,
-                    selectedFilter === filter.id && styles.filterChipBadgeTextActive
-                  ]}>
-                    {count}
-                  </Text>
-                </View>
-              )}
-            </TouchableOpacity>
-          );
-        })}
       </View>
 
       {/* Orders List */}
@@ -341,7 +303,7 @@ export default function SalesOrderComponent() {
                 <Text style={styles.sectionTitle}>Order Information</Text>
                 <View style={styles.detailRow}>
                   <Text style={styles.detailLabel}>Customer:</Text>
-                  <Text style={styles.detailValue}>{selectedOrder.partner_id[1]}</Text>
+                  <Text style={styles.detailValue}>{formatRelationalField(selectedOrder.partner_id, 'No Customer')}</Text>
                 </View>
                 <View style={styles.detailRow}>
                   <Text style={styles.detailLabel}>Date:</Text>
@@ -349,11 +311,11 @@ export default function SalesOrderComponent() {
                 </View>
                 <View style={styles.detailRow}>
                   <Text style={styles.detailLabel}>Salesperson:</Text>
-                  <Text style={styles.detailValue}>{selectedOrder.user_id[1]}</Text>
+                  <Text style={styles.detailValue}>{formatRelationalField(selectedOrder.user_id)}</Text>
                 </View>
                 <View style={styles.detailRow}>
                   <Text style={styles.detailLabel}>Sales Team:</Text>
-                  <Text style={styles.detailValue}>{selectedOrder.team_id[1]}</Text>
+                  <Text style={styles.detailValue}>{formatRelationalField(selectedOrder.team_id)}</Text>
                 </View>
               </View>
 
@@ -440,6 +402,16 @@ export default function SalesOrderComponent() {
           }}
         />
       )}
+
+      {/* Filter Bottom Sheet */}
+      <FilterBottomSheet
+        visible={showFilterSheet}
+        onClose={() => setShowFilterSheet(false)}
+        title="Filter Sales Orders"
+        filters={getFiltersWithCounts()}
+        selectedFilter={selectedFilter}
+        onFilterSelect={(filterId) => setSelectedFilter(filterId as any)}
+      />
     </View>
   );
 }
@@ -485,58 +457,15 @@ const styles = StyleSheet.create({
     color: '#666',
     fontWeight: '500',
   },
+  filterButton: {
+    padding: 6,
+    borderRadius: 6,
+  },
   addButton: {
     padding: 6,
     borderRadius: 6,
   },
-  filterBar: {
-    flexDirection: 'row',
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    backgroundColor: '#FFF',
-    borderBottomWidth: 1,
-    borderBottomColor: '#E5E5E5',
-    gap: 8,
-  },
-  filterChip: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 6,
-    paddingHorizontal: 12,
-    borderRadius: 16,
-    backgroundColor: '#F8F9FA',
-    gap: 4,
-  },
-  filterChipActive: {
-    backgroundColor: '#007AFF',
-  },
-  filterChipText: {
-    fontSize: 12,
-    fontWeight: '500',
-    color: '#666',
-  },
-  filterChipTextActive: {
-    color: '#FFF',
-  },
-  filterChipBadge: {
-    backgroundColor: '#FF3B30',
-    borderRadius: 8,
-    paddingHorizontal: 4,
-    paddingVertical: 1,
-    minWidth: 16,
-    alignItems: 'center',
-  },
-  filterChipBadgeActive: {
-    backgroundColor: '#FFF',
-  },
-  filterChipBadgeText: {
-    fontSize: 10,
-    fontWeight: '600',
-    color: '#FFF',
-  },
-  filterChipBadgeTextActive: {
-    color: '#007AFF',
-  },
+
   ordersList: {
     flex: 1,
     paddingHorizontal: 16,

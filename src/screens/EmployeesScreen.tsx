@@ -19,6 +19,7 @@ import { MaterialIcons } from '@expo/vector-icons';
 import { authService } from '../services/auth';
 import FilterBottomSheet from '../components/FilterBottomSheet';
 import EmployeeDetailBottomSheet from '../components/EmployeeDetailBottomSheet';
+import { formatRelationalField } from '../utils/relationalFieldUtils';
 
 interface Employee {
   id: number;
@@ -102,7 +103,7 @@ export default function EmployeesScreen() {
         employee.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
         employee.work_email?.toLowerCase().includes(searchQuery.toLowerCase()) ||
         employee.job_title?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        employee.department_id?.[1]?.toLowerCase().includes(searchQuery.toLowerCase())
+        formatRelationalField(employee.department_id)?.toLowerCase().includes(searchQuery.toLowerCase())
       );
     }
 
@@ -136,7 +137,7 @@ export default function EmployeesScreen() {
           )}
           {employee.department_id && (
             <Text style={styles.employeeDepartment} numberOfLines={1}>
-              {employee.department_id[1]}
+              {formatRelationalField(employee.department_id)}
             </Text>
           )}
           {employee.work_email && (

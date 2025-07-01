@@ -104,6 +104,14 @@ export default function MoreTabScreen() {
       screenName: 'Mobile',
     },
     {
+      id: 'users',
+      name: 'Users',
+      description: 'User accounts and management',
+      icon: 'manage-accounts',
+      color: '#FF3B30',
+      screenName: 'Users',
+    },
+    {
       id: 'sync',
       name: 'Data Sync',
       description: 'Synchronize with Odoo server',

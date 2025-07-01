@@ -20,6 +20,7 @@ import { MaterialIcons } from '@expo/vector-icons';
 import { chatterService, ChatterMessage, ChatterActivity } from '../services/chatterService';
 import { odooActionsService, OdooAction } from '../services/odooActions';
 import { attachmentsService, OdooAttachment } from '../services/attachmentsService';
+import { formatRelationalField } from '../utils/relationalFieldUtils';
 
 interface SimpleChatterProps {
   model: string;
@@ -417,7 +418,7 @@ export default function SimpleChatterComponent({ model, recordId, recordName }: 
                   Due: {formatDate(activity.date_deadline)}
                 </Text>
                 <Text style={styles.activityUser}>
-                  Assigned to: {activity.user_id ? activity.user_id[1] : 'Unassigned'}
+                  Assigned to: {activity.user_id ? formatRelationalField(activity.user_id) : 'Unassigned'}
                 </Text>
               </View>
             ))}

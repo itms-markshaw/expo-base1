@@ -3,42 +3,62 @@
  * Provides one-tap business process automation for any Odoo record
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import {
   View,
   Text,
   StyleSheet,
-  ScrollView,
   TouchableOpacity,
   Alert,
-  Modal,
   TextInput,
   ActivityIndicator,
 } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
+import BottomSheet, { BottomSheetView, BottomSheetScrollView } from '@gorhom/bottom-sheet';
 import { odooWorkflowsService, WorkflowAction } from '../services/odooWorkflows';
 
 interface WorkflowActionsProps {
+  visible: boolean;
+  onClose: () => void;
   model: string;
   recordId: number;
   recordName?: string;
   onActionComplete?: () => void;
 }
 
-export default function WorkflowActionsComponent({ 
-  model, 
-  recordId, 
-  recordName, 
-  onActionComplete 
+export default function WorkflowActionsComponent({
+  visible,
+  onClose,
+  model,
+  recordId,
+  recordName,
+  onActionComplete
 }: WorkflowActionsProps) {
   const [actions, setActions] = useState<WorkflowAction[]>([]);
   const [loading, setLoading] = useState(false);
   const [executing, setExecuting] = useState<string | null>(null);
-  
-  // Confirmation modal states
-  const [showConfirmModal, setShowConfirmModal] = useState(false);
-  const [selectedAction, setSelectedAction] = useState<WorkflowAction | null>(null);
-  const [confirmationReason, setConfirmationReason] = useState('');
+
+
+
+  // Bottom sheet refs and snap points
+  const bottomSheetRef = useRef<BottomSheet>(null);
+  const snapPoints = useMemo(() => ['50%', '80%'], []); // Start at 50%, expand to 80%
+
+  // Handle visibility changes
+  useEffect(() => {
+    if (visible) {
+      bottomSheetRef.current?.snapToIndex(0); // Open to first snap point (50%)
+    } else {
+      bottomSheetRef.current?.close();
+    }
+  }, [visible]);
+
+  // Bottom sheet callbacks
+  const handleSheetChanges = useCallback((index: number) => {
+    if (index === -1) {
+      onClose();
+    }
+  }, [onClose]);
 
   useEffect(() => {
     loadWorkflowActions();
@@ -58,8 +78,21 @@ export default function WorkflowActionsComponent({
 
   const handleActionPress = (action: WorkflowAction) => {
     if (action.requires_confirmation) {
-      setSelectedAction(action);
-      setShowConfirmModal(true);
+      Alert.alert(
+        'Confirm Action',
+        `Are you sure you want to execute "${action.name}"?\n\nThis action will modify the record and cannot be undone.`,
+        [
+          {
+            text: 'Cancel',
+            style: 'cancel',
+          },
+          {
+            text: 'Execute',
+            style: 'destructive',
+            onPress: () => executeAction(action),
+          },
+        ]
+      );
     } else {
       executeAction(action);
     }
@@ -70,7 +103,7 @@ export default function WorkflowActionsComponent({
     try {
       const params = reason ? { reason } : {};
       const success = await odooWorkflowsService.executeWorkflowAction(action, recordId, params);
-      
+
       if (success) {
         Alert.alert(
           'Success',
@@ -87,16 +120,10 @@ export default function WorkflowActionsComponent({
       Alert.alert('Error', `Failed to execute ${action.name}: ${error.message}`);
     } finally {
       setExecuting(null);
-      setShowConfirmModal(false);
-      setConfirmationReason('');
     }
   };
 
-  const handleConfirmAction = () => {
-    if (selectedAction) {
-      executeAction(selectedAction, confirmationReason);
-    }
-  };
+
 
   const getActionIcon = (iconName: string) => {
     const iconMap: { [key: string]: any } = {
@@ -112,158 +139,143 @@ export default function WorkflowActionsComponent({
     return iconMap[iconName] || 'settings';
   };
 
-  if (loading) {
-    return (
-      <View style={styles.loadingContainer}>
-        <ActivityIndicator size="large" color="#007AFF" />
-        <Text style={styles.loadingText}>Loading workflow actions...</Text>
-      </View>
-    );
-  }
-
-  if (actions.length === 0) {
-    return (
-      <View style={styles.emptyContainer}>
-        <MaterialIcons name="settings" size={48} color="#C7C7CC" />
-        <Text style={styles.emptyText}>No workflow actions available</Text>
-        <Text style={styles.emptySubtext}>
-          Actions will appear here based on the record's current state
-        </Text>
-      </View>
-    );
-  }
-
   return (
-    <View style={styles.container}>
-      <View style={styles.header}>
-        <MaterialIcons name="settings" size={24} color="#007AFF" />
-        <Text style={styles.title}>Workflow Actions</Text>
-        <Text style={styles.subtitle}>{recordName || `${model}:${recordId}`}</Text>
-      </View>
-
-      <ScrollView style={styles.actionsContainer}>
-        {actions.map((action) => (
+    <BottomSheet
+      ref={bottomSheetRef}
+      index={-1} // Start closed
+      snapPoints={snapPoints}
+      onChange={handleSheetChanges}
+      enablePanDownToClose={true}
+      backgroundStyle={styles.bottomSheetBackground}
+      handleIndicatorStyle={styles.bottomSheetHandle}
+    >
+      <BottomSheetView style={styles.bottomSheetContainer}>
+        {/* Header */}
+        <View style={styles.header}>
+          <Text style={styles.title}>Workflow Actions</Text>
           <TouchableOpacity
-            key={action.id}
-            style={[
-              styles.actionCard,
-              { borderLeftColor: action.color }
-            ]}
-            onPress={() => handleActionPress(action)}
-            disabled={executing === action.id}
+            onPress={() => bottomSheetRef.current?.close()}
+            style={styles.closeButton}
           >
-            <View style={styles.actionHeader}>
-              <View style={styles.actionIconContainer}>
-                <MaterialIcons 
-                  name={getActionIcon(action.icon) as any} 
-                  size={24} 
-                  color={action.color} 
-                />
-              </View>
-              <View style={styles.actionInfo}>
-                <Text style={styles.actionName}>{action.name}</Text>
-                <Text style={styles.actionDescription}>{action.description}</Text>
-              </View>
-              <View style={styles.actionStatus}>
-                {executing === action.id ? (
-                  <ActivityIndicator size="small" color={action.color} />
-                ) : (
-                  <MaterialIcons 
-                    name={action.requires_confirmation ? "warning" : "play-arrow"} 
-                    size={20} 
-                    color={action.requires_confirmation ? "#FF9500" : "#34C759"} 
-                  />
-                )}
-              </View>
-            </View>
-            
-            {action.requires_confirmation && (
-              <View style={styles.confirmationBadge}>
-                <MaterialIcons name="warning" size={16} color="#FF9500" />
-                <Text style={styles.confirmationText}>Requires confirmation</Text>
-              </View>
-            )}
+            <MaterialIcons name="close" size={24} color="#666" />
           </TouchableOpacity>
-        ))}
-      </ScrollView>
-
-      {/* Confirmation Modal */}
-      <Modal
-        visible={showConfirmModal}
-        animationType="slide"
-        presentationStyle="pageSheet"
-        onRequestClose={() => setShowConfirmModal(false)}
-      >
-        <View style={styles.modalContainer}>
-          <View style={styles.modalHeader}>
-            <TouchableOpacity onPress={() => setShowConfirmModal(false)}>
-              <Text style={styles.cancelButton}>Cancel</Text>
-            </TouchableOpacity>
-            <Text style={styles.modalTitle}>Confirm Action</Text>
-            <TouchableOpacity onPress={handleConfirmAction}>
-              <Text style={styles.confirmButton}>Execute</Text>
-            </TouchableOpacity>
-          </View>
-
-          <View style={styles.modalContent}>
-            {selectedAction && (
-              <>
-                <View style={styles.actionPreview}>
-                  <MaterialIcons 
-                    name={getActionIcon(selectedAction.icon) as any} 
-                    size={32} 
-                    color={selectedAction.color} 
-                  />
-                  <Text style={styles.actionPreviewName}>{selectedAction.name}</Text>
-                  <Text style={styles.actionPreviewDescription}>
-                    {selectedAction.description}
-                  </Text>
-                </View>
-
-                <View style={styles.warningBox}>
-                  <MaterialIcons name="warning" size={24} color="#FF9500" />
-                  <Text style={styles.warningText}>
-                    This action will modify the record and cannot be undone. 
-                    Please confirm you want to proceed.
-                  </Text>
-                </View>
-
-                <Text style={styles.inputLabel}>Reason (optional):</Text>
-                <TextInput
-                  style={styles.reasonInput}
-                  placeholder="Enter reason for this action..."
-                  value={confirmationReason}
-                  onChangeText={setConfirmationReason}
-                  multiline
-                  numberOfLines={3}
-                  textAlignVertical="top"
-                />
-
-                <View style={styles.recordInfo}>
-                  <Text style={styles.recordInfoLabel}>Record:</Text>
-                  <Text style={styles.recordInfoValue}>
-                    {recordName || `${model}:${recordId}`}
-                  </Text>
-                </View>
-              </>
-            )}
-          </View>
         </View>
-      </Modal>
-    </View>
+
+        {/* Content */}
+        <BottomSheetScrollView style={styles.content} showsVerticalScrollIndicator={false}>
+          {loading && (
+            <View style={styles.loadingContainer}>
+              <ActivityIndicator size="large" color="#007AFF" />
+              <Text style={styles.loadingText}>Loading workflow actions...</Text>
+            </View>
+          )}
+
+          {!loading && actions.length === 0 && (
+            <View style={styles.emptyContainer}>
+              <MaterialIcons name="settings" size={48} color="#C7C7CC" />
+              <Text style={styles.emptyText}>No workflow actions available</Text>
+              <Text style={styles.emptySubtext}>
+                Actions will appear here based on the record's current state
+              </Text>
+            </View>
+          )}
+
+          {!loading && actions.length > 0 && (
+            <View style={styles.actionsContainer}>
+              <Text style={styles.subtitle}>{recordName || `${model}:${recordId}`}</Text>
+
+              {actions.map((action) => (
+                <TouchableOpacity
+                  key={action.id}
+                  style={[
+                    styles.actionCard,
+                    { borderLeftColor: action.color }
+                  ]}
+                  onPress={() => handleActionPress(action)}
+                  disabled={executing === action.id}
+                >
+                  <View style={styles.actionHeader}>
+                    <View style={styles.actionIconContainer}>
+                      <MaterialIcons
+                        name={getActionIcon(action.icon) as any}
+                        size={24}
+                        color={action.color}
+                      />
+                    </View>
+                    <View style={styles.actionInfo}>
+                      <Text style={styles.actionName}>{action.name}</Text>
+                      <Text style={styles.actionDescription}>{action.description}</Text>
+                    </View>
+                    <View style={styles.actionStatus}>
+                      {executing === action.id ? (
+                        <ActivityIndicator size="small" color={action.color} />
+                      ) : (
+                        <MaterialIcons
+                          name={action.requires_confirmation ? "warning" : "play-arrow"}
+                          size={20}
+                          color={action.requires_confirmation ? "#FF9500" : "#34C759"}
+                        />
+                      )}
+                    </View>
+                  </View>
+
+                  {action.requires_confirmation && (
+                    <View style={styles.confirmationBadge}>
+                      <MaterialIcons name="warning" size={16} color="#FF9500" />
+                      <Text style={styles.confirmationText}>Requires confirmation</Text>
+                    </View>
+                  )}
+                </TouchableOpacity>
+              ))}
+            </View>
+          )}
+        </BottomSheetScrollView>
+
+      </BottomSheetView>
+    </BottomSheet>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
+  bottomSheetBackground: {
+    backgroundColor: '#FFF',
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+  },
+  bottomSheetHandle: {
+    backgroundColor: '#C7C7CC',
+    width: 40,
+    height: 4,
+  },
+  bottomSheetContainer: {
     flex: 1,
-    backgroundColor: '#F8F9FA',
+    backgroundColor: '#FFF',
+  },
+  header: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: '#E5E5E5',
+  },
+  title: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#1A1A1A',
+  },
+  closeButton: {
+    padding: 4,
+  },
+  content: {
+    flex: 1,
+    paddingHorizontal: 16,
   },
   loadingContainer: {
-    flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: '#F8F9FA',
+    paddingVertical: 40,
   },
   loadingText: {
     marginTop: 16,
@@ -271,11 +283,9 @@ const styles = StyleSheet.create({
     color: '#666',
   },
   emptyContainer: {
-    flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: '#F8F9FA',
-    padding: 32,
+    paddingVertical: 40,
   },
   emptyText: {
     fontSize: 18,
@@ -291,27 +301,14 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     lineHeight: 20,
   },
-  header: {
-    padding: 16,
-    backgroundColor: '#FFF',
-    borderBottomWidth: 1,
-    borderBottomColor: '#E5E5E5',
-    alignItems: 'center',
-  },
-  title: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: '#1A1A1A',
-    marginTop: 8,
-  },
   subtitle: {
     fontSize: 14,
     color: '#666',
-    marginTop: 4,
+    marginTop: 12,
+    marginBottom: 16,
   },
   actionsContainer: {
-    flex: 1,
-    padding: 16,
+    paddingTop: 8,
   },
   actionCard: {
     backgroundColor: '#FFF',
@@ -368,105 +365,5 @@ const styles = StyleSheet.create({
     color: '#FF9500',
     marginLeft: 4,
     fontWeight: '600',
-  },
-  modalContainer: {
-    flex: 1,
-    backgroundColor: '#F8F9FA',
-  },
-  modalHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    padding: 16,
-    backgroundColor: '#FFF',
-    borderBottomWidth: 1,
-    borderBottomColor: '#E5E5E5',
-  },
-  modalTitle: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: '#1A1A1A',
-  },
-  cancelButton: {
-    fontSize: 16,
-    color: '#666',
-  },
-  confirmButton: {
-    fontSize: 16,
-    color: '#007AFF',
-    fontWeight: '600',
-  },
-  modalContent: {
-    flex: 1,
-    padding: 16,
-  },
-  actionPreview: {
-    alignItems: 'center',
-    padding: 24,
-    backgroundColor: '#FFF',
-    borderRadius: 12,
-    marginBottom: 16,
-  },
-  actionPreviewName: {
-    fontSize: 20,
-    fontWeight: '600',
-    color: '#1A1A1A',
-    marginTop: 12,
-  },
-  actionPreviewDescription: {
-    fontSize: 14,
-    color: '#666',
-    marginTop: 4,
-    textAlign: 'center',
-  },
-  warningBox: {
-    flexDirection: 'row',
-    backgroundColor: '#FFF5E6',
-    padding: 16,
-    borderRadius: 8,
-    marginBottom: 16,
-    borderLeftWidth: 4,
-    borderLeftColor: '#FF9500',
-  },
-  warningText: {
-    flex: 1,
-    fontSize: 14,
-    color: '#B8860B',
-    marginLeft: 12,
-    lineHeight: 20,
-  },
-  inputLabel: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#1A1A1A',
-    marginBottom: 8,
-  },
-  reasonInput: {
-    backgroundColor: '#FFF',
-    borderRadius: 8,
-    padding: 12,
-    fontSize: 16,
-    borderWidth: 1,
-    borderColor: '#E5E5E5',
-    minHeight: 80,
-    textAlignVertical: 'top',
-    marginBottom: 16,
-  },
-  recordInfo: {
-    backgroundColor: '#F8F9FA',
-    padding: 12,
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: '#E5E5E5',
-  },
-  recordInfoLabel: {
-    fontSize: 12,
-    color: '#666',
-    fontWeight: '600',
-  },
-  recordInfoValue: {
-    fontSize: 14,
-    color: '#1A1A1A',
-    marginTop: 2,
   },
 });

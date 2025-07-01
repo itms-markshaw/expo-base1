@@ -30,6 +30,7 @@ import CRMLeadsScreen from './src/screens/CRMLeadsScreen';
 import SalesOrderScreen from './src/screens/SalesOrderScreen';
 
 import EmployeesScreen from './src/screens/EmployeesScreen';
+import UsersScreen from './src/screens/UsersScreen';
 import MobileScreen from './src/screens/MobileScreen';
 import MessagesScreen from './src/screens/MessagesScreen';
 import AttachmentsScreen from './src/screens/AttachmentsScreen';
@@ -95,6 +96,11 @@ function AllScreensStack() {
         name="Employees"
         component={withBottomNav(EmployeesScreen, 'Employees')}
         options={{ title: 'Employees' }}
+      />
+      <Stack.Screen
+        name="Users"
+        component={withBottomNav(UsersScreen, 'Users')}
+        options={{ title: 'Users' }}
       />
       <Stack.Screen
         name="CRMLeads"

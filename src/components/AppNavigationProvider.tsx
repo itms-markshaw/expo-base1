@@ -69,6 +69,7 @@ export default function AppNavigationProvider({ children }: AppNavigationProvide
       'CRM': 'CRMLeads',
       'CRM Leads': 'CRMLeads',
       'Employees': 'Employees',
+      'Users': 'Users',
       'Settings': 'Settings',
       'Sync': 'SyncStack',
       'Data': 'Data',

@@ -100,6 +100,8 @@ export default function SyncScreen() {
     return option?.label || timePeriod;
   };
 
+
+
   return (
     <SafeAreaView style={styles.container}>
       <ScrollView style={styles.scrollView}>
@@ -236,15 +238,17 @@ export default function SyncScreen() {
             onPress={handleStartSync}
             disabled={syncStatus.isRunning || selectedModels.length === 0}
           >
-            <MaterialIcons 
-              name={syncStatus.isRunning ? "hourglass-empty" : "sync"} 
-              size={20} 
-              color="#FFF" 
+            <MaterialIcons
+              name={syncStatus.isRunning ? "hourglass-empty" : "sync"}
+              size={20}
+              color="#FFF"
             />
             <Text style={styles.syncButtonText}>
               {syncStatus.isRunning ? 'Syncing...' : 'Start Sync'}
             </Text>
           </TouchableOpacity>
+
+
         </View>
 
         {/* Errors */}
@@ -514,6 +518,7 @@ const styles = StyleSheet.create({
     color: '#FFF',
     marginLeft: 8,
   },
+
   errorsContainer: {
     backgroundColor: '#FFEBEE',
     borderRadius: 12,

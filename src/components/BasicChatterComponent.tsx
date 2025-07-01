@@ -17,6 +17,7 @@ import {
 } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
 import { authService } from '../services/auth';
+import { formatRelationalField } from '../utils/relationalFieldUtils';
 
 interface BasicChatterProps {
   model: string;
@@ -276,7 +277,7 @@ export default function BasicChatterComponent({ model, recordId, recordName }: B
                 </Text>
                 {activity.user_id && (
                   <Text style={styles.activityUser}>
-                    Assigned to: {activity.user_id[1]}
+                    Assigned to: {formatRelationalField(activity.user_id)}
                   </Text>
                 )}
               </View>

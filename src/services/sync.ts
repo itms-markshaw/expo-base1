@@ -152,12 +152,14 @@ class SyncService {
         displayName: 'Attachments',
         description: 'Files and document attachments',
         enabled: true,
+        syncType: 'time', // Time-based sync for attachments
       },
       {
         name: 'calendar.event',
         displayName: 'Calendar Events',
         description: 'Calendar events and meetings',
         enabled: true,
+        syncType: 'time', // Time-based sync for calendar events
       },
       {
         name: 'res.users',
@@ -681,6 +683,20 @@ class SyncService {
   }
 
   /**
+   * Fix messages table schema issue
+   */
+  async fixMessagesTable(): Promise<void> {
+    try {
+      console.log('🔧 Fixing messages table schema...');
+      await databaseService.recreateMessagesTable();
+      console.log('✅ Messages table schema fixed');
+    } catch (error) {
+      console.error('❌ Failed to fix messages table:', error);
+      throw error;
+    }
+  }
+
+  /**
    * Check if app is in offline mode
    */
   async isOfflineMode(): Promise<boolean> {
@@ -746,8 +762,8 @@ class SyncService {
       return 5000; // Higher limit for master data
     }
 
-    // Time-based models get reasonable limits
-    return 1000;
+    // Time-based models get higher limits too (since they're filtered by time)
+    return 2500; // Increased from 1000 to 2500 for time-filtered data
   }
 
   /**
