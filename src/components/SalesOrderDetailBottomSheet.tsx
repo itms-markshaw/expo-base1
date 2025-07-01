@@ -1,15 +1,18 @@
-import React, { useMemo, useCallback, useEffect, useState } from 'react';
+/**
+ * Sales Order Detail Bottom Sheet - GOOGLE MAPS STYLE
+ * Simple @gorhom/bottom-sheet with working infinite scroll like Google Maps
+ */
+
+import React, { useRef, useMemo, useCallback, useEffect, useState } from 'react';
 import {
   View,
   Text,
   StyleSheet,
   TouchableOpacity,
   ActivityIndicator,
-  FlatList,
-  Modal,
-  Dimensions,
 } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
+import BottomSheet, { BottomSheetFlatList } from '@gorhom/bottom-sheet';
 import { authService } from '../services/auth';
 
 interface SalesOrder {
@@ -33,11 +36,12 @@ interface SalesOrderLine {
   id: number;
   product_id: [number, string];
   name: string;
+  display_name?: string;
   product_uom_qty: number;
   price_unit: number;
   price_subtotal: number;
   discount: number;
-  display_name?: string;
+  sequence?: number;
 }
 
 interface SalesOrderDetailBottomSheetProps {
@@ -47,447 +51,455 @@ interface SalesOrderDetailBottomSheetProps {
   order: SalesOrder | null;
 }
 
-const { height: screenHeight } = Dimensions.get('window');
-
 export default function SalesOrderDetailBottomSheet({
   visible,
   onClose,
   onWorkflowActions,
   order,
 }: SalesOrderDetailBottomSheetProps) {
-  const [orderLines, setOrderLines] = useState<SalesOrderLine[]>([]);
-  const [loadingLines, setLoadingLines] = useState(false);
-  const [loadingMore, setLoadingMore] = useState(false);
-  const [currentPage, setCurrentPage] = useState(0);
-  const [hasMoreData, setHasMoreData] = useState(true);
+  // Bottom sheet refs and snap points - STABLE FOR GESTURES
+  const bottomSheetRef = useRef<BottomSheet>(null);
+  const snapPoints = useMemo(() => ['25%', '50%', '95%'], []); // Fixed snap points for consistency
 
+  // 🔄 Infinite Scroll State - CORRECTED SYNTAX
+  const [orderLines, setOrderLines] = useState<SalesOrderLine[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [hasMoreData, setHasMoreData] = useState(true);
+  const [currentPage, setCurrentPage] = useState(0); // Fixed syntax error
+  const [error, setError] = useState<string | null>(null);
+
+  // Configuration
   const ITEMS_PER_PAGE = 20;
 
-  // Utility functions
-  const formatCurrency = (amount: number, currencySymbol: string = '$') => {
-    return `${currencySymbol}${amount.toLocaleString(undefined, { minimumFractionDigits: 2 })}`;
-  };
-
-  const formatDate = (dateString: string) => {
-    if (!dateString) return 'No Date';
-    try {
-      const date = new Date(dateString);
-      return date.toLocaleDateString(undefined, {
-        year: 'numeric',
-        month: 'short',
-        day: 'numeric'
-      });
-    } catch (error) {
-      return 'Invalid Date';
-    }
-  };
-
-  const formatRelationalField = (field: any, fallback: string = 'Unknown') => {
-    if (!field) return fallback;
-    if (Array.isArray(field) && field.length > 1) {
-      return field[1];
-    }
-    return fallback;
-  };
-
-  // Infinite scroll implementation
-  const loadOrderLines = async (page: number = 0, reset: boolean = false) => {
-    if (!order || (!hasMoreData && !reset)) return;
-    
-    if (page === 0) {
-      setLoadingLines(true);
+  // Handle visibility changes - SMOOTH OPEN/CLOSE
+  useEffect(() => {
+    if (visible && order) {
+      console.log(`📋 Opening order: ${order.name}`);
+      bottomSheetRef.current?.snapToIndex(1); // Open to 50%
+      loadOrderLines(0, true);
     } else {
-      setLoadingMore(true);
+      bottomSheetRef.current?.close();
     }
+  }, [visible, order]);
+
+  // Bottom sheet callbacks - OPTIMIZED FOR GESTURES
+  const handleSheetChanges = useCallback((index: number) => {
+    console.log(`📋 Sheet index: ${index}`);
+    if (index === -1) {
+      onClose();
+    }
+  }, [onClose]);
+
+  // 📥 Load order lines with pagination
+  const loadOrderLines = async (page: number = 0, reset: boolean = false) => {
+    if (!order || (!hasMoreData && !reset) || loadingMore) return;
+
+    console.log(`📥 Loading page ${page}`);
+    if (page === 0) setLoading(true);
+    else setLoadingMore(true);
 
     try {
       const client = authService.getClient();
-      if (!client) return;
+      if (!client) throw new Error('Not authenticated');
 
-      const lines = await client.searchRead('sale.order.line',
+      const lines = await client.searchRead(
+        'sale.order.line',
         [['order_id', '=', order.id]],
         ['id', 'product_id', 'name', 'display_name', 'product_uom_qty', 'price_unit', 'price_subtotal', 'discount'],
-        { 
-          order: 'sequence asc',
+        {
+          order: 'sequence asc, id asc',
           limit: ITEMS_PER_PAGE,
-          offset: page * ITEMS_PER_PAGE
+          offset: page * ITEMS_PER_PAGE,
         }
       );
 
+      console.log(`✅ Loaded ${lines.length} lines`);
       if (reset) {
         setOrderLines(lines);
+        setCurrentPage(0);
       } else {
-        setOrderLines(prev => [...prev, ...lines]);
+        setOrderLines((prev) => [...prev, ...lines]);
+        setCurrentPage(page);
       }
-
       setHasMoreData(lines.length === ITEMS_PER_PAGE);
-      setCurrentPage(page);
-      
+      setError(null);
     } catch (error) {
-      console.error('Error loading order lines:', error);
+      console.error('❌ Failed to load lines:', error);
+      setError('Failed to load items');
     } finally {
-      setLoadingLines(false);
+      setLoading(false);
       setLoadingMore(false);
     }
   };
 
-  const handleLoadMore = () => {
-    if (!loadingMore && hasMoreData) {
-      loadOrderLines(currentPage + 1);
+  // 🔄 Handle infinite scroll - OPTIMIZED
+  const handleLoadMore = useCallback(() => {
+    console.log(
+      `🔄 onEndReached - loadingMore: ${loadingMore}, hasMoreData: ${hasMoreData}, loading: ${loading}, orderLines: ${orderLines.length}`
+    );
+    if (!loadingMore && hasMoreData && !loading && orderLines.length > 0) {
+      console.log('🔄 Loading more data');
+      loadOrderLines(currentPage + 1, false);
     }
+  }, [loadingMore, hasMoreData, currentPage, loading, orderLines.length]);
+
+  // Utility functions
+  const formatCurrency = (amount: number) => {
+    return `$${amount.toLocaleString(undefined, { minimumFractionDigits: 2 })}`;
   };
 
-  // Debug visibility changes
-  useEffect(() => {
-    console.log('BottomSheet visibility changed:', visible, 'order:', order?.name);
-  }, [visible, order]);
+  const formatDate = (dateString: string) => {
+    if (!dateString) return 'No Date';
+    return new Date(dateString).toLocaleDateString();
+  };
 
-  // Load initial data
-  useEffect(() => {
-    if (order && visible) {
-      loadOrderLines(0, true);
-    }
-  }, [order?.id, visible]);
+  const formatRelationalField = (field: any, fallback: string = 'Unknown') => {
+    if (!field) return fallback;
+    if (Array.isArray(field) && field.length > 1) return field[1];
+    return fallback;
+  };
 
-
-
-  // Create flat data structure
+  // 📋 Create data for FlatList - GOOGLE MAPS SEARCH RESULTS
   const flatListData = useMemo(() => {
     if (!order) return [];
-    
+
     const data = [];
-    
-    // Order Information
-    data.push({
-      id: 'order-info',
-      type: 'section',
-      title: 'Order Information',
-      content: [
-        { label: 'Customer', value: formatRelationalField(order.partner_id, 'No Customer') },
-        { label: 'Date', value: formatDate(order.date_order) },
-        { label: 'Salesperson', value: formatRelationalField(order.user_id) },
-        { label: 'Sales Team', value: formatRelationalField(order.team_id) },
-      ]
+    data.push({ id: 'header', type: 'header', order });
+    data.push({ id: 'status', type: 'status', order });
+    orderLines.forEach((line) => {
+      data.push({ id: `line-${line.id}`, type: 'line-item', line });
     });
-
-    // Status
-    data.push({
-      id: 'status',
-      type: 'status',
-      title: 'Status',
-      orderStatus: order.state,
-      invoiceStatus: order.invoice_status,
-      deliveryStatus: order.delivery_status,
-    });
-
-    // Line Items Header
-    data.push({
-      id: 'line-items-header',
-      type: 'section-header',
-      title: 'Line Items'
-    });
-
-    // Each Line Item
-    orderLines.forEach(line => {
-      data.push({
-        id: `line-${line.id}`,
-        type: 'line-item',
-        line
-      });
-    });
-
-    // Financial Summary
-    data.push({
-      id: 'financial-summary',
-      type: 'section',
-      title: 'Financial Summary',
-      content: [
-        { label: 'Subtotal', value: formatCurrency(order.amount_untaxed) },
-        { label: 'Tax', value: formatCurrency(order.amount_tax) },
-        { label: 'Total', value: formatCurrency(order.amount_total), isTotal: true },
-      ]
-    });
-
+    data.push({ id: 'total', type: 'total', order });
     return data;
   }, [order, orderLines]);
 
-  // Render function
-  const renderItem = useCallback(({ item }: { item: any }) => {
-    switch (item.type) {
-      case 'section':
-        return (
-          <View style={styles.section}>
-            <Text style={styles.sectionTitle}>{item.title}</Text>
-            {item.content.map((info: any, index: number) => (
-              <View key={index} style={styles.infoRow}>
-                <Text style={styles.infoLabel}>{info.label}:</Text>
-                <Text style={[styles.infoValue, info.isTotal && styles.totalValue]}>
-                  {info.value}
-                </Text>
+  // 🎨 Render items - GOOGLE MAPS STYLE
+  const renderItem = useCallback(
+    ({ item }: { item: any }) => {
+      switch (item.type) {
+        case 'header':
+          return (
+            <View style={styles.header}>
+              <View style={styles.headerMain}>
+                <Text style={styles.orderNumber}>{item.order.name}</Text>
+                <TouchableOpacity onPress={onWorkflowActions} style={styles.moreButton}>
+                  <MaterialIcons name="more-vert" size={24} color="#007AFF" />
+                </TouchableOpacity>
               </View>
-            ))}
-          </View>
-        );
-      
-      case 'status':
-        return (
-          <View style={styles.section}>
-            <Text style={styles.sectionTitle}>{item.title}</Text>
-            <View style={styles.statusGrid}>
+              <Text style={styles.customer}>
+                {formatRelationalField(item.order.partner_id, 'No Customer')}
+              </Text>
+              <Text style={styles.date}>{formatDate(item.order.date_order)}</Text>
+            </View>
+          );
+        case 'status':
+          return (
+            <View style={styles.statusContainer}>
               <View style={styles.statusItem}>
-                <MaterialIcons 
-                  name="check-circle" 
-                  size={24} 
-                  color={item.orderStatus === 'sale' ? '#4CAF50' : '#FFC107'} 
-                />
-                <Text style={styles.statusItemLabel}>Order Status</Text>
-                <Text style={[styles.statusItemValue, { color: item.orderStatus === 'sale' ? '#4CAF50' : '#FFC107' }]}>
-                  {item.orderStatus?.toUpperCase() || 'SALE'}
-                </Text>
+                <MaterialIcons name="check-circle" size={16} color="#34C759" />
+                <Text style={styles.statusText}>{item.order.state.toUpperCase()}</Text>
               </View>
               <View style={styles.statusItem}>
-                <MaterialIcons 
-                  name="receipt" 
-                  size={24} 
-                  color={item.invoiceStatus === 'invoiced' ? '#4CAF50' : '#FF9800'} 
-                />
-                <Text style={styles.statusItemLabel}>Invoice</Text>
-                <Text style={[styles.statusItemValue, { color: item.invoiceStatus === 'invoiced' ? '#4CAF50' : '#FF9800' }]}>
-                  {item.invoiceStatus === 'invoiced' ? 'Invoiced' : 'Pending'}
-                </Text>
-              </View>
-              <View style={styles.statusItem}>
-                <MaterialIcons 
-                  name="local-shipping" 
-                  size={24} 
-                  color={item.deliveryStatus === 'full' ? '#4CAF50' : '#FF9800'} 
-                />
-                <Text style={styles.statusItemLabel}>Delivery</Text>
-                <Text style={[styles.statusItemValue, { color: item.deliveryStatus === 'full' ? '#4CAF50' : '#FF9800' }]}>
-                  {item.deliveryStatus === 'full' ? 'Delivered' : 'Pending'}
+                <MaterialIcons name="receipt" size={16} color="#007AFF" />
+                <Text style={styles.statusText}>
+                  {item.order.invoice_status === 'invoiced' ? 'INVOICED' : 'TO INVOICE'}
                 </Text>
               </View>
             </View>
-          </View>
-        );
-      
-      case 'section-header':
-        return (
-          <View style={styles.section}>
-            <Text style={styles.sectionTitle}>{item.title}</Text>
-          </View>
-        );
-      
-      case 'line-item':
-        return (
-          <View style={styles.lineItem}>
-            <View style={styles.lineItemHeader}>
-              <Text style={styles.lineItemName}>{item.line.display_name || item.line.name}</Text>
-              <Text style={styles.lineItemPrice}>{formatCurrency(item.line.price_subtotal)}</Text>
+          );
+        case 'line-item':
+          return (
+            <View style={styles.lineItem}>
+              <View style={styles.lineItemMain}>
+                <Text style={styles.itemName} numberOfLines={2}>
+                  {item.line.display_name || item.line.name || 'Product'}
+                </Text>
+                <Text style={styles.itemPrice}>
+                  {formatCurrency(item.line.price_subtotal)}
+                </Text>
+              </View>
+              <Text style={styles.itemDetails}>
+                Qty: {item.line.product_uom_qty} × {formatCurrency(item.line.price_unit)}
+              </Text>
             </View>
-            <Text style={styles.lineItemDetails}>
-              Qty: {item.line.product_uom_qty} × {formatCurrency(item.line.price_unit)}
-            </Text>
-          </View>
-        );
-      
-      default:
-        return null;
+          );
+        case 'total':
+          return (
+            <View style={styles.totalContainer}>
+              <View style={styles.totalRow}>
+                <Text style={styles.totalLabel}>Subtotal</Text>
+                <Text style={styles.totalValue}>{formatCurrency(item.order.amount_untaxed)}</Text>
+              </View>
+              <View style={styles.totalRow}>
+                <Text style={styles.totalLabel}>Tax</Text>
+                <Text style={styles.totalValue}>{formatCurrency(item.order.amount_tax)}</Text>
+              </View>
+              <View style={styles.totalRowFinal}>
+                <Text style={styles.totalLabelFinal}>Total</Text>
+                <Text style={styles.totalValueFinal}>{formatCurrency(item.order.amount_total)}</Text>
+              </View>
+            </View>
+          );
+        default:
+          return null;
+      }
+    },
+    [onWorkflowActions]
+  );
+
+  // 🔄 Footer for loading more - ENHANCED
+  const renderFooter = () => {
+    if (loadingMore) {
+      return (
+        <View style={styles.loadingFooter}>
+          <ActivityIndicator size="small" color="#007AFF" />
+        </View>
+      );
     }
-  }, []);
+    return <View style={styles.bottomPadding} />;
+  };
 
-  if (!order) {
-    console.log('No order provided to BottomSheet');
-    return null;
-  }
+  // Optimize item layout for fixed-height items
+  const getItemLayout = useCallback(
+    (data: any, index: number) => {
+      let height = 80; // Default height for line items
+      if (data[index].type === 'header') height = 100;
+      else if (data[index].type === 'status') height = 60;
+      else if (data[index].type === 'total') height = 120;
+      return { length: height, offset: height * index, index };
+    },
+    []
+  );
 
-  console.log('Rendering Modal for order:', order.name, 'visible:', visible);
+  if (!order) return null;
 
   return (
-    <Modal
-      visible={visible}
-      animationType="slide"
-      presentationStyle="pageSheet"
-      onRequestClose={onClose}
+    <BottomSheet
+      ref={bottomSheetRef}
+      index={-1} // Start closed
+      snapPoints={snapPoints}
+      onChange={handleSheetChanges}
+      enablePanDownToClose={true}
+      enableHandlePanningGesture={true} // Only handle drags sheet
+      enableContentPanningGesture={false} // Prevent content dragging
+      overDragResistanceFactor={2} // Smooth over-drag feel
+      handleHeight={40} // Larger hit area for handle
+      backgroundStyle={styles.bottomSheetBackground}
+      handleIndicatorStyle={styles.bottomSheetHandle}
+      animationConfigs={{
+        duration: 300, // Smooth transitions
+        damping: 80, // Google Maps-like snap
+      }}
+      android_keyboardInputMode="adjustResize"
     >
-      <View style={styles.modalContainer}>
-        {/* Header */}
-        <View style={styles.header}>
-          <Text style={styles.title}>{order.name}</Text>
-          <TouchableOpacity onPress={onClose} style={styles.closeButton}>
-            <MaterialIcons name="close" size={24} color="#666" />
-          </TouchableOpacity>
-        </View>
-
-        {/* Content with Working Infinite Scroll */}
-        <FlatList
-          data={flatListData}
-          renderItem={renderItem}
-          keyExtractor={(item) => item.id}
-          style={styles.content}
-          contentContainerStyle={styles.scrollContent}
-          showsVerticalScrollIndicator={true}
-          keyboardShouldPersistTaps="handled"
-          bounces={true}
-          onEndReached={handleLoadMore}
-          onEndReachedThreshold={0.5}
-          ListFooterComponent={
-            loadingMore ? (
-              <View style={styles.loadingContainer}>
-                <ActivityIndicator size="small" color="#007AFF" />
-                <Text style={styles.loadingText}>Loading more...</Text>
-              </View>
-            ) : null
-          }
-        />
-      </View>
-    </Modal>
+      <BottomSheetFlatList
+        data={flatListData}
+        renderItem={renderItem}
+        keyExtractor={(item) => item.id}
+        contentContainerStyle={styles.listContent}
+        // ✨ INFINITE SCROLL - OPTIMIZED
+        onEndReached={handleLoadMore}
+        onEndReachedThreshold={0.5}
+        ListFooterComponent={renderFooter}
+        // 🔄 REFRESH
+        refreshing={loading}
+        onRefresh={() => loadOrderLines(0, true)}
+        // 📱 GOOGLE MAPS-STYLE SCROLLING
+        showsVerticalScrollIndicator={true}
+        bounces={true} // Enable slight bounce for natural feel
+        overScrollMode="always" // Allow over-scroll
+        decelerationRate="fast" // Snappy scrolling like Google Maps
+        nestedScrollEnabled={true} // Prioritize FlatList scrolling
+        // PERFORMANCE
+        removeClippedSubviews={true}
+        initialNumToRender={10} // Slightly higher for smoother initial load
+        windowSize={5} // Slightly larger window for modern devices
+        maxToRenderPerBatch={5} // Balanced for performance
+        updateCellsBatchingPeriod={50} // Faster batching
+        getItemLayout={getItemLayout} // Optimize rendering
+        scrollEventThrottle={16}
+        keyboardShouldPersistTaps="handled"
+      />
+    </BottomSheet>
   );
 }
 
 const styles = StyleSheet.create({
-  modalContainer: {
-    flex: 1,
-    backgroundColor: '#FFF',
-  },
   bottomSheetBackground: {
     backgroundColor: '#FFF',
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
+    borderTopLeftRadius: 16,
+    borderTopRightRadius: 16,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: -2 },
-    shadowOpacity: 0.1,
+    shadowOpacity: 0.15, // Softer shadow for Google Maps style
     shadowRadius: 10,
     elevation: 10,
   },
   bottomSheetHandle: {
-    backgroundColor: '#DDD',
-    width: 40,
-    height: 4,
-    borderRadius: 2,
+    backgroundColor: '#DCDCDC',
+    width: 40, // Slightly wider handle
+    height: 5,
+    borderRadius: 2.5,
+    marginTop: 8,
   },
-  container: {
-    flex: 1,
-    backgroundColor: '#FFF',
+  listContent: {
+    paddingHorizontal: 16,
+    paddingBottom: 80, // Reduced for better content visibility
   },
+  // Header - Refined for Google Maps aesthetic
   header: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingHorizontal: 20,
-    paddingVertical: 16,
-    borderBottomWidth: 1,
-    borderBottomColor: '#E5E5E7',
-  },
-  title: {
-    fontSize: 20,
-    fontWeight: '600',
-    color: '#1A1A1A',
-  },
-  closeButton: {
-    padding: 4,
-  },
-  content: {
-    flex: 1,
-  },
-  scrollContent: {
-    paddingBottom: 120,
-    flexGrow: 1,
-  },
-  section: {
-    padding: 20,
+    paddingVertical: 12,
     borderBottomWidth: 1,
     borderBottomColor: '#F0F0F0',
   },
-  sectionTitle: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: '#1A1A1A',
-    marginBottom: 16,
-  },
-  infoRow: {
+  headerMain: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    paddingVertical: 8,
+    marginBottom: 6,
   },
-  infoLabel: {
-    fontSize: 16,
+  orderNumber: {
+    fontSize: 20,
+    fontWeight: '700',
+    color: '#1A1A1A',
+  },
+  moreButton: {
+    padding: 6,
+    borderRadius: 16,
+    backgroundColor: '#F0F8FF',
+  },
+  customer: {
+    fontSize: 15,
     color: '#666',
-    flex: 1,
+    marginBottom: 4,
   },
-  infoValue: {
-    fontSize: 16,
-    color: '#1A1A1A',
-    fontWeight: '500',
-    flex: 1,
-    textAlign: 'right',
+  date: {
+    fontSize: 13,
+    color: '#999',
   },
-  totalValue: {
-    fontWeight: 'bold',
-    fontSize: 16,
-    color: '#1A1A1A',
-  },
-  statusGrid: {
+  // Status - Tighter spacing
+  statusContainer: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
-    gap: 12,
+    gap: 10,
+    paddingVertical: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: '#F0F0F0',
   },
   statusItem: {
-    flex: 1,
+    flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: '#F8F9FA',
-    padding: 16,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
     borderRadius: 12,
+    gap: 5,
   },
-  statusItemLabel: {
-    fontSize: 12,
-    color: '#666',
-    marginTop: 8,
-    textAlign: 'center',
-  },
-  statusItemValue: {
-    fontSize: 14,
+  statusText: {
+    fontSize: 11,
     fontWeight: '600',
-    marginTop: 4,
-    textAlign: 'center',
+    color: '#666',
   },
+  // Line Items - Cleaner design
   lineItem: {
-    padding: 16,
+    paddingVertical: 12,
     borderBottomWidth: 1,
     borderBottomColor: '#F0F0F0',
   },
-  lineItemHeader: {
+  lineItemMain: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'flex-start',
-    marginBottom: 8,
+    marginBottom: 4,
   },
-  lineItemName: {
-    fontSize: 16,
+  itemName: {
+    fontSize: 15,
     fontWeight: '500',
     color: '#1A1A1A',
     flex: 1,
-    marginRight: 12,
+    marginRight: 10,
   },
-  lineItemPrice: {
+  itemPrice: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#1A1A1A',
+  },
+  itemDetails: {
+    fontSize: 13,
+    color: '#666',
+  },
+  // Total - More prominent
+  totalContainer: {
+    paddingVertical: 16,
+    paddingHorizontal: 12,
+    backgroundColor: '#F8F9FA',
+    marginTop: 6,
+    borderRadius: 10,
+  },
+  totalRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    paddingVertical: 5,
+  },
+  totalLabel: {
+    fontSize: 14,
+    color: '#666',
+  },
+  totalValue: {
+    fontSize: 14,
+    fontWeight: '500',
+    color: '#1A1A1A',
+  },
+  totalRowFinal: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    paddingVertical: 10,
+    marginTop: 6,
+    borderTopWidth: 1,
+    borderTopColor: '#E0E0E0',
+  },
+  totalLabelFinal: {
     fontSize: 16,
     fontWeight: '600',
-    color: '#007AFF',
+    color: '#1A1A1A',
   },
-  lineItemDetails: {
-    fontSize: 14,
-    color: '#666',
+  totalValueFinal: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#34C759',
   },
-  loadingContainer: {
-    flexDirection: 'row',
-    justifyContent: 'center',
+  // Loading & Error
+  loadingFooter: {
+    paddingVertical: 16,
     alignItems: 'center',
-    padding: 20,
-    gap: 8,
   },
-  loadingText: {
-    fontSize: 14,
-    color: '#666',
+  bottomPadding: {
+    height: 40, // Reduced for better content fit
+  },
+  errorContainer: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    backgroundColor: '#FFEBEE',
+    padding: 10,
+    marginHorizontal: 16,
+    marginVertical: 6,
+    borderRadius: 6,
+  },
+  errorText: {
+    fontSize: 13,
+    color: '#C62828',
+    flex: 1,
+  },
+  retryButton: {
+    backgroundColor: '#C62828',
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 5,
+  },
+  retryText: {
+    color: '#FFF',
+    fontSize: 11,
+    fontWeight: '600',
   },
 });
