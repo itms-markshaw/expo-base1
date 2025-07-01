@@ -1,26 +1,28 @@
 /**
- * Clean Navigation Screen - Main Dashboard
- * Based on NavigationDrawer but as a full screen
+ * Dashboard Screen
+ * Modern dashboard with today’s activities, quick actions, favorites, and navigation
+ * Aligned with global standards (e.g., Google Workspace, Salesforce)
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import {
   View,
   Text,
-  StyleSheet,
-  ScrollView,
   TouchableOpacity,
   TextInput,
   SafeAreaView,
   RefreshControl,
-  Alert,
-  Vibration,
+  ActivityIndicator,
+  ScrollView,
 } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
+import * as Haptics from 'expo-haptics';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { debounce } from 'lodash';
+import tw from 'twrnc';
 import {
   NavigationService,
   NavigationItem,
-  navigationCategories,
   NavigationCategoryType,
 } from '../navigation/NavigationConfig';
 import { useAppStore } from '../store';
@@ -37,6 +39,15 @@ interface ActivityItem {
   user_id: [number, string];
 }
 
+interface DashboardItem {
+  id: string;
+  name: string;
+  description: string;
+  icon: string;
+  color: string;
+  screenName: string;
+}
+
 interface QuickAction {
   id: string;
   name: string;
@@ -45,661 +56,429 @@ interface QuickAction {
   onPress: () => void;
 }
 
-export default function CleanNavigationScreen() {
-  const [searchQuery, setSearchQuery] = useState('');
-  const [selectedCategory, setSelectedCategory] = useState<NavigationCategoryType | 'all'>('all');
-  const [expandedCategories, setExpandedCategories] = useState<Set<NavigationCategoryType>>(
-    new Set(['dashboard', 'sales'])
-  );
-  const [refreshing, setRefreshing] = useState(false);
-  const [todaysActivities, setTodaysActivities] = useState<ActivityItem[]>([]);
-  const [favorites, setFavorites] = useState<Set<string>>(new Set());
+const FAVORITES_KEY = '@DashboardFavorites';
 
+const SearchHeader = React.memo(
+  ({
+    searchQuery,
+    setSearchQuery,
+    inputRef,
+  }: {
+    searchQuery: string;
+    setSearchQuery: (query: string) => void;
+    inputRef: React.RefObject<TextInput>;
+  }) => {
+    console.log('[DEBUG] SearchHeader rendered');
+    return (
+      <View style={tw`px-4 py-3 bg-white border-b border-gray-200`}>
+        <View style={tw`flex-row items-center bg-gray-100 rounded-lg px-3 py-2`}>
+          <MaterialIcons name="search" size={20} color="#666" style={tw`mr-2`} />
+          <TextInput
+            ref={inputRef}
+            style={tw`flex-1 text-base text-gray-900`}
+            placeholder="Search dashboard..."
+            placeholderTextColor="#999"
+            value={searchQuery}
+            onChangeText={setSearchQuery}
+            accessibilityLabel="Search dashboard"
+            accessibilityRole="search"
+          />
+          {searchQuery.length > 0 && (
+            <TouchableOpacity onPress={() => setSearchQuery('')} accessibilityRole="button">
+              <MaterialIcons name="clear" size={20} color="#666" />
+            </TouchableOpacity>
+          )}
+        </View>
+      </View>
+    );
+  },
+  (prevProps, nextProps) => prevProps.searchQuery === nextProps.searchQuery
+);
+
+export default function DashboardScreen() {
+  // Hook 1: User state
   const { user } = useAppStore();
+
+  // Hook 2: Navigation
   const { navigateToScreen } = useAppNavigation();
 
-  const allItems = NavigationService.getAvailableItems().filter(item =>
-    item.id !== 'home' && item.id !== 'analytics' // Remove Dashboard and Home items
+  // Hook 3: Search query
+  const [searchQuery, setSearchQuery] = useState('');
+
+  // Hook 4: Debounced search query
+  const [debouncedSearchQuery, setDebouncedSearchQuery] = useState('');
+
+  // Hook 5: Refreshing state
+  const [refreshing, setRefreshing] = useState(false);
+
+  // Hook 6: Activities
+  const [todaysActivities, setTodaysActivities] = useState<ActivityItem[]>([]);
+
+  // Hook 7: Favorites
+  const [favorites, setFavorites] = useState<Set<string>>(new Set());
+
+  // Hook 8: Error state
+  const [error, setError] = useState<string | null>(null);
+
+  // Hook 9: Search input ref
+  const searchInputRef = useRef<TextInput>(null);
+
+  // Hook 10: Debounced search
+  const debouncedSetSearchQuery = useCallback(
+    debounce((query: string) => {
+      setDebouncedSearchQuery(query);
+    }, 300),
+    []
   );
-  const categories = Object.values(navigationCategories);
 
-  // Quick actions
-  const quickActions: QuickAction[] = [
-    {
-      id: 'new-order',
-      name: 'New Order',
-      icon: 'add-shopping-cart',
-      color: '#34C759',
-      onPress: () => navigateToScreen('Sales Orders'),
+  // Hook 11: Handle search input
+  const handleSearchChange = useCallback(
+    (text: string) => {
+      setSearchQuery(text);
+      debouncedSetSearchQuery(text);
     },
-    {
-      id: 'new-task',
-      name: 'New Task',
-      icon: 'add-task',
-      color: '#FF9500',
-      onPress: () => navigateToScreen('Activities'),
-    },
-    {
-      id: 'scan',
-      name: 'Scan',
-      icon: 'qr-code-scanner',
-      color: '#9C27B0',
-      onPress: () => navigateToScreen('Mobile'),
-    },
-    {
-      id: 'photo',
-      name: 'Photo',
-      icon: 'camera-alt',
-      color: '#007AFF',
-      onPress: () => navigateToScreen('Mobile'),
-    },
-  ];
+    [debouncedSetSearchQuery]
+  );
 
-  useEffect(() => {
-    loadTodaysActivities();
-    loadFavorites();
+  // Define dashboard items (combining NavigationService and MoreTabScreen)
+  const dashboardItems = useMemo(() => {
+    const navItems = NavigationService.getAvailableItems().filter(
+      (item) => item.id !== 'home' && item.id !== 'analytics'
+    );
+    const moreItems: DashboardItem[] = [
+      { id: 'activities', name: 'Activities', description: 'Tasks, events, and reminders', icon: 'event-note', color: '#FF9500', screenName: 'Activities' },
+      { id: 'crm', name: 'CRM Leads', description: 'Manage leads and opportunities', icon: 'trending-up', color: '#34C759', screenName: 'CRM Leads' },
+      { id: 'chat', name: 'Chat', description: 'Real-time messaging and communication', icon: 'chat', color: '#00C851', screenName: 'Chat' },
+      { id: 'messages', name: 'Messages', description: 'Email and communication history', icon: 'message', color: '#007AFF', screenName: 'Messages' },
+      { id: 'attachments', name: 'Attachments', description: 'Files and documents', icon: 'attach-file', color: '#FF9500', screenName: 'Attachments' },
+      { id: 'projects', name: 'Projects', description: 'Project management and tasks', icon: 'folder', color: '#9C27B0', screenName: 'Projects' },
+      { id: 'employees', name: 'Employees', description: 'HR and employee management', icon: 'badge', color: '#FF3B30', screenName: 'Employees' },
+      { id: 'helpdesk', name: 'Helpdesk', description: 'Support tickets and issues', icon: 'support', color: '#FF9500', screenName: 'Helpdesk' },
+      { id: 'mobile', name: 'Field Service', description: 'Mobile tools and documentation', icon: 'smartphone', color: '#34C759', screenName: 'Mobile' },
+      { id: 'users', name: 'Users', description: 'User accounts and management', icon: 'manage-accounts', color: '#FF3B30', screenName: 'Users' },
+      { id: 'sync', name: 'Data Sync', description: 'Synchronize with Odoo server', icon: 'sync', color: '#666', screenName: 'Sync' },
+      { id: 'data', name: 'Data Management', description: 'View and manage synced data', icon: 'storage', color: '#666', screenName: 'Data' },
+      { id: 'testing', name: 'Testing', description: 'System diagnostics and testing', icon: 'bug-report', color: '#666', screenName: 'Testing' },
+      { id: 'calendar', name: 'Calendar', description: 'Schedule and appointments', icon: 'calendar-today', color: '#007AFF', screenName: 'Calendar' },
+      { id: 'settings', name: 'Settings', description: 'App configuration and preferences', icon: 'settings', color: '#8E8E93', screenName: 'Settings' },
+    ];
+
+    const allItemsMap = new Map<string, DashboardItem>();
+    navItems.forEach((item) => allItemsMap.set(item.id, { ...item, screenName: item.id }));
+    moreItems.forEach((item) => allItemsMap.set(item.id, item));
+    return Array.from(allItemsMap.values()).sort((a, b) => a.name.localeCompare(b.name));
   }, []);
 
-  const loadFavorites = () => {
-    // In a real app, this would load from AsyncStorage
-    // For now, we'll use some default favorites
-    setFavorites(new Set(['customers', 'activities', 'sales-orders']));
-  };
+  // Quick actions
+  const quickActions: QuickAction[] = useMemo(
+    () => [
+      {
+        id: 'new-order',
+        name: 'New Order',
+        icon: 'add-shopping-cart',
+        color: '#34C759',
+        onPress: () => navigateToScreen('Sales Orders'),
+      },
+      {
+        id: 'new-task',
+        name: 'New Task',
+        icon: 'add-task',
+        color: '#FF9500',
+        onPress: () => navigateToScreen('Activities'),
+      },
+      {
+        id: 'scan',
+        name: 'Scan',
+        icon: 'qr-code-scanner',
+        color: '#9C27B0',
+        onPress: () => navigateToScreen('Mobile'),
+      },
+      {
+        id: 'photo',
+        name: 'Photo',
+        icon: 'camera-alt',
+        color: '#007AFF',
+        onPress: () => navigateToScreen('Mobile'),
+      },
+    ],
+    [navigateToScreen]
+  );
 
-  const saveFavorites = (newFavorites: Set<string>) => {
-    // In a real app, this would save to AsyncStorage
-    setFavorites(newFavorites);
-  };
+  // Hook 12: Load initial data
+  useEffect(() => {
+    const loadData = async () => {
+      try {
+        const savedFavorites = await AsyncStorage.getItem(FAVORITES_KEY);
+        if (savedFavorites) {
+          setFavorites(new Set(JSON.parse(savedFavorites)));
+        } else {
+          setFavorites(new Set(['activities', 'crm', 'sales-orders']));
+        }
+        await loadTodaysActivities();
+      } catch (error) {
+        console.error('Failed to load initial data:', error);
+        setError('Failed to load dashboard data');
+      }
+    };
+    loadData();
+  }, []);
 
-  const toggleFavorite = (itemId: string) => {
-    const newFavorites = new Set(favorites);
-    if (newFavorites.has(itemId)) {
-      newFavorites.delete(itemId);
-      Alert.alert('Removed from Favorites', 'Item removed from your favorites');
-    } else {
-      newFavorites.add(itemId);
-      Vibration.vibrate(50); // Haptic feedback
-      Alert.alert('Added to Favorites', 'Item added to your favorites');
-    }
-    saveFavorites(newFavorites);
-  };
+  // Hook 13: Save favorites
+  const saveFavorites = useCallback(
+    async (newFavorites: Set<string>) => {
+      try {
+        await AsyncStorage.setItem(FAVORITES_KEY, JSON.stringify([...newFavorites]));
+        setFavorites(newFavorites);
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      } catch (error) {
+        console.error('Failed to save favorites:', error);
+        setError('Failed to save favorites');
+      }
+    },
+    []
+  );
 
-  const loadTodaysActivities = async () => {
+  // Hook 14: Load activities
+  const loadTodaysActivities = useCallback(async () => {
     try {
       const client = authService.getClient();
-      if (!client) return;
+      if (!client) throw new Error('Not authenticated');
 
       const today = new Date().toISOString().split('T')[0];
-      const activities = await client.searchRead('mail.activity',
+      const cachedActivities = await AsyncStorage.getItem(`@Activities_${today}`);
+      if (cachedActivities) {
+        setTodaysActivities(JSON.parse(cachedActivities));
+      }
+
+      const activities = await client.searchRead(
+        'mail.activity',
         [['date_deadline', '=', today]],
         ['id', 'summary', 'activity_type_id', 'res_model', 'res_name', 'date_deadline', 'user_id'],
         { limit: 5, order: 'date_deadline asc' }
       );
 
       setTodaysActivities(activities);
+      await AsyncStorage.setItem(`@Activities_${today}`, JSON.stringify(activities));
+      setError(null);
     } catch (error) {
       console.error('Failed to load activities:', error);
+      setError('Failed to load activities');
     }
-  };
+  }, []);
 
-  const handleRefresh = async () => {
+  // Hook 15: Handle refresh
+  const handleRefresh = useCallback(async () => {
     setRefreshing(true);
     await loadTodaysActivities();
     setRefreshing(false);
-  };
+  }, [loadTodaysActivities]);
 
-  // Filter items based on search and category
-  const filteredItems = allItems.filter(item => {
-    const matchesSearch = item.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-                         item.description?.toLowerCase().includes(searchQuery.toLowerCase());
-    const matchesCategory = selectedCategory === 'all' || item.category === selectedCategory;
-    return matchesSearch && matchesCategory;
-  });
-
-  // Group items by category
-  const groupedItems = categories.reduce((acc, category) => {
-    acc[category.id] = filteredItems.filter(item => item.category === category.id);
-    return acc;
-  }, {} as Record<NavigationCategoryType, NavigationItem[]>);
-
-  const toggleCategory = (categoryId: NavigationCategoryType) => {
-    const newExpanded = new Set(expandedCategories);
-    if (newExpanded.has(categoryId)) {
-      newExpanded.delete(categoryId);
-    } else {
-      newExpanded.add(categoryId);
-    }
-    setExpandedCategories(newExpanded);
-  };
-
-  const handleItemPress = (item: NavigationItem) => {
-    const screenMapping: Record<string, string> = {
-      'home': 'Dashboard',
-      'customers': 'Contacts',
-      'activities': 'Activities',
-      'calendar': 'Calendar',
-      'sync': 'Sync',
-      'data': 'Data',
-      'test': 'Testing',
-      'camera': 'Documentation',
-      'messages': 'Messages',
-      'attachments': 'Attachments',
-      'projects': 'Projects',
-      'helpdesk': 'Helpdesk',
-      'sales-orders': 'Sales Orders',
-      'employees': 'Employees',
-      'leads': 'CRM Leads',
-      'field-service': 'Mobile',
-      'settings': 'Settings',
-    };
-
-    const screenName = screenMapping[item.id];
-    if (screenName) {
-      navigateToScreen(screenName);
-    } else {
-      console.warn(`No screen mapping found for item: ${item.id}`);
-    }
-  };
-
-  const renderQuickAction = (action: QuickAction) => (
-    <TouchableOpacity key={action.id} style={styles.quickAction} onPress={action.onPress}>
-      <View style={[styles.quickActionIcon, { backgroundColor: action.color + '15' }]}>
-        <MaterialIcons name={action.icon as any} size={24} color={action.color} />
-      </View>
-      <Text style={styles.quickActionText}>{action.name}</Text>
-    </TouchableOpacity>
+  // Hook 16: Toggle favorite
+  const toggleFavorite = useCallback(
+    (itemId: string) => {
+      const newFavorites = new Set(favorites);
+      if (newFavorites.has(itemId)) {
+        newFavorites.delete(itemId);
+      } else {
+        newFavorites.add(itemId);
+      }
+      saveFavorites(newFavorites);
+    },
+    [favorites, saveFavorites]
   );
 
-  const renderActivityItem = (activity: ActivityItem) => (
-    <TouchableOpacity key={activity.id} style={styles.activityItem}>
-      <View style={[styles.activityIcon, { backgroundColor: '#FF950015' }]}>
-        <MaterialIcons name="event-note" size={16} color="#FF9500" />
-      </View>
-      <View style={styles.activityInfo}>
-        <Text style={styles.activityTitle} numberOfLines={1}>
-          {activity.summary}
-        </Text>
-        <Text style={styles.activitySubtitle} numberOfLines={1}>
-          {activity.res_name} • {activity.activity_type_id[1]}
-        </Text>
-      </View>
-      <MaterialIcons name="chevron-right" size={16} color="#C7C7CC" />
-    </TouchableOpacity>
+  // Hook 17: Handle item press
+  const handleItemPress = useCallback(
+    (item: DashboardItem) => {
+      if (item.screenName) {
+        navigateToScreen(item.screenName);
+      } else {
+        console.warn(`No screen mapping for item: ${item.id}`);
+        setError(`No screen found for ${item.name}`);
+      }
+    },
+    [navigateToScreen]
   );
 
-  const renderCategoryHeader = (category: any) => {
-    const isExpanded = expandedCategories.has(category.id);
-    const itemCount = groupedItems[category.id]?.length || 0;
-    
-    return (
-      <TouchableOpacity
-        key={category.id}
-        style={styles.categoryHeader}
-        onPress={() => toggleCategory(category.id)}
-      >
-        <View style={styles.categoryInfo}>
-          <View style={[styles.categoryIcon, { backgroundColor: category.color + '15' }]}>
-            <MaterialIcons name={category.icon as any} size={20} color={category.color} />
-          </View>
-          <View style={styles.categoryText}>
-            <Text style={styles.categoryName}>{category.name}</Text>
-            <Text style={styles.categoryDescription}>{category.description}</Text>
-          </View>
-        </View>
-        <View style={styles.categoryMeta}>
-          <Text style={styles.categoryCount}>{itemCount}</Text>
-          <MaterialIcons 
-            name={isExpanded ? 'expand-less' : 'expand-more'} 
-            size={20} 
-            color="#666" 
-          />
-        </View>
-      </TouchableOpacity>
+  // Filter items
+  const filteredItems = useMemo(() => {
+    if (!debouncedSearchQuery) return dashboardItems;
+    return dashboardItems.filter(
+      (item) =>
+        item.name.toLowerCase().includes(debouncedSearchQuery.toLowerCase()) ||
+        item.description?.toLowerCase().includes(debouncedSearchQuery.toLowerCase())
     );
-  };
+  }, [debouncedSearchQuery, dashboardItems]);
 
-  const renderNavigationItem = (item: NavigationItem) => {
-    const isFavorite = favorites.has(item.id);
-
-    return (
+  // Render components
+  const renderActivityItem = useCallback(
+    (activity: ActivityItem) => (
       <TouchableOpacity
-        key={item.id}
-        style={styles.navigationItem}
-        onPress={() => handleItemPress(item)}
-        onLongPress={() => toggleFavorite(item.id)}
-        delayLongPress={500}
+        key={activity.id}
+        style={tw`flex-row items-center p-4 bg-white border-b border-gray-100`}
+        onPress={() => navigateToScreen('Activities')}
+        accessibilityRole="button"
+        accessibilityLabel={`View activity ${activity.summary}`}
       >
-        <View style={[styles.itemIcon, { backgroundColor: item.color + '15' }]}>
-          <MaterialIcons name={item.icon as any} size={18} color={item.color} />
+        <View style={tw`w-8 h-8 rounded-full justify-center items-center bg-orange-100 mr-3`}>
+          <MaterialIcons name="event-note" size={16} color="#FF9500" />
         </View>
-        <View style={styles.itemInfo}>
-          <Text style={styles.itemName}>{item.name}</Text>
-          <Text style={styles.itemDescription}>{item.description}</Text>
+        <View style={tw`flex-1`}>
+          <Text style={tw`text-sm font-semibold text-gray-900`} numberOfLines={1}>
+            {activity.summary}
+          </Text>
+          <Text style={tw`text-xs text-gray-600`} numberOfLines={1}>
+            {activity.res_name} • {activity.activity_type_id[1]}
+          </Text>
         </View>
-        <View style={styles.itemActions}>
-          {isFavorite && (
-            <MaterialIcons name="star" size={16} color="#FFD700" style={styles.favoriteIcon} />
-          )}
-          <MaterialIcons name="chevron-right" size={16} color="#C7C7CC" />
-        </View>
+        <MaterialIcons name="chevron-right" size={16} color="#C7C7CC" />
       </TouchableOpacity>
-    );
-  };
+    ),
+    [navigateToScreen]
+  );
+
+  const renderQuickAction = useCallback(
+    (action: QuickAction) => (
+      <TouchableOpacity
+        key={action.id}
+        style={tw`flex-1 items-center p-3`}
+        onPress={action.onPress}
+        accessibilityRole="button"
+        accessibilityLabel={action.name}
+      >
+        <View style={tw`w-12 h-12 rounded-full justify-center items-center bg-[${action.color}15]`}>
+          <MaterialIcons name={action.icon as any} size={24} color={action.color} />
+        </View>
+        <Text style={tw`text-xs font-medium text-gray-900 mt-2 text-center`}>{action.name}</Text>
+      </TouchableOpacity>
+    ),
+    []
+  );
+
+  const renderDashboardItem = useCallback(
+    (item: DashboardItem) => {
+      const isFavorite = favorites.has(item.id);
+
+      return (
+        <TouchableOpacity
+          key={item.id}
+          style={tw`flex-row items-center p-4 bg-white border-b border-gray-100`}
+          onPress={() => handleItemPress(item)}
+          onLongPress={() => toggleFavorite(item.id)}
+          delayLongPress={500}
+          accessibilityRole="button"
+          accessibilityLabel={`Navigate to ${item.name}`}
+        >
+          <View style={tw`w-8 h-8 rounded-full justify-center items-center bg-[${item.color}15] mr-3`}>
+            <MaterialIcons name={item.icon as any} size={18} color={item.color} />
+          </View>
+          <View style={tw`flex-1`}>
+            <Text style={tw`text-sm font-semibold text-gray-900`}>{item.name}</Text>
+            <Text style={tw`text-xs text-gray-600`}>{item.description}</Text>
+          </View>
+          <View style={tw`flex-row items-center gap-2`}>
+            {isFavorite && <MaterialIcons name="star" size={16} color="#FFD700" />}
+            <MaterialIcons name="chevron-right" size={16} color="#C7C7CC" />
+          </View>
+        </TouchableOpacity>
+      );
+    },
+    [favorites, handleItemPress, toggleFavorite]
+  );
 
   return (
-    <SafeAreaView style={styles.container}>
-      {/* Header */}
-      <View style={styles.header}>
-        <View style={styles.headerLeft}>
-          <Text style={styles.headerTitle}>Navigation</Text>
-          <Text style={styles.headerSubtitle}>{user?.name || 'Mark Shaw'}</Text>
+    <SafeAreaView style={tw`flex-1 bg-gray-50`}>
+      <View style={tw`flex-row justify-between items-center p-4 bg-white border-b border-gray-200`}>
+        <View>
+          <Text style={tw`text-2xl font-bold text-gray-900`}>Dashboard</Text>
+          <Text style={tw`text-sm text-gray-600`}>{user?.name || 'Mark Shaw'}</Text>
         </View>
         <TouchableOpacity
-          style={styles.profileButton}
+          style={tw`p-2`}
           onPress={() => navigateToScreen('Settings')}
+          accessibilityRole="button"
+          accessibilityLabel="Go to settings"
         >
           <MaterialIcons name="account-circle" size={32} color="#007AFF" />
         </TouchableOpacity>
       </View>
-
-      {/* Search */}
-      <View style={styles.searchContainer}>
-        <View style={styles.searchBox}>
-          <MaterialIcons name="search" size={20} color="#666" />
-          <TextInput
-            style={styles.searchInput}
-            placeholder="Search features..."
-            value={searchQuery}
-            onChangeText={setSearchQuery}
-            placeholderTextColor="#999"
-          />
-          {searchQuery.length > 0 && (
-            <TouchableOpacity onPress={() => setSearchQuery('')}>
-              <MaterialIcons name="clear" size={20} color="#666" />
-            </TouchableOpacity>
-          )}
+      <SearchHeader
+        searchQuery={searchQuery}
+        setSearchQuery={handleSearchChange}
+        inputRef={searchInputRef}
+      />
+      {error && (
+        <View style={tw`flex-row items-center bg-red-100 p-3 mx-4 my-2 rounded-lg`}>
+          <Text style={tw`flex-1 text-sm text-red-700`}>{error}</Text>
+          <TouchableOpacity
+            onPress={handleRefresh}
+            style={tw`bg-red-600 px-3 py-1 rounded-md`}
+            accessibilityRole="button"
+          >
+            <Text style={tw`text-xs text-white font-semibold`}>Retry</Text>
+          </TouchableOpacity>
         </View>
-      </View>
-
+      )}
       <ScrollView
-        style={styles.content}
+        style={tw`flex-1`}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} />}
         showsVerticalScrollIndicator={false}
+        keyboardShouldPersistTaps="always"
       >
-        {/* Category Filters - Compact */}
-        <View style={styles.categoryFilters}>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-            <TouchableOpacity
-              style={[styles.filterChip, selectedCategory === 'all' && styles.filterChipActive]}
-              onPress={() => setSelectedCategory('all')}
-            >
-              <MaterialIcons name="apps" size={16} color={selectedCategory === 'all' ? '#FFF' : '#666'} />
-              <Text style={[styles.filterChipText, selectedCategory === 'all' && styles.filterChipTextActive]}>
-                All
-              </Text>
-            </TouchableOpacity>
-            {categories.map((category) => (
+        {/* Today's Activities */}
+        {todaysActivities.length > 0 && (
+          <View style={tw`p-4 bg-gray-50`}>
+            <View style={tw`flex-row justify-between items-center mb-3`}>
+              <Text style={tw`text-base font-semibold text-gray-900`}>Today's Activities</Text>
               <TouchableOpacity
-                key={category.id}
-                style={[styles.filterChip, selectedCategory === category.id && styles.filterChipActive]}
-                onPress={() => setSelectedCategory(category.id)}
+                onPress={() => navigateToScreen('Activities')}
+                accessibilityRole="button"
               >
-                <MaterialIcons 
-                  name={category.icon as any} 
-                  size={16} 
-                  color={selectedCategory === category.id ? '#FFF' : category.color} 
-                />
-                <Text style={[styles.filterChipText, selectedCategory === category.id && styles.filterChipTextActive]}>
-                  {category.name}
-                </Text>
+                <Text style={tw`text-sm text-blue-600`}>See All</Text>
               </TouchableOpacity>
-            ))}
-          </ScrollView>
-        </View>
+            </View>
+            <View style={tw`bg-white rounded-lg overflow-hidden`}>
+              {todaysActivities.map(renderActivityItem)}
+            </View>
+          </View>
+        )}
 
         {/* Quick Actions */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Quick Actions</Text>
-          <View style={styles.quickActionsGrid}>
+        <View style={tw`p-4 bg-gray-50`}>
+          <Text style={tw`text-base font-semibold text-gray-900 mb-3`}>Quick Actions</Text>
+          <View style={tw`flex-row flex-wrap justify-around`}>
             {quickActions.map(renderQuickAction)}
           </View>
         </View>
 
         {/* Favorites */}
         {favorites.size > 0 && (
-          <View style={styles.section}>
-            <View style={styles.sectionHeader}>
-              <Text style={styles.sectionTitle}>Favorites</Text>
-              <Text style={styles.seeAllText}>{favorites.size} items</Text>
+          <View style={tw`p-4 bg-gray-50`}>
+            <View style={tw`flex-row justify-between items-center mb-3`}>
+              <Text style={tw`text-base font-semibold text-gray-900`}>Favorites</Text>
+              <Text style={tw`text-sm text-gray-600`}>{favorites.size} items</Text>
             </View>
-            <View style={styles.favoritesList}>
-              {allItems
-                .filter(item => favorites.has(item.id))
-                .map(renderNavigationItem)}
-            </View>
-          </View>
-        )}
-
-        {/* Today's Activities */}
-        {todaysActivities.length > 0 && (
-          <View style={styles.section}>
-            <View style={styles.sectionHeader}>
-              <Text style={styles.sectionTitle}>Today's Activities</Text>
-              <TouchableOpacity onPress={() => navigateToScreen('Activities')}>
-                <Text style={styles.seeAllText}>See All</Text>
-              </TouchableOpacity>
-            </View>
-            <View style={styles.activitiesList}>
-              {todaysActivities.map(renderActivityItem)}
+            <View style={tw`bg-white rounded-lg overflow-hidden`}>
+              {dashboardItems
+                .filter((item) => favorites.has(item.id))
+                .map(renderDashboardItem)}
             </View>
           </View>
         )}
 
-        {/* Navigation Items */}
-        <View style={styles.section}>
-          <View style={styles.sectionHeader}>
-            <Text style={styles.sectionTitle}>All Features</Text>
-            <Text style={styles.hintText}>Long press to favorite</Text>
+        {/* All Features */}
+        <View style={tw`p-4 bg-gray-50`}>
+          <View style={tw`flex-row justify-between items-center mb-3`}>
+            <Text style={tw`text-base font-semibold text-gray-900`}>All Features</Text>
+            <Text style={tw`text-xs italic text-gray-600`}>Long press to favorite</Text>
           </View>
-          {selectedCategory === 'all' ? (
-            categories.map((category) => {
-              const categoryItems = groupedItems[category.id];
-              const isExpanded = expandedCategories.has(category.id);
-              
-              if (categoryItems.length === 0) return null;
-              
-              return (
-                <View key={category.id} style={styles.categorySection}>
-                  {renderCategoryHeader(category)}
-                  {isExpanded && (
-                    <View style={styles.categoryItems}>
-                      {categoryItems.map(renderNavigationItem)}
-                    </View>
-                  )}
-                </View>
-              );
-            })
-          ) : (
-            <View style={styles.categoryItems}>
-              {filteredItems.map(renderNavigationItem)}
-            </View>
-          )}
+          <View style={tw`bg-white rounded-lg overflow-hidden`}>
+            {filteredItems.map(renderDashboardItem)}
+          </View>
         </View>
 
-        <View style={styles.footerSpace} />
+        <View style={tw`h-16`} />
       </ScrollView>
     </SafeAreaView>
   );
 }
-
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#F8F9FA',
-  },
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    backgroundColor: '#FFF',
-    borderBottomWidth: 1,
-    borderBottomColor: '#E5E5E5',
-  },
-  headerLeft: {
-    flex: 1,
-  },
-  headerTitle: {
-    fontSize: 24,
-    fontWeight: '700',
-    color: '#1A1A1A',
-  },
-  headerSubtitle: {
-    fontSize: 14,
-    color: '#666',
-    marginTop: 2,
-  },
-  profileButton: {
-    padding: 4,
-  },
-  searchContainer: {
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    backgroundColor: '#FFF',
-    borderBottomWidth: 1,
-    borderBottomColor: '#E5E5E5',
-  },
-  searchBox: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#F8F9FA',
-    borderRadius: 8,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    gap: 8,
-  },
-  searchInput: {
-    flex: 1,
-    fontSize: 16,
-    color: '#1A1A1A',
-  },
-  content: {
-    flex: 1,
-  },
-  categoryFilters: {
-    paddingVertical: 12,
-    paddingLeft: 16,
-    backgroundColor: '#FFF',
-    borderBottomWidth: 1,
-    borderBottomColor: '#E5E5E5',
-  },
-  filterChip: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    marginRight: 8,
-    borderRadius: 16,
-    backgroundColor: '#F8F9FA',
-    gap: 4,
-  },
-  filterChipActive: {
-    backgroundColor: '#007AFF',
-  },
-  filterChipText: {
-    fontSize: 12,
-    fontWeight: '500',
-    color: '#666',
-  },
-  filterChipTextActive: {
-    color: '#FFF',
-  },
-  section: {
-    paddingHorizontal: 16,
-    paddingTop: 20,
-  },
-  sectionHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 12,
-  },
-  sectionTitle: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#1A1A1A',
-  },
-  seeAllText: {
-    fontSize: 14,
-    color: '#007AFF',
-    fontWeight: '500',
-  },
-  hintText: {
-    fontSize: 12,
-    color: '#999',
-    fontStyle: 'italic',
-  },
-  quickActionsGrid: {
-    flexDirection: 'row',
-    justifyContent: 'space-around',
-    marginTop: 12,
-  },
-  quickAction: {
-    alignItems: 'center',
-    padding: 12,
-  },
-  quickActionIcon: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginBottom: 8,
-  },
-  quickActionText: {
-    fontSize: 12,
-    fontWeight: '500',
-    color: '#1A1A1A',
-  },
-  activitiesList: {
-    backgroundColor: '#FFF',
-    borderRadius: 12,
-    overflow: 'hidden',
-    marginTop: 12,
-  },
-  favoritesList: {
-    backgroundColor: '#FFF',
-    borderRadius: 12,
-    overflow: 'hidden',
-    marginTop: 12,
-  },
-  activityItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: '#F0F0F0',
-  },
-  activityIcon: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginRight: 12,
-  },
-  activityInfo: {
-    flex: 1,
-  },
-  activityTitle: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#1A1A1A',
-    marginBottom: 2,
-  },
-  activitySubtitle: {
-    fontSize: 12,
-    color: '#666',
-  },
-  categorySection: {
-    marginBottom: 8,
-  },
-  categoryHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingVertical: 12,
-    paddingHorizontal: 16,
-    backgroundColor: '#FFF',
-    borderRadius: 12,
-    marginBottom: 4,
-  },
-  categoryInfo: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    flex: 1,
-  },
-  categoryIcon: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginRight: 12,
-  },
-  categoryText: {
-    flex: 1,
-  },
-  categoryName: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#1A1A1A',
-    marginBottom: 2,
-  },
-  categoryDescription: {
-    fontSize: 12,
-    color: '#666',
-  },
-  categoryMeta: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  categoryCount: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: '#666',
-    backgroundColor: '#F0F0F0',
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    borderRadius: 8,
-    minWidth: 20,
-    textAlign: 'center',
-  },
-  categoryItems: {
-    backgroundColor: '#FFF',
-    borderRadius: 12,
-    overflow: 'hidden',
-  },
-  navigationItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: '#F0F0F0',
-  },
-  itemIcon: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginRight: 12,
-  },
-  itemInfo: {
-    flex: 1,
-  },
-  itemName: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#1A1A1A',
-    marginBottom: 2,
-  },
-  itemDescription: {
-    fontSize: 12,
-    color: '#666',
-  },
-  itemActions: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  favoriteIcon: {
-    marginRight: 4,
-  },
-  footerSpace: {
-    height: 32,
-  },
-});
