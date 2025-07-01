@@ -3,7 +3,7 @@
  * Reusable filter interface for lists
  */
 
-import React, { useRef, useMemo, useCallback, useEffect } from 'react';
+import React, { useRef, useMemo, useCallback, useEffect, useState } from 'react';
 import {
   View,
   Text,
@@ -52,14 +52,22 @@ export default function FilterBottomSheet({
 
   // Bottom sheet refs and snap points
   const bottomSheetRef = useRef<BottomSheet>(null);
-  const snapPoints = useMemo(() => ['50%', '80%'], []); // Start at 50%, expand to 80%
+  const snapPoints = useMemo(() => ['50%', '85%'], []); // Start at 50%, expand to 85%
+
+  // Track current snap point for scroll control
+  const [currentSnapIndex, setCurrentSnapIndex] = useState(0);
+  const isFullScreen = currentSnapIndex === 1; // Full screen is index 1 (85%)
 
   // Handle visibility changes
   useEffect(() => {
     if (visible) {
-      bottomSheetRef.current?.snapToIndex(0); // Open to first snap point (50%)
+      setTimeout(() => {
+        bottomSheetRef.current?.snapToIndex(0); // Open to first snap point (50%)
+        setCurrentSnapIndex(0);
+      }, 100);
     } else {
       bottomSheetRef.current?.close();
+      setCurrentSnapIndex(0);
     }
   }, [visible]);
 
@@ -67,6 +75,9 @@ export default function FilterBottomSheet({
   const handleSheetChanges = useCallback((index: number) => {
     if (index === -1) {
       onClose();
+      setCurrentSnapIndex(0);
+    } else {
+      setCurrentSnapIndex(index);
     }
   }, [onClose]);
 
@@ -89,6 +100,8 @@ export default function FilterBottomSheet({
       snapPoints={snapPoints}
       onChange={handleSheetChanges}
       enablePanDownToClose={true}
+      enableContentPanningGesture={!isFullScreen} // Allow panning when not full screen
+      activeOffsetY={isFullScreen ? [-1, 1] : undefined} // Restrict vertical pan when full screen
       backgroundStyle={styles.bottomSheetBackground}
       handleIndicatorStyle={styles.bottomSheetHandle}
     >
@@ -105,7 +118,17 @@ export default function FilterBottomSheet({
         </View>
 
         {/* Content */}
-        <BottomSheetScrollView style={styles.content}>
+        <BottomSheetScrollView
+          style={styles.content}
+          contentContainerStyle={styles.scrollContent}
+          showsVerticalScrollIndicator={isFullScreen}
+          scrollEnabled={isFullScreen} // Only allow scrolling when in full screen
+          nestedScrollEnabled={isFullScreen}
+          keyboardShouldPersistTaps="handled"
+          bounces={true}
+          alwaysBounceVertical={false}
+          overScrollMode="auto"
+        >
           {/* Filters Section */}
           <View style={styles.section}>
             <Text style={styles.sectionTitle}>Filter by</Text>
@@ -228,6 +251,10 @@ const styles = StyleSheet.create({
   content: {
     flex: 1,
     paddingHorizontal: 20,
+  },
+  scrollContent: {
+    paddingBottom: 120, // Extra padding at bottom for infinite scrolling
+    flexGrow: 1, // Allow content to grow naturally
   },
   section: {
     marginBottom: 20,

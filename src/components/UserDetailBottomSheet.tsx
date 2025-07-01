@@ -3,7 +3,7 @@
  * Shows detailed user information and actions
  */
 
-import React, { useRef, useMemo, useCallback, useEffect } from 'react';
+import React, { useRef, useMemo, useCallback, useEffect, useState } from 'react';
 import {
   View,
   Text,
@@ -41,14 +41,23 @@ export default function UserDetailBottomSheet({
 }: UserDetailBottomSheetProps) {
   // Bottom sheet refs and snap points
   const bottomSheetRef = useRef<BottomSheet>(null);
-  const snapPoints = useMemo(() => ['60%', '90%'], []); // Start at 60%, expand to 90%
+  const snapPoints = useMemo(() => ['50%', '90%'], []); // Start at 50%, expand to 90% for infinite scrolling
+
+  // Track current snap point for scroll control
+  const [currentSnapIndex, setCurrentSnapIndex] = useState(0);
+  const isFullScreen = currentSnapIndex === 1; // Full screen is index 1 (90%)
 
   // Handle visibility changes
   useEffect(() => {
     if (visible && user) {
-      bottomSheetRef.current?.snapToIndex(0); // Open to first snap point (60%)
+      // Small delay to ensure the component is fully mounted
+      setTimeout(() => {
+        bottomSheetRef.current?.snapToIndex(0); // Open to first snap point (50%)
+        setCurrentSnapIndex(0);
+      }, 100);
     } else {
       bottomSheetRef.current?.close();
+      setCurrentSnapIndex(0);
     }
   }, [visible, user]);
 
@@ -56,6 +65,9 @@ export default function UserDetailBottomSheet({
   const handleSheetChanges = useCallback((index: number) => {
     if (index === -1) {
       onClose();
+      setCurrentSnapIndex(0);
+    } else {
+      setCurrentSnapIndex(index);
     }
   }, [onClose]);
 
@@ -89,6 +101,8 @@ export default function UserDetailBottomSheet({
       snapPoints={snapPoints}
       onChange={handleSheetChanges}
       enablePanDownToClose={true}
+      enableContentPanningGesture={!isFullScreen} // Allow panning when not full screen
+      activeOffsetY={isFullScreen ? [-1, 1] : undefined} // Restrict vertical pan when full screen
       backgroundStyle={styles.bottomSheetBackground}
       handleIndicatorStyle={styles.bottomSheetHandle}
     >
@@ -105,7 +119,17 @@ export default function UserDetailBottomSheet({
         </View>
 
         {/* Content */}
-        <BottomSheetScrollView style={styles.content} showsVerticalScrollIndicator={false}>
+        <BottomSheetScrollView
+          style={styles.content}
+          contentContainerStyle={styles.scrollContent}
+          showsVerticalScrollIndicator={isFullScreen}
+          scrollEnabled={isFullScreen} // Only allow scrolling when in full screen
+          nestedScrollEnabled={isFullScreen}
+          keyboardShouldPersistTaps="handled"
+          bounces={true}
+          alwaysBounceVertical={false}
+          overScrollMode="auto"
+        >
         {/* User Header */}
         <View style={styles.userHeader}>
           <View style={[styles.avatar, { backgroundColor: user.active ? '#007AFF' : '#999' }]}>
@@ -247,6 +271,10 @@ const styles = StyleSheet.create({
   content: {
     flex: 1,
     paddingHorizontal: 20,
+  },
+  scrollContent: {
+    paddingBottom: 120, // Extra padding at bottom for infinite scrolling
+    flexGrow: 1, // Allow content to grow naturally
   },
   userHeader: {
     flexDirection: 'row',

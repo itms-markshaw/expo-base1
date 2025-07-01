@@ -19,6 +19,7 @@ import {
 import { MaterialIcons } from '@expo/vector-icons';
 import { authService } from '../services/auth';
 import WorkflowActionsComponent from './WorkflowActionsComponent';
+import SalesOrderDetailBottomSheet from './SalesOrderDetailBottomSheet';
 import FilterBottomSheet from './FilterBottomSheet';
 import { formatRelationalField } from '../utils/relationalFieldUtils';
 
@@ -276,119 +277,18 @@ export default function SalesOrderComponent() {
         )}
       </ScrollView>
 
-      {/* Order Detail Modal */}
-      <Modal
+      {/* Order Detail Bottom Sheet */}
+      <SalesOrderDetailBottomSheet
         visible={showOrderDetail}
-        animationType="slide"
-        presentationStyle="pageSheet"
-        onRequestClose={() => setShowOrderDetail(false)}
-      >
-        {selectedOrder && (
-          <View style={styles.modalContainer}>
-            <View style={styles.modalHeader}>
-              <TouchableOpacity onPress={() => setShowOrderDetail(false)}>
-                <Text style={styles.cancelButton}>Close</Text>
-              </TouchableOpacity>
-              <Text style={styles.modalTitle}>{selectedOrder.name}</Text>
-              <TouchableOpacity onPress={() => {
-                setShowOrderDetail(false);
-                setShowWorkflowActions(true);
-              }}>
-                <MaterialIcons name="more-vert" size={24} color="#007AFF" />
-              </TouchableOpacity>
-            </View>
+        onClose={() => setShowOrderDetail(false)}
+        onWorkflowActions={() => {
+          setShowOrderDetail(false);
+          setShowWorkflowActions(true);
+        }}
+        order={selectedOrder}
+      />
 
-            <ScrollView style={styles.modalContent}>
-              <View style={styles.detailSection}>
-                <Text style={styles.sectionTitle}>Order Information</Text>
-                <View style={styles.detailRow}>
-                  <Text style={styles.detailLabel}>Customer:</Text>
-                  <Text style={styles.detailValue}>{formatRelationalField(selectedOrder.partner_id, 'No Customer')}</Text>
-                </View>
-                <View style={styles.detailRow}>
-                  <Text style={styles.detailLabel}>Date:</Text>
-                  <Text style={styles.detailValue}>{formatDate(selectedOrder.date_order)}</Text>
-                </View>
-                <View style={styles.detailRow}>
-                  <Text style={styles.detailLabel}>Salesperson:</Text>
-                  <Text style={styles.detailValue}>{formatRelationalField(selectedOrder.user_id)}</Text>
-                </View>
-                <View style={styles.detailRow}>
-                  <Text style={styles.detailLabel}>Sales Team:</Text>
-                  <Text style={styles.detailValue}>{formatRelationalField(selectedOrder.team_id)}</Text>
-                </View>
-              </View>
-
-              <View style={styles.detailSection}>
-                <Text style={styles.sectionTitle}>Financial Summary</Text>
-                <View style={styles.financialSummary}>
-                  <View style={styles.summaryRow}>
-                    <Text style={styles.summaryLabel}>Subtotal:</Text>
-                    <Text style={styles.summaryValue}>
-                      {formatCurrency(selectedOrder.amount_untaxed)}
-                    </Text>
-                  </View>
-                  <View style={styles.summaryRow}>
-                    <Text style={styles.summaryLabel}>Tax:</Text>
-                    <Text style={styles.summaryValue}>
-                      {formatCurrency(selectedOrder.amount_tax)}
-                    </Text>
-                  </View>
-                  <View style={[styles.summaryRow, styles.totalRow]}>
-                    <Text style={styles.totalLabel}>Total:</Text>
-                    <Text style={styles.totalValue}>
-                      {formatCurrency(selectedOrder.amount_total)}
-                    </Text>
-                  </View>
-                </View>
-              </View>
-
-              <View style={styles.detailSection}>
-                <Text style={styles.sectionTitle}>Status</Text>
-                <View style={styles.statusGrid}>
-                  <View style={styles.statusItem}>
-                    <MaterialIcons 
-                      name={getStateIcon(selectedOrder.state) as any} 
-                      size={24} 
-                      color={getStateColor(selectedOrder.state)} 
-                    />
-                    <Text style={styles.statusItemLabel}>Order Status</Text>
-                    <Text style={[styles.statusItemValue, { color: getStateColor(selectedOrder.state) }]}>
-                      {selectedOrder.state.toUpperCase()}
-                    </Text>
-                  </View>
-                  
-                  <View style={styles.statusItem}>
-                    <MaterialIcons 
-                      name="receipt" 
-                      size={24} 
-                      color={selectedOrder.invoice_status === 'invoiced' ? '#34C759' : '#FF9500'} 
-                    />
-                    <Text style={styles.statusItemLabel}>Invoice</Text>
-                    <Text style={styles.statusItemValue}>
-                      {selectedOrder.invoice_status === 'invoiced' ? 'Invoiced' : 'To Invoice'}
-                    </Text>
-                  </View>
-                  
-                  <View style={styles.statusItem}>
-                    <MaterialIcons 
-                      name="local-shipping" 
-                      size={24} 
-                      color={selectedOrder.delivery_status === 'full' ? '#34C759' : '#FF9500'} 
-                    />
-                    <Text style={styles.statusItemLabel}>Delivery</Text>
-                    <Text style={styles.statusItemValue}>
-                      {selectedOrder.delivery_status === 'full' ? 'Delivered' : 'Pending'}
-                    </Text>
-                  </View>
-                </View>
-              </View>
-            </ScrollView>
-          </View>
-        )}
-      </Modal>
-
-      {/* Workflow Actions Modal */}
+      {/* Workflow Actions Bottom Sheet */}
       {selectedOrder && (
         <WorkflowActionsComponent
           visible={showWorkflowActions}
@@ -582,123 +482,6 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#999',
     marginTop: 8,
-    textAlign: 'center',
-  },
-  modalContainer: {
-    flex: 1,
-    backgroundColor: '#F8F9FA',
-  },
-  modalHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    padding: 16,
-    backgroundColor: '#FFF',
-    borderBottomWidth: 1,
-    borderBottomColor: '#E5E5E5',
-  },
-  modalTitle: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: '#1A1A1A',
-  },
-  cancelButton: {
-    fontSize: 16,
-    color: '#666',
-  },
-  modalContent: {
-    flex: 1,
-    padding: 16,
-  },
-  detailSection: {
-    backgroundColor: '#FFF',
-    borderRadius: 8,
-    padding: 16,
-    marginBottom: 16,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.05,
-    shadowRadius: 2,
-    elevation: 1,
-  },
-  sectionTitle: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#1A1A1A',
-    marginBottom: 16,
-  },
-  detailRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingVertical: 8,
-    borderBottomWidth: 1,
-    borderBottomColor: '#F0F0F0',
-  },
-  detailLabel: {
-    fontSize: 14,
-    color: '#666',
-    flex: 1,
-  },
-  detailValue: {
-    fontSize: 14,
-    color: '#1A1A1A',
-    fontWeight: '500',
-    flex: 2,
-    textAlign: 'right',
-  },
-  financialSummary: {
-    gap: 8,
-  },
-  summaryRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingVertical: 4,
-  },
-  summaryLabel: {
-    fontSize: 14,
-    color: '#666',
-  },
-  summaryValue: {
-    fontSize: 14,
-    color: '#1A1A1A',
-    fontWeight: '500',
-  },
-  totalRow: {
-    borderTopWidth: 1,
-    borderTopColor: '#E5E5E5',
-    paddingTop: 8,
-    marginTop: 8,
-  },
-  totalLabel: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#1A1A1A',
-  },
-  totalValue: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: '#1A1A1A',
-  },
-  statusGrid: {
-    flexDirection: 'row',
-    justifyContent: 'space-around',
-    gap: 16,
-  },
-  statusItem: {
-    alignItems: 'center',
-    flex: 1,
-  },
-  statusItemLabel: {
-    fontSize: 12,
-    color: '#666',
-    marginTop: 8,
-    marginBottom: 4,
-  },
-  statusItemValue: {
-    fontSize: 12,
-    fontWeight: '600',
     textAlign: 'center',
   },
 });

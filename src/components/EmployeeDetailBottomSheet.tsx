@@ -3,7 +3,7 @@
  * Shows detailed employee information and actions
  */
 
-import React, { useRef, useMemo, useCallback, useEffect } from 'react';
+import React, { useRef, useMemo, useCallback, useEffect, useState } from 'react';
 import {
   View,
   Text,
@@ -40,14 +40,23 @@ export default function EmployeeDetailBottomSheet({
 }: EmployeeDetailBottomSheetProps) {
   // Bottom sheet refs and snap points
   const bottomSheetRef = useRef<BottomSheet>(null);
-  const snapPoints = useMemo(() => ['50%', '85%'], []); // Start at 50%, expand to 85%
+  const snapPoints = useMemo(() => ['50%', '90%'], []); // Start at 50%, expand to 90% for infinite scrolling
+
+  // Track current snap point for scroll control
+  const [currentSnapIndex, setCurrentSnapIndex] = useState(0);
+  const isFullScreen = currentSnapIndex === 1; // Full screen is index 1 (90%)
 
   // Handle visibility changes
   useEffect(() => {
     if (visible && employee) {
-      bottomSheetRef.current?.snapToIndex(0); // Open to first snap point (50%)
+      // Small delay to ensure the component is fully mounted
+      setTimeout(() => {
+        bottomSheetRef.current?.snapToIndex(0); // Open to first snap point (50%)
+        setCurrentSnapIndex(0);
+      }, 100);
     } else {
       bottomSheetRef.current?.close();
+      setCurrentSnapIndex(0);
     }
   }, [visible, employee]);
 
@@ -55,6 +64,9 @@ export default function EmployeeDetailBottomSheet({
   const handleSheetChanges = useCallback((index: number) => {
     if (index === -1) {
       onClose();
+      setCurrentSnapIndex(0);
+    } else {
+      setCurrentSnapIndex(index);
     }
   }, [onClose]);
 
@@ -85,6 +97,8 @@ export default function EmployeeDetailBottomSheet({
       snapPoints={snapPoints}
       onChange={handleSheetChanges}
       enablePanDownToClose={true}
+      enableContentPanningGesture={!isFullScreen} // Allow panning when not full screen
+      activeOffsetY={isFullScreen ? [-1, 1] : undefined} // Restrict vertical pan when full screen
       backgroundStyle={styles.bottomSheetBackground}
       handleIndicatorStyle={styles.bottomSheetHandle}
     >
@@ -101,7 +115,17 @@ export default function EmployeeDetailBottomSheet({
         </View>
 
         {/* Content */}
-        <BottomSheetScrollView style={styles.content} showsVerticalScrollIndicator={false}>
+        <BottomSheetScrollView
+          style={styles.content}
+          contentContainerStyle={styles.scrollContent}
+          showsVerticalScrollIndicator={isFullScreen}
+          scrollEnabled={isFullScreen} // Only allow scrolling when in full screen
+          nestedScrollEnabled={isFullScreen}
+          keyboardShouldPersistTaps="handled"
+          bounces={true}
+          alwaysBounceVertical={false}
+          overScrollMode="auto"
+        >
         {/* Employee Header */}
         <View style={styles.employeeHeader}>
           <View style={[styles.avatar, { backgroundColor: employee.active ? '#34C759' : '#999' }]}>
@@ -256,6 +280,10 @@ const styles = StyleSheet.create({
     flex: 1,
     paddingHorizontal: 20,
     paddingTop: 16,
+  },
+  scrollContent: {
+    paddingBottom: 120, // Extra padding at bottom for infinite scrolling
+    flexGrow: 1, // Allow content to grow naturally
   },
   employeeHeader: {
     flexDirection: 'row',

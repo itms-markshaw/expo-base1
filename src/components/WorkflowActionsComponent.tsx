@@ -38,18 +38,24 @@ export default function WorkflowActionsComponent({
   const [loading, setLoading] = useState(false);
   const [executing, setExecuting] = useState<string | null>(null);
 
-
-
   // Bottom sheet refs and snap points
   const bottomSheetRef = useRef<BottomSheet>(null);
-  const snapPoints = useMemo(() => ['50%', '80%'], []); // Start at 50%, expand to 80%
+  const snapPoints = useMemo(() => ['50%', '85%'], []); // Start at 50%, expand to 85%
+
+  // Track current snap point for scroll control
+  const [currentSnapIndex, setCurrentSnapIndex] = useState(0);
+  const isFullScreen = currentSnapIndex === 1; // Full screen is index 1 (85%)
 
   // Handle visibility changes
   useEffect(() => {
     if (visible) {
-      bottomSheetRef.current?.snapToIndex(0); // Open to first snap point (50%)
+      setTimeout(() => {
+        bottomSheetRef.current?.snapToIndex(0); // Open to first snap point (50%)
+        setCurrentSnapIndex(0);
+      }, 100);
     } else {
       bottomSheetRef.current?.close();
+      setCurrentSnapIndex(0);
     }
   }, [visible]);
 
@@ -57,6 +63,9 @@ export default function WorkflowActionsComponent({
   const handleSheetChanges = useCallback((index: number) => {
     if (index === -1) {
       onClose();
+      setCurrentSnapIndex(0);
+    } else {
+      setCurrentSnapIndex(index);
     }
   }, [onClose]);
 
@@ -146,6 +155,8 @@ export default function WorkflowActionsComponent({
       snapPoints={snapPoints}
       onChange={handleSheetChanges}
       enablePanDownToClose={true}
+      enableContentPanningGesture={!isFullScreen} // Allow panning when not full screen
+      activeOffsetY={isFullScreen ? [-1, 1] : undefined} // Restrict vertical pan when full screen
       backgroundStyle={styles.bottomSheetBackground}
       handleIndicatorStyle={styles.bottomSheetHandle}
     >
@@ -162,7 +173,17 @@ export default function WorkflowActionsComponent({
         </View>
 
         {/* Content */}
-        <BottomSheetScrollView style={styles.content} showsVerticalScrollIndicator={false}>
+        <BottomSheetScrollView
+          style={styles.content}
+          contentContainerStyle={styles.scrollContent}
+          showsVerticalScrollIndicator={isFullScreen}
+          scrollEnabled={isFullScreen} // Only allow scrolling when in full screen
+          nestedScrollEnabled={isFullScreen}
+          keyboardShouldPersistTaps="handled"
+          bounces={true}
+          alwaysBounceVertical={false}
+          overScrollMode="auto"
+        >
           {loading && (
             <View style={styles.loadingContainer}>
               <ActivityIndicator size="large" color="#007AFF" />
@@ -271,6 +292,10 @@ const styles = StyleSheet.create({
   content: {
     flex: 1,
     paddingHorizontal: 16,
+  },
+  scrollContent: {
+    paddingBottom: 120, // Extra padding at bottom for infinite scrolling
+    flexGrow: 1, // Allow content to grow naturally
   },
   loadingContainer: {
     justifyContent: 'center',
