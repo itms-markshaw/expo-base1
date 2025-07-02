@@ -45,10 +45,10 @@ export default function SyncDashboard() {
   const [syncStats, setSyncStats] = useState<SyncStats>({
     totalModels: 844,
     syncedModels: 0, // This will be calculated from database
-    totalRecords: 1247,
-    dataSize: '2.4 MB',
-    lastSync: new Date('2025-07-02T10:27:51'),
-    conflicts: 2,
+    totalRecords: 0,
+    dataSize: '0 MB',
+    lastSync: null, // Will be loaded from database
+    conflicts: 0, // Will be calculated from actual conflicts
   });
   const [isLoading, setIsLoading] = useState(false);
 
@@ -77,11 +77,16 @@ export default function SyncDashboard() {
       const lastSyncTimes = metadata.map(m => m.last_sync).filter(Boolean);
       const lastSync = lastSyncTimes.length > 0 ? new Date(Math.max(...lastSyncTimes.map(d => new Date(d).getTime()))) : null;
 
+      // Get actual conflicts count (for now set to 0, will implement conflict detection later)
+      const conflicts = 0;
+
       setSyncStats(prev => ({
         ...prev,
+        syncedModels,
         totalRecords,
         dataSize,
         lastSync,
+        conflicts,
       }));
     } catch (error) {
       console.error('Failed to load sync stats:', error);
@@ -166,7 +171,7 @@ export default function SyncDashboard() {
 
         {/* Navigation Cards */}
         <View style={styles.navigationContainer}>
-          {/* Conflicts Navigation Card */}
+          {/* Conflicts Navigation Card - Only show if there are actual conflicts */}
           {syncStats.conflicts > 0 && (
             <TouchableOpacity
               style={styles.navCard}

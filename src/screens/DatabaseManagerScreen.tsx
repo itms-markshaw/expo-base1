@@ -8,6 +8,7 @@ import {
   TouchableOpacity,
   Alert,
   RefreshControl,
+  TextInput,
 } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
 import { databaseService } from '../services/database';
@@ -26,8 +27,10 @@ export default function DatabaseManagerScreen() {
   const [tables, setTables] = useState<TableInfo[]>([]);
   const [selectedTable, setSelectedTable] = useState<string | null>(null);
   const [records, setRecords] = useState<DatabaseRecord[]>([]);
+  const [filteredRecords, setFilteredRecords] = useState<DatabaseRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
 
   useEffect(() => {
     loadTables();
@@ -85,53 +88,16 @@ export default function DatabaseManagerScreen() {
   };
 
   const getTableName = (modelName: string): string => {
-    const tableMap: { [key: string]: string } = {
-      'res.partner': 'contacts',
-      'res.users': 'users',
-      'hr.employee': 'employees',
-      'mail.message': 'messages',
-      'mail.activity': 'activities',
-      'ir.attachment': 'attachments',
-      'discuss.channel': 'chat_channels',
-      'sale.order': 'sale_orders',
-      'crm.lead': 'crm_leads',
-      'calendar.event': 'calendar_events',
-      'product.product': 'products',
-      'product.template': 'product_templates',
-      'account.move': 'invoices',
-      'stock.picking': 'deliveries',
-      'project.project': 'projects',
-      'project.task': 'project_tasks',
-      'helpdesk.ticket': 'helpdesk_tickets',
-      'helpdesk.team': 'helpdesk_teams',
-    };
-
-    return tableMap[modelName] || modelName.replace('.', '_');
+    // DYNAMIC TABLE CREATION: Convert any Odoo model name to valid SQLite table name
+    return modelName
+      .replace(/\./g, '_')           // Replace dots with underscores
+      .replace(/[^a-zA-Z0-9_]/g, '_') // Replace any other invalid chars with underscores
+      .toLowerCase();                 // Ensure lowercase for consistency
   };
 
   const getModelNameFromTable = (tableName: string): string => {
-    const reverseTableMap: { [key: string]: string } = {
-      'contacts': 'res.partner',
-      'users': 'res.users',
-      'employees': 'hr.employee',
-      'messages': 'mail.message',
-      'activities': 'mail.activity',
-      'attachments': 'ir.attachment',
-      'chat_channels': 'discuss.channel',
-      'sale_orders': 'sale.order',
-      'crm_leads': 'crm.lead',
-      'calendar_events': 'calendar.event',
-      'products': 'product.product',
-      'product_templates': 'product.template',
-      'invoices': 'account.move',
-      'deliveries': 'stock.picking',
-      'projects': 'project.project',
-      'project_tasks': 'project.task',
-      'helpdesk_tickets': 'helpdesk.ticket',
-      'helpdesk_teams': 'helpdesk.team',
-    };
-
-    return reverseTableMap[tableName] || tableName.replace('_', '.');
+    // DYNAMIC REVERSE CONVERSION: Convert table name back to model name
+    return tableName.replace(/_/g, '.');
   };
 
   const loadTableRecords = async (tableName: string) => {
@@ -139,7 +105,9 @@ export default function DatabaseManagerScreen() {
       setLoading(true);
       const tableRecords = await databaseService.getRecords(tableName, 50, 0);
       setRecords(tableRecords);
+      setFilteredRecords(tableRecords);
       setSelectedTable(tableName);
+      setSearchQuery(''); // Reset search when loading new table
     } catch (error) {
       console.error(`❌ Failed to load records from ${tableName}:`, error);
       Alert.alert('Error', `Failed to load records from ${tableName}`);
@@ -180,6 +148,30 @@ export default function DatabaseManagerScreen() {
     setRefreshing(false);
   };
 
+  const goBack = () => {
+    if (selectedTable) {
+      setSelectedTable(null);
+      setRecords([]);
+      setFilteredRecords([]);
+      setSearchQuery('');
+    }
+  };
+
+  const handleSearch = (query: string) => {
+    setSearchQuery(query);
+    if (!query.trim()) {
+      setFilteredRecords(records);
+      return;
+    }
+
+    const filtered = records.filter(record => {
+      return Object.values(record).some(value =>
+        value?.toString().toLowerCase().includes(query.toLowerCase())
+      );
+    });
+    setFilteredRecords(filtered);
+  };
+
   const renderTableItem = ({ item }: { item: TableInfo }) => (
     <TouchableOpacity
       style={styles.tableCard}
@@ -207,7 +199,7 @@ export default function DatabaseManagerScreen() {
     <View style={styles.recordCard}>
       <Text style={styles.recordIndex}>#{index + 1}</Text>
       <View style={styles.recordContent}>
-        {Object.entries(item).slice(0, 5).map(([key, value]) => (
+        {Object.entries(item).slice(0, 10).map(([key, value]) => (
           <View key={key} style={styles.recordField}>
             <Text style={styles.fieldName}>{key}:</Text>
             <Text style={styles.fieldValue} numberOfLines={1}>
@@ -215,9 +207,9 @@ export default function DatabaseManagerScreen() {
             </Text>
           </View>
         ))}
-        {Object.keys(item).length > 5 && (
+        {Object.keys(item).length > 10 && (
           <Text style={styles.moreFields}>
-            +{Object.keys(item).length - 5} more fields
+            +{Object.keys(item).length - 10} more fields
           </Text>
         )}
       </View>
@@ -230,10 +222,7 @@ export default function DatabaseManagerScreen() {
         <View style={styles.header}>
           <TouchableOpacity
             style={styles.backButton}
-            onPress={() => {
-              setSelectedTable(null);
-              setRecords([]);
-            }}
+            onPress={goBack}
           >
             <MaterialIcons name="arrow-back" size={24} color="#2196F3" />
           </TouchableOpacity>
@@ -246,14 +235,33 @@ export default function DatabaseManagerScreen() {
           </TouchableOpacity>
         </View>
 
+        <View style={styles.searchContainer}>
+          <MaterialIcons name="search" size={20} color="#666" style={styles.searchIcon} />
+          <TextInput
+            style={styles.searchInput}
+            placeholder="Search records..."
+            value={searchQuery}
+            onChangeText={handleSearch}
+            placeholderTextColor="#999"
+          />
+          {searchQuery.length > 0 && (
+            <TouchableOpacity
+              onPress={() => handleSearch('')}
+              style={styles.clearSearchButton}
+            >
+              <MaterialIcons name="clear" size={20} color="#666" />
+            </TouchableOpacity>
+          )}
+        </View>
+
         <View style={styles.statsBar}>
           <Text style={styles.statsText}>
-            {records.length.toLocaleString()} records
+            {searchQuery ? `${filteredRecords.length} of ${records.length}` : records.length.toLocaleString()} records
           </Text>
         </View>
 
         <FlatList
-          data={records}
+          data={filteredRecords}
           renderItem={renderRecordItem}
           keyExtractor={(item, index) => `${item.id || index}`}
           contentContainerStyle={styles.listContainer}
@@ -263,7 +271,9 @@ export default function DatabaseManagerScreen() {
           ListEmptyComponent={
             <View style={styles.emptyContainer}>
               <MaterialIcons name="inbox" size={64} color="#ccc" />
-              <Text style={styles.emptyText}>No records found</Text>
+              <Text style={styles.emptyText}>
+                {searchQuery ? 'No matching records found' : 'No records found'}
+              </Text>
             </View>
           }
         />
@@ -442,5 +452,30 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#ccc',
     marginTop: 8,
+  },
+  searchContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#fff',
+    marginHorizontal: 16,
+    marginBottom: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#e0e0e0',
+  },
+  searchIcon: {
+    marginRight: 8,
+  },
+  searchInput: {
+    flex: 1,
+    fontSize: 16,
+    color: '#333',
+    paddingVertical: 4,
+  },
+  clearSearchButton: {
+    padding: 4,
+    marginLeft: 8,
   },
 });

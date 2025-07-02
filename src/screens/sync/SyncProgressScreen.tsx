@@ -22,6 +22,7 @@ const AnimatedCircle = Animated.createAnimatedComponent(Circle);
 import { useAppStore } from '../../store';
 import { syncService } from '../../services/sync';
 import { databaseService } from '../../services/database';
+import { authService } from '../../services/auth';
 
 interface SyncProgress {
   currentModel: string;
@@ -37,6 +38,39 @@ interface SyncProgress {
   syncType: 'full' | 'incremental';
   isFirstSync: boolean;
 }
+
+// Helper functions for calculating sync totals
+const buildDomainForModel = async (modelName: string, syncType: 'full' | 'incremental'): Promise<any[]> => {
+  if (syncType === 'full') {
+    return []; // No filters for full sync
+  }
+
+  // For incremental sync, get last sync timestamp
+  try {
+    const metadata = await databaseService.getSyncMetadata(modelName);
+    if (metadata?.lastSyncWriteDate) {
+      return [['write_date', '>', metadata.lastSyncWriteDate]];
+    }
+  } catch (error) {
+    console.warn(`Could not get sync metadata for ${modelName}:`, error);
+  }
+
+  return []; // Fallback to full sync if no metadata
+};
+
+const getLimitForModel = (modelName: string): number => {
+  // Master data models - sync ALL records
+  const masterDataModels = [
+    'res.partner', 'res.users', 'hr.employee', 'product.product', 'product.template'
+  ];
+
+  if (masterDataModels.includes(modelName)) {
+    return 999999; // Effectively unlimited
+  }
+
+  // Transactional data - limit to recent records
+  return 1000;
+};
 
 export default function SyncProgressScreen() {
   const navigation = useNavigation();

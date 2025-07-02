@@ -509,32 +509,14 @@ class SyncService {
   }
 
   /**
-   * Get table name for model
+   * Get table name for model - FULLY DYNAMIC
    */
   private getTableName(modelName: string): string {
-    const tableMap: { [key: string]: string } = {
-      'res.partner': 'contacts',
-      'sale.order': 'sale_orders',
-      'crm.lead': 'crm_leads',
-      'hr.employee': 'employees',
-      'mail.activity': 'activities',
-      'mail.message': 'messages',
-      'discuss.channel': 'chat_channels',
-      'mail.thread': 'mail_threads',
-      'ir.attachment': 'attachments',
-      'calendar.event': 'calendar_events',
-      'res.users': 'users',
-      'product.product': 'products',
-      'product.template': 'product_templates',
-      'account.move': 'invoices',
-      'stock.picking': 'deliveries',
-      'project.project': 'projects',
-      'project.task': 'project_tasks',
-      'helpdesk.ticket': 'helpdesk_tickets',
-      'helpdesk.team': 'helpdesk_teams',
-    };
-
-    return tableMap[modelName] || modelName.replace('.', '_');
+    // DYNAMIC TABLE CREATION: Convert any Odoo model name to valid SQLite table name
+    return modelName
+      .replace(/\./g, '_')           // Replace dots with underscores
+      .replace(/[^a-zA-Z0-9_]/g, '_') // Replace any other invalid chars with underscores
+      .toLowerCase();                 // Ensure lowercase for consistency
   }
 
   /**
@@ -592,90 +574,12 @@ class SyncService {
   }
 
   /**
-   * Get priority fields for each model (fields we prefer to sync if available)
+   * Get priority fields for a model - FULLY DYNAMIC
    */
   private getPriorityFields(modelName: string): string[] {
-    const priorityFieldMap: { [key: string]: string[] } = {
-      'res.partner': [
-        'name', 'email', 'phone', 'mobile', 'is_company', 'customer_rank', 'supplier_rank',
-        'street', 'street2', 'city', 'state_id', 'zip', 'country_id', 'website',
-        'category_id', 'user_id', 'company_id'
-      ],
-      'sale.order': [
-        'name', 'partner_id', 'date_order', 'validity_date', 'user_id', 'team_id',
-        'amount_untaxed', 'amount_tax', 'amount_total', 'currency_id', 'state',
-        'invoice_status', 'delivery_status', 'note'
-      ],
-      'crm.lead': [
-        'name', 'partner_name', 'email_from', 'phone', 'mobile', 'website',
-        'street', 'street2', 'city', 'state_id', 'zip', 'country_id',
-        'stage_id', 'user_id', 'team_id', 'company_id', 'source_id', 'medium_id', 'campaign_id',
-        'referred', 'probability', 'expected_revenue', 'priority', 'type',
-        'description', 'date_deadline', 'date_closed', 'date_conversion', 'lost_reason_id', 'tag_ids'
-      ],
-      'hr.employee': [
-        'name', 'work_email', 'work_phone', 'job_title',
-        'department_id', 'company_id', 'user_id'
-      ],
-      'mail.activity': [
-        'summary', 'note', 'date_deadline', 'user_id', 'res_model', 'res_id',
-        'res_name', 'activity_type_id', 'state'
-      ],
-      'mail.message': [
-        'subject', 'body', 'date', 'author_id', 'email_from', 'message_type',
-        'subtype_id', 'model', 'res_id', 'record_name', 'reply_to', 'attachment_ids'
-      ],
-      'discuss.channel': [
-        'name', 'description', 'channel_type'
-      ],
-      'mail.thread': [
-        'message_ids', 'message_follower_ids', 'message_partner_ids'
-      ],
-      'ir.attachment': [
-        'name', 'description', 'res_model', 'res_id',
-        'res_name', 'type', 'url', 'file_size', 'mimetype'
-      ],
-      'calendar.event': [
-        'name', 'description', 'start', 'stop', 'allday', 'duration',
-        'user_id', 'partner_ids', 'location', 'privacy', 'show_as'
-      ],
-      'res.users': [
-        'name', 'login', 'email', 'partner_id', 'company_id', 'company_ids', 'groups_id'
-      ],
-      'product.product': [
-        'name', 'default_code', 'barcode', 'product_tmpl_id', 'list_price',
-        'standard_price', 'categ_id', 'uom_id'
-      ],
-      'product.template': [
-        'name', 'description', 'list_price', 'standard_price', 'categ_id',
-        'uom_id', 'uom_po_id', 'type', 'sale_ok', 'purchase_ok'
-      ],
-      'account.move': [
-        'name', 'partner_id', 'invoice_date', 'invoice_date_due', 'amount_untaxed',
-        'amount_tax', 'amount_total', 'currency_id', 'state', 'move_type', 'ref'
-      ],
-      'stock.picking': [
-        'name', 'partner_id', 'picking_type_id', 'location_id', 'location_dest_id',
-        'scheduled_date', 'date_done', 'state', 'origin', 'note'
-      ],
-      'project.project': [
-        'name', 'description', 'user_id', 'partner_id', 'date_start', 'date',
-        'privacy_visibility'
-      ],
-      'project.task': [
-        'name', 'description', 'project_id', 'user_ids', 'partner_id',
-        'date_deadline', 'stage_id', 'priority'
-      ],
-      'helpdesk.ticket': [
-        'name', 'description', 'partner_id', 'user_id', 'team_id', 'stage_id',
-        'priority', 'kanban_state', 'close_date'
-      ],
-      'helpdesk.team': [
-        'name', 'description', 'member_ids', 'color', 'alias_name', 'alias_domain'
-      ],
-    };
-
-    return priorityFieldMap[modelName] || [];
+    // DYNAMIC: No hardcoded priority fields
+    // Auto-detection will handle field selection
+    return [];
   }
 
   /**
@@ -936,59 +840,20 @@ class SyncService {
   }
 
   /**
-   * Get sync configuration for a model
+   * Get sync configuration for a model - FULLY DYNAMIC
    */
   private getModelSyncConfig(modelName: string): { enabled: boolean; syncType: string } {
-    // Master data models - sync all records
-    if (['res.partner', 'res.users', 'hr.employee', 'product.template', 'product.product'].includes(modelName)) {
-      return { enabled: true, syncType: 'all' };
-    }
-
-    // High priority transactional models
-    if (['crm.lead', 'sale.order', 'helpdesk.ticket', 'mail.activity'].includes(modelName)) {
-      return { enabled: true, syncType: 'time_based' };
-    }
-
-    // Chat models
-    if (['discuss.channel', 'mail.message'].includes(modelName)) {
-      return { enabled: true, syncType: 'time_based' };
-    }
-
-    // Large/optional models - disabled by default
-    if (['ir.attachment', 'account.move', 'stock.picking'].includes(modelName)) {
-      return { enabled: false, syncType: 'time_based' };
-    }
-
-    // Default for other models
+    // DYNAMIC: All models enabled by default with time-based sync
+    // Users can customize this through the UI
     return { enabled: true, syncType: 'time_based' };
   }
 
   /**
-   * Get display name for a model
+   * Get display name for a model - FULLY DYNAMIC
    */
   private getDisplayName(modelName: string): string {
-    const displayNames: { [key: string]: string } = {
-      'res.partner': 'Contacts',
-      'res.users': 'Users',
-      'hr.employee': 'Employees',
-      'crm.lead': 'CRM Leads',
-      'sale.order': 'Sales Orders',
-      'account.move': 'Invoices',
-      'stock.picking': 'Deliveries',
-      'project.project': 'Projects',
-      'project.task': 'Project Tasks',
-      'helpdesk.ticket': 'Helpdesk Tickets',
-      'helpdesk.team': 'Helpdesk Teams',
-      'mail.activity': 'Activities',
-      'mail.message': 'Messages',
-      'discuss.channel': 'Chat Channels',
-      'calendar.event': 'Calendar Events',
-      'ir.attachment': 'Attachments',
-      'product.product': 'Products',
-      'product.template': 'Product Templates',
-    };
-
-    return displayNames[modelName] || modelName.split('.').map(part =>
+    // DYNAMIC: Convert model name to display name
+    return modelName.split('.').map(part =>
       part.charAt(0).toUpperCase() + part.slice(1)
     ).join(' ');
   }

@@ -99,18 +99,31 @@ class DatabaseService {
 
     // Build dynamic CREATE TABLE statement
     const columns = ['id INTEGER PRIMARY KEY'];
-    
+
+    // Track which standard columns we've already added
+    const standardColumns = new Set(['id', 'create_date', 'write_date', 'synced_at']);
+
     // Add each field as TEXT (we'll handle type conversion in the app)
     for (const field of fields) {
-      if (field !== 'id') { // Skip id as it's already added
+      if (!standardColumns.has(field)) {
         columns.push(`${field} TEXT`);
+      } else if (field === 'create_date' || field === 'write_date') {
+        // Add the field from Odoo data (don't duplicate)
+        columns.push(`${field} TEXT`);
+        standardColumns.delete(field); // Mark as added
       }
     }
-    
-    // Always add standard tracking columns
-    columns.push('create_date TEXT');
-    columns.push('write_date TEXT');
-    columns.push('synced_at INTEGER DEFAULT (strftime(\'%s\', \'now\'))');
+
+    // Add any remaining standard tracking columns that weren't in the Odoo fields
+    if (standardColumns.has('create_date')) {
+      columns.push('create_date TEXT');
+    }
+    if (standardColumns.has('write_date')) {
+      columns.push('write_date TEXT');
+    }
+    if (standardColumns.has('synced_at')) {
+      columns.push('synced_at INTEGER DEFAULT (strftime(\'%s\', \'now\'))');
+    }
 
     const createTableSQL = `
       CREATE TABLE IF NOT EXISTS ${tableName} (

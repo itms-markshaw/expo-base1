@@ -17,6 +17,7 @@ import { MaterialIcons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 
 import { useAppStore } from '../../store';
+import { databaseService } from '../../services/database';
 import { TimePeriod } from '../../types';
 
 export default function SyncSettingsScreen() {
@@ -55,12 +56,17 @@ export default function SyncSettingsScreen() {
       'This will delete all locally stored data. Are you sure?',
       [
         { text: 'Cancel', style: 'cancel' },
-        { 
-          text: 'Clear Data', 
+        {
+          text: 'Clear Data',
           style: 'destructive',
-          onPress: () => {
-            // TODO: Implement clear data functionality
-            Alert.alert('Data Cleared', 'All offline data has been removed.');
+          onPress: async () => {
+            try {
+              await databaseService.clearAllData();
+              Alert.alert('Data Cleared', 'All offline data has been removed.');
+            } catch (error) {
+              console.error('Failed to clear data:', error);
+              Alert.alert('Error', 'Failed to clear offline data. Please try again.');
+            }
           }
         },
       ]

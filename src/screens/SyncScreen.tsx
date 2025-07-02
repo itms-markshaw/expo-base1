@@ -66,8 +66,8 @@ export default function SyncDashboard() {
       const lastSyncTimes = metadata.map(m => m.last_sync).filter(Boolean);
       const lastSync = lastSyncTimes.length > 0 ? new Date(Math.max(...lastSyncTimes.map(d => new Date(d).getTime()))) : null;
 
-      // TODO: Get actual conflicts from database
-      const conflicts = 2; // Mock data for now
+      // Get actual conflicts from database (for now set to 0, will implement conflict detection later)
+      const conflicts = 0;
 
       setSyncStats({
         totalModels: 844,
