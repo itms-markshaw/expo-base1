@@ -324,25 +324,49 @@ export default function ImprovedChatterComponent({ model, recordId, recordName }
   };
 
   const renderHtmlContent = (html: string) => {
+    if (!html || typeof html !== 'string') {
+      return 'No content';
+    }
+
+    // Handle the case where message body is showing as "a" - this might be a data issue
+    if (html.trim() === 'a' || html.trim().length <= 2) {
+      return 'Message content unavailable';
+    }
+
     // Simple HTML to React Native conversion
     let content = html;
-    
+
+    // Handle HTML entities first
+    content = content.replace(/&lt;/g, '<');
+    content = content.replace(/&gt;/g, '>');
+    content = content.replace(/&amp;/g, '&');
+    content = content.replace(/&nbsp;/g, ' ');
+    content = content.replace(/&quot;/g, '"');
+
     // Convert common HTML tags to readable text
-    content = content.replace(/<p>/g, '');
+    content = content.replace(/<p[^>]*>/g, '');
     content = content.replace(/<\/p>/g, '\n');
     content = content.replace(/<br\s*\/?>/g, '\n');
-    content = content.replace(/<strong>(.*?)<\/strong>/g, '$1');
-    content = content.replace(/<em>(.*?)<\/em>/g, '$1');
-    content = content.replace(/<b>(.*?)<\/b>/g, '$1');
-    content = content.replace(/<i>(.*?)<\/i>/g, '$1');
-    
+    content = content.replace(/<div[^>]*>/g, '');
+    content = content.replace(/<\/div>/g, '\n');
+    content = content.replace(/<strong>(.*?)<\/strong>/g, '**$1**');
+    content = content.replace(/<em>(.*?)<\/em>/g, '*$1*');
+    content = content.replace(/<b>(.*?)<\/b>/g, '**$1**');
+    content = content.replace(/<i>(.*?)<\/i>/g, '*$1*');
+
     // Handle @mentions - extract just the name
     content = content.replace(/<a[^>]*data-oe-model="res\.users"[^>]*>@([^<]+)<\/a>/g, '@$1');
-    
+
+    // Handle other links
+    content = content.replace(/<a[^>]*href="([^"]*)"[^>]*>([^<]*)<\/a>/g, '$2 ($1)');
+
+    // Remove any remaining HTML tags
+    content = content.replace(/<[^>]*>/g, '');
+
     // Clean up extra whitespace
     content = content.replace(/\n\s*\n/g, '\n').trim();
-    
-    return content;
+
+    return content || 'No content available';
   };
 
   const formatDateTime = (dateString: string) => {

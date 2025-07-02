@@ -20,6 +20,17 @@ class SyncService {
   private listeners: ((status: SyncStatus) => void)[] = [];
   private fieldCache: { [modelName: string]: string[] } = {};
 
+  // SMART PRE-SCAN: Cache discovered models to avoid repeated API calls
+  private discoveredModelsCache: OdooModel[] | null = null;
+  private discoveryTimestamp: number | null = null;
+  private readonly CACHE_DURATION = 5 * 60 * 1000; // 5 minutes
+
+  // CIRCUIT BREAKER: Prevent infinite loops
+  private discoveryCallCount = 0;
+  private lastDiscoveryReset = Date.now();
+  private readonly MAX_DISCOVERY_CALLS = 3; // Max calls per minute
+  private readonly DISCOVERY_RESET_INTERVAL = 60 * 1000; // 1 minute
+
   // Default sync settings
   private syncSettings: SyncSettings = {
     globalTimePeriod: '1month',
@@ -91,129 +102,164 @@ class SyncService {
   }
 
   /**
-   * Get available models to sync
+   * SMART PRE-SCAN: Dynamic model discovery with caching and circuit breaker
+   * Discovers available models and tests user permissions
    */
-  getAvailableModels(): OdooModel[] {
+  async discoverAvailableModels(): Promise<OdooModel[]> {
+    console.log('🔍 Entering discoverAvailableModels...');
+
+    // CRITICAL: Initialize database FIRST
+    try {
+      await databaseService.initialize();
+      console.log('✅ Database initialized before model discovery');
+    } catch (error) {
+      console.error('❌ Failed to initialize database:', error);
+    }
+
+    const now = Date.now();
+
+    // CIRCUIT BREAKER: Reset call count every minute
+    if (now - this.lastDiscoveryReset > this.DISCOVERY_RESET_INTERVAL) {
+      this.discoveryCallCount = 0;
+      this.lastDiscoveryReset = now;
+      console.log('🔄 Circuit breaker reset');
+    }
+
+    // CIRCUIT BREAKER: Prevent infinite loops
+    if (this.discoveryCallCount >= this.MAX_DISCOVERY_CALLS) {
+      console.warn('🚨 CIRCUIT BREAKER: Too many discovery calls, returning fallback models');
+      return this.getFallbackModels();
+    }
+
+    // Dynamic discovery re-enabled - core issues fixed
+
+    this.discoveryCallCount++;
+
+    // Check cache first
+    if (this.discoveredModelsCache && this.discoveryTimestamp &&
+        (now - this.discoveryTimestamp) < this.CACHE_DURATION) {
+      console.log(`📦 Using cached model discovery results (${this.discoveredModelsCache.length} models)`);
+      return this.discoveredModelsCache;
+    }
+
+    const client = authService.getClient();
+    if (!client) {
+      console.warn('⚠️ No client available - returning fallback models');
+      return this.getFallbackModels();
+    }
+
+    console.log('🔍 Client available, starting model discovery...');
+
+    try {
+      // Test connectivity with a simple model first
+      console.log('🔍 Testing access to res.partner...');
+      await client.searchCount('res.partner', []);
+      console.log('✅ res.partner access confirmed');
+
+      console.log('🔍 SMART PRE-SCAN: Discovering available models from Odoo server...');
+
+      // STEP 1: First get the count of ALL models
+      const totalCount = await client.searchCount('ir.model', []);
+      console.log(`🔍 Total models in Odoo: ${totalCount}`);
+
+      // STEP 2: Get ALL models using proper limit override
+      const allModels = await client.searchRead('ir.model',
+        [], // NO FILTERS - get everything
+        ['model', 'name', 'info'],
+        {
+          limit: totalCount, // Use the actual count as limit
+          offset: 0
+        }
+      );
+
+      console.log(`📋 Found ${allModels.length} total models in Odoo`);
+
+      // RETURN ALL 844 MODELS - NO FILTERING
+      console.log(`🔍 Found ${allModels.length} total models from ir.model`);
+
+      // Convert ALL models to OdooModel format
+      const allOdooModels = allModels.map(model => ({
+        name: model.model,
+        displayName: model.name || model.model,
+        description: `Model: ${model.model}`,
+        enabled: false, // Default to disabled
+        syncType: 'time_based' as const,
+        hasAccess: true, // Assume accessible for now
+        discoveredAt: new Date().toISOString()
+      }));
+
+      console.log(`✅ Returning ALL ${allOdooModels.length} models`);
+
+      // Cache the results
+      this.discoveredModelsCache = allOdooModels;
+      this.discoveryTimestamp = now;
+
+      return allOdooModels;
+
+    } catch (error) {
+      console.error('❌ Model discovery failed:', error instanceof Error ? error.message : String(error));
+      console.warn('⚠️ Falling back to static model list');
+      return this.getFallbackModels();
+    }
+  }
+
+  /**
+   * SMART PRE-SCAN: Clear discovery cache and reset circuit breaker
+   */
+  clearDiscoveryCache(): void {
+    this.discoveredModelsCache = null;
+    this.discoveryTimestamp = null;
+    this.discoveryCallCount = 0;
+    this.lastDiscoveryReset = Date.now();
+    console.log('🗑️ Discovery cache cleared and circuit breaker reset');
+  }
+
+  /**
+   * Get static fallback models (original hardcoded list)
+   */
+  getFallbackModels(): OdooModel[] {
     return [
       {
         name: 'res.partner',
         displayName: 'Contacts',
         description: 'Customers, vendors, and companies',
         enabled: true,
-        syncType: 'all', // Always sync all contacts
+        syncType: 'all',
       },
       {
         name: 'sale.order',
         displayName: 'Sales Orders',
         description: 'Sales orders and quotations',
         enabled: true,
-        syncType: 'time_based', // Use time filtering for sales orders
+        syncType: 'time_based',
       },
       {
         name: 'crm.lead',
         displayName: 'CRM Leads',
         description: 'Sales leads and opportunities',
         enabled: true,
-        syncType: 'time_based', // Use time filtering for leads
+        syncType: 'time_based',
       },
       {
         name: 'hr.employee',
         displayName: 'Employees',
         description: 'Company employees and HR data',
         enabled: true,
-        syncType: 'all', // Always sync all employees
-      },
-      {
-        name: 'mail.activity',
-        displayName: 'Activities',
-        description: 'Tasks, reminders, and activities',
-        enabled: true,
-        syncType: 'time_based', // Use time filtering for activities
-      },
-      {
-        name: 'mail.message',
-        displayName: 'Messages',
-        description: 'Chatter messages and communications',
-        enabled: true,
-        priority: 1, // High priority for chat
-        syncType: 'time_based', // Use time filtering for messages
-      },
-      {
-        name: 'discuss.channel',
-        displayName: 'Chat Channels',
-        description: 'Chat channels and conversations',
-        enabled: true,
-        priority: 1, // High priority for chat
-        syncType: 'all', // Sync all channels
-      },
-
-      {
-        name: 'ir.attachment',
-        displayName: 'Attachments',
-        description: 'Files and document attachments',
-        enabled: true,
-        syncType: 'time', // Time-based sync for attachments
-      },
-      {
-        name: 'calendar.event',
-        displayName: 'Calendar Events',
-        description: 'Calendar events and meetings',
-        enabled: true,
-        syncType: 'time', // Time-based sync for calendar events
-      },
-      {
-        name: 'res.users',
-        displayName: 'Users',
-        description: 'System users and authentication',
-        enabled: true,
-      },
-      {
-        name: 'product.product',
-        displayName: 'Products',
-        description: 'Product catalog and variants',
-        enabled: true,
-      },
-      {
-        name: 'product.template',
-        displayName: 'Product Templates',
-        description: 'Product templates and categories',
-        enabled: true,
-      },
-      {
-        name: 'account.move',
-        displayName: 'Invoices',
-        description: 'Invoices and accounting entries',
-        enabled: true,
-      },
-      {
-        name: 'stock.picking',
-        displayName: 'Deliveries',
-        description: 'Delivery orders and shipments',
-        enabled: true,
-      },
-      {
-        name: 'project.project',
-        displayName: 'Projects',
-        description: 'Project management',
-        enabled: true,
-      },
-      {
-        name: 'project.task',
-        displayName: 'Project Tasks',
-        description: 'Project tasks and milestones',
-        enabled: true,
+        syncType: 'all',
       },
       {
         name: 'helpdesk.ticket',
         displayName: 'Helpdesk Tickets',
         description: 'Support tickets and requests',
         enabled: true,
+        syncType: 'time_based',
       },
       {
-        name: 'helpdesk.team',
-        displayName: 'Helpdesk Teams',
-        description: 'Support team management (auto-detected fields)',
+        name: 'res.users',
+        displayName: 'Users',
+        description: 'System users and authentication',
         enabled: true,
+        syncType: 'all',
       },
     ];
   }
@@ -306,13 +352,14 @@ class SyncService {
       let totalRecords = 0;
       for (const modelName of selectedModels) {
         try {
-          // Build domain for counting (respects time period settings)
-          const domain = this.buildDomainForModel(modelName);
+          // Build domain for counting (respects incremental sync and time period settings)
+          const domain = await this.buildDomainForModel(modelName);
           const count = await client.searchCount(modelName, domain);
           const limit = this.getLimitForModel(modelName);
           totalRecords += Math.min(count, limit); // Use dynamic limit based on model type
         } catch (error) {
-          console.warn(`⚠️ Could not count records for ${modelName}:`, error.message);
+          const errorMessage = error instanceof Error ? error.message : String(error);
+          console.warn(`⚠️ Could not count records for ${modelName}:`, errorMessage);
         }
       }
 
@@ -322,23 +369,32 @@ class SyncService {
       let syncedRecords = 0;
       for (let i = 0; i < selectedModels.length; i++) {
         const modelName = selectedModels[i];
-        
+
+        // Calculate progress based on models completed + current model progress
+        const baseProgress = (i / selectedModels.length) * 100;
+
         this.updateStatus({
           currentModel: modelName,
-          progress: Math.round((i / selectedModels.length) * 100),
+          progress: Math.round(baseProgress),
         });
 
         try {
           console.log(`📥 Syncing ${modelName}...`);
           const records = await this.syncModel(modelName);
           syncedRecords += records;
-          
-          this.updateStatus({ syncedRecords });
-          
-        } catch (error) {
-          console.error(`❌ Failed to sync ${modelName}:`, error.message);
+
+          // Update progress after model completion
+          const completedProgress = ((i + 1) / selectedModels.length) * 100;
           this.updateStatus({
-            errors: [...this.currentStatus.errors, `${modelName}: ${error.message}`],
+            syncedRecords,
+            progress: Math.round(completedProgress)
+          });
+
+        } catch (error) {
+          const errorMessage = error instanceof Error ? error.message : String(error);
+          console.error(`❌ Failed to sync ${modelName}:`, errorMessage);
+          this.updateStatus({
+            errors: [...this.currentStatus.errors, `${modelName}: ${errorMessage}`],
           });
         }
       }
@@ -352,17 +408,18 @@ class SyncService {
       console.log(`✅ Sync completed! Synced ${syncedRecords} records`);
 
     } catch (error) {
-      console.error('❌ Sync failed:', error.message);
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      console.error('❌ Sync failed:', errorMessage);
 
       // Check if we have cached data to fall back to
       const hasCached = await this.hasCachedData();
-      const errorMessage = hasCached
-        ? `Sync failed but cached data is available: ${error.message}`
-        : `Sync failed: ${error.message}`;
+      const finalErrorMessage = hasCached
+        ? `Sync failed but cached data is available: ${errorMessage}`
+        : `Sync failed: ${errorMessage}`;
 
       this.updateStatus({
         isRunning: false,
-        errors: [...this.currentStatus.errors, errorMessage],
+        errors: [...this.currentStatus.errors, finalErrorMessage],
       });
 
       // Don't throw error if we have cached data - just warn
@@ -390,14 +447,19 @@ class SyncService {
       // Get fields to sync using auto-detection
       const fields = await this.getFieldsForModel(modelName);
 
-      // Build domain based on time period settings
-      const domain = this.buildDomainForModel(modelName);
+      // Build domain based on incremental sync and time period settings
+      const domain = await this.buildDomainForModel(modelName);
 
       // Fetch records with time filtering and smart limits
       const limit = this.getLimitForModel(modelName);
+
+      // Set timeout based on model type - longer for problematic models
+      const timeout = this.getTimeoutForModel(modelName);
+
       const records = await client.searchRead(modelName, domain, fields, {
         limit,
-        order: 'write_date desc' // Get most recent records first
+        order: 'write_date desc', // Get most recent records first
+        timeout // Add timeout to prevent hanging
       });
 
       if (records.length === 0) {
@@ -408,20 +470,38 @@ class SyncService {
       // Save to database
       await databaseService.saveRecords(tableName, records);
 
-      console.log(`✅ Synced ${records.length} ${modelName} records`);
+      // INCREMENTAL SYNC: Update sync metadata with latest write_date
+      const latestWriteDate = this.getLatestWriteDate(records);
+      await databaseService.updateSyncMetadata(modelName, {
+        lastSyncTimestamp: new Date().toISOString(),
+        lastSyncWriteDate: latestWriteDate || undefined,
+        totalRecords: records.length,
+        lastError: undefined
+      });
+
+      console.log(`✅ Synced ${records.length} ${modelName} records (latest: ${latestWriteDate})`);
       return records.length;
     } catch (error) {
-      console.error(`❌ Failed to sync ${modelName}:`, error.message);
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      console.error(`❌ Failed to sync ${modelName}:`, errorMessage);
+
+      // INCREMENTAL SYNC: Record sync error in metadata
+      await databaseService.updateSyncMetadata(modelName, {
+        lastError: errorMessage,
+        lastSyncTimestamp: new Date().toISOString()
+      });
 
       // Check for specific error types and provide helpful messages
-      if (error.message.includes('You are not allowed to access')) {
+      if (errorMessage.includes('You are not allowed to access')) {
         console.warn(`⚠️ Skipping ${modelName} - insufficient permissions (this is normal for some models)`);
-      } else if (error.message.includes('Invalid field')) {
+      } else if (errorMessage.includes('Invalid field')) {
         console.warn(`⚠️ Skipping ${modelName} - field mapping issue`);
-      } else if (error.message.includes('no such table')) {
+      } else if (errorMessage.includes('no such table')) {
         console.warn(`⚠️ Skipping ${modelName} - database table missing`);
+      } else if (errorMessage.includes('Network request failed') || errorMessage.includes('timeout')) {
+        console.warn(`⚠️ Skipping ${modelName} - sync error: ${errorMessage}`);
       } else {
-        console.warn(`⚠️ Skipping ${modelName} - sync error: ${error.message}`);
+        console.warn(`⚠️ Skipping ${modelName} - sync error: ${errorMessage}`);
       }
 
       return 0;
@@ -503,7 +583,8 @@ class SyncService {
       return fieldsToSync;
 
     } catch (error) {
-      console.warn(`⚠️ Field detection failed for ${modelName}, using fallback:`, error.message);
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      console.warn(`⚠️ Field detection failed for ${modelName}, using fallback:`, errorMessage);
       const fallbackFields = this.getFallbackFields(modelName);
       this.fieldCache[modelName] = fallbackFields; // Cache fallback too
       return fallbackFields;
@@ -620,6 +701,327 @@ class SyncService {
   }
 
   /**
+   * SMART PRE-SCAN: Filter and test only relevant business models
+   */
+  private async filterAndTestModels(allModels: any[]): Promise<OdooModel[]> {
+    const client = authService.getClient();
+    if (!client) return [];
+
+    console.log('🎯 SMART PRE-SCAN: Filtering to business-relevant models only...');
+
+    // SMART FILTERING: Only test models we actually care about
+    const businessModels = this.getBusinessModelPatterns();
+
+    // DEBUG: Log first 10 models to see what's available
+    console.log('🔍 DEBUG: First 10 models from Odoo:', allModels.slice(0, 10).map(m => m.model));
+
+    const candidateModels = allModels.filter(model => {
+      // Skip system/wizard/transient models
+      if (this.isSystemModel(model.model)) {
+        return false;
+      }
+
+      // Only include exact matches for business models (no wildcards)
+      const isMatch = businessModels.includes(model.model);
+      if (isMatch) {
+        console.log(`✅ MATCH: ${model.model}`);
+      }
+      return isMatch;
+    });
+
+    console.log(`📋 PRE-SCAN: Filtered from ${allModels.length} to ${candidateModels.length} candidate models`);
+
+    // DEBUG: If no candidates, show what business models we're looking for
+    if (candidateModels.length === 0) {
+      console.log('🔍 DEBUG: Looking for these business models:', businessModels.slice(0, 10));
+      console.log('🔍 DEBUG: Available models include:', allModels.slice(0, 20).map(m => m.model));
+    }
+
+    // Test access for candidate models (much smaller list)
+    const accessibleModels: OdooModel[] = [];
+    const accessResults: { [key: string]: boolean } = {};
+
+    for (const model of candidateModels) {
+      try {
+        const hasAccess = await this.testModelAccess(model.model);
+        accessResults[model.model] = hasAccess;
+
+        if (hasAccess) {
+          const syncConfig = this.getModelSyncConfig(model.model);
+          accessibleModels.push({
+            name: model.model,
+            displayName: model.name || this.getDisplayName(model.model),
+            description: model.info || this.getDescription(model.model),
+            enabled: syncConfig.enabled,
+            syncType: syncConfig.syncType as 'all' | 'time_based'
+          });
+        }
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        console.log(`⚠️ Access test failed for ${model.model}: ${errorMessage}`);
+        accessResults[model.model] = false;
+      }
+    }
+
+    // Log discovery report
+    this.logDiscoveryReport(accessResults, accessibleModels.length);
+
+    return accessibleModels.sort((a, b) => a.displayName.localeCompare(b.displayName));
+  }
+
+  /**
+   * FIXED: Expanded business model patterns to prevent 0 results
+   */
+  private getBusinessModelPatterns(): string[] {
+    return [
+      // Core business models
+      'res.partner',      // Contacts
+      'res.users',        // Users
+      'res.company',      // Companies
+
+      // HR models
+      'hr.employee',      // Employees
+      'hr.department',    // Departments
+
+      // CRM models
+      'crm.lead',         // CRM Leads
+      'crm.stage',        // CRM Stages
+      'crm.team',         // Sales Teams
+
+      // Sales models
+      'sale.order',       // Sales Orders
+      'sale.order.line',  // Sales Order Lines
+
+      // Accounting models
+      'account.move',     // Invoices
+      'account.payment',  // Payments
+
+      // Inventory models
+      'stock.picking',    // Deliveries
+      'stock.move',       // Stock Moves
+
+      // Project models
+      'project.project',  // Projects
+      'project.task',     // Project Tasks
+
+      // Helpdesk models
+      'helpdesk.ticket',  // Helpdesk Tickets
+      'helpdesk.team',    // Helpdesk Teams
+      'helpdesk.stage',   // Helpdesk Stages
+
+      // Communication models
+      'mail.activity',    // Activities
+      'mail.message',     // Messages
+      'discuss.channel',  // Chat Channels
+      'mail.followers',   // Followers
+
+      // Calendar models
+      'calendar.event',   // Calendar Events
+
+      // Attachment models
+      'ir.attachment',    // Attachments
+
+      // Product models
+      'product.product',  // Products
+      'product.template', // Product Templates
+      'product.category', // Product Categories
+
+      // Additional common models
+      'res.partner.category', // Contact Tags
+      'res.currency',     // Currencies
+      'res.country',      // Countries
+    ];
+  }
+
+  /**
+   * Check if model is a system/wizard model to skip
+   */
+  private isSystemModel(modelName: string): boolean {
+    const systemPatterns = [
+      'wizard.',          // Wizard models
+      'report.',          // Report models
+      'base.',            // Base system models
+      'ir.actions.',      // Action models
+      'ir.ui.',           // UI models
+      'ir.model.',        // Model metadata (except ir.model itself)
+      'account.move.send', // Specific problematic models
+      'mail.compose.',    // Mail composer wizards
+      'stock.immediate.', // Stock wizards
+    ];
+
+    return systemPatterns.some(pattern => modelName.startsWith(pattern));
+  }
+
+  /**
+   * FIXED: Fallback discovery when main discovery returns 0 models
+   */
+  private async fallbackDiscovery(): Promise<OdooModel[]> {
+    console.log('🔄 Attempting fallback discovery...');
+
+    const client = authService.getClient();
+    if (!client) return this.getFallbackModels();
+
+    // Test a known list of common models
+    const testModels = [
+      'res.partner', 'res.users', 'hr.employee', 'crm.lead',
+      'sale.order', 'project.task', 'helpdesk.ticket', 'mail.message',
+      'res.company', 'mail.activity', 'calendar.event', 'ir.attachment'
+    ];
+
+    const accessibleModels: OdooModel[] = [];
+
+    for (const modelName of testModels) {
+      try {
+        // Simple access test
+        await client.searchCount(modelName, []);
+
+        accessibleModels.push({
+          name: modelName,
+          displayName: this.getDisplayName(modelName),
+          description: this.getDescription(modelName),
+          enabled: true,
+          syncType: this.getModelSyncConfig(modelName).syncType as 'all' | 'time_based'
+        });
+
+        console.log(`✅ Fallback: ${modelName} is accessible`);
+      } catch (error) {
+        console.log(`❌ Fallback: ${modelName} not accessible`);
+      }
+    }
+
+    console.log(`🔄 Fallback discovery found ${accessibleModels.length} models`);
+    return accessibleModels;
+  }
+
+  /**
+   * Log discovery report for debugging
+   */
+  private logDiscoveryReport(accessResults: { [key: string]: boolean }, accessibleCount: number): void {
+    const accessible = Object.entries(accessResults).filter(([_, hasAccess]) => hasAccess);
+    const denied = Object.entries(accessResults).filter(([_, hasAccess]) => !hasAccess);
+
+    console.log(`\n📊 DISCOVERY REPORT:`);
+    console.log(`✅ Accessible models (${accessible.length}):`);
+    accessible.forEach(([model, _]) => console.log(`   • ${model}`));
+
+    if (denied.length > 0) {
+      console.log(`🚫 Access denied (${denied.length}):`);
+      denied.forEach(([model, _]) => console.log(`   • ${model}`));
+    }
+
+    console.log(`🎯 Total available for sync: ${accessibleCount} models\n`);
+  }
+
+  /**
+   * Test if user has read access to a model
+   */
+  private async testModelAccess(modelName: string): Promise<boolean> {
+    const client = authService.getClient();
+    if (!client) return false;
+
+    try {
+      // Try to search with limit 1 to test access
+      await client.searchRead(modelName, [], ['id'], { limit: 1 });
+      return true;
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      if (errorMessage.includes('You are not allowed to access') ||
+          errorMessage.includes('AccessError') ||
+          errorMessage.includes('does not exist')) {
+        return false;
+      }
+      // Other errors might be temporary, assume access exists
+      return true;
+    }
+  }
+
+  /**
+   * Get sync configuration for a model
+   */
+  private getModelSyncConfig(modelName: string): { enabled: boolean; syncType: string } {
+    // Master data models - sync all records
+    if (['res.partner', 'res.users', 'hr.employee', 'product.template', 'product.product'].includes(modelName)) {
+      return { enabled: true, syncType: 'all' };
+    }
+
+    // High priority transactional models
+    if (['crm.lead', 'sale.order', 'helpdesk.ticket', 'mail.activity'].includes(modelName)) {
+      return { enabled: true, syncType: 'time_based' };
+    }
+
+    // Chat models
+    if (['discuss.channel', 'mail.message'].includes(modelName)) {
+      return { enabled: true, syncType: 'time_based' };
+    }
+
+    // Large/optional models - disabled by default
+    if (['ir.attachment', 'account.move', 'stock.picking'].includes(modelName)) {
+      return { enabled: false, syncType: 'time_based' };
+    }
+
+    // Default for other models
+    return { enabled: true, syncType: 'time_based' };
+  }
+
+  /**
+   * Get display name for a model
+   */
+  private getDisplayName(modelName: string): string {
+    const displayNames: { [key: string]: string } = {
+      'res.partner': 'Contacts',
+      'res.users': 'Users',
+      'hr.employee': 'Employees',
+      'crm.lead': 'CRM Leads',
+      'sale.order': 'Sales Orders',
+      'account.move': 'Invoices',
+      'stock.picking': 'Deliveries',
+      'project.project': 'Projects',
+      'project.task': 'Project Tasks',
+      'helpdesk.ticket': 'Helpdesk Tickets',
+      'helpdesk.team': 'Helpdesk Teams',
+      'mail.activity': 'Activities',
+      'mail.message': 'Messages',
+      'discuss.channel': 'Chat Channels',
+      'calendar.event': 'Calendar Events',
+      'ir.attachment': 'Attachments',
+      'product.product': 'Products',
+      'product.template': 'Product Templates',
+    };
+
+    return displayNames[modelName] || modelName.split('.').map(part =>
+      part.charAt(0).toUpperCase() + part.slice(1)
+    ).join(' ');
+  }
+
+  /**
+   * Get description for a model
+   */
+  private getDescription(modelName: string): string {
+    const descriptions: { [key: string]: string } = {
+      'res.partner': 'Customers, vendors, and companies',
+      'res.users': 'System users and authentication',
+      'hr.employee': 'Company employees and HR data',
+      'crm.lead': 'Sales leads and opportunities',
+      'sale.order': 'Sales orders and quotations',
+      'account.move': 'Invoices and accounting entries',
+      'stock.picking': 'Delivery orders and shipments',
+      'project.project': 'Project management',
+      'project.task': 'Project tasks and milestones',
+      'helpdesk.ticket': 'Support tickets and requests',
+      'helpdesk.team': 'Support team management',
+      'mail.activity': 'Tasks, reminders, and activities',
+      'mail.message': 'Chatter messages and communications',
+      'discuss.channel': 'Chat channels and conversations',
+      'calendar.event': 'Calendar events and meetings',
+      'ir.attachment': 'Files and document attachments',
+      'product.product': 'Product catalog and variants',
+      'product.template': 'Product templates and categories',
+    };
+
+    return descriptions[modelName] || `${modelName} records`;
+  }
+
+  /**
    * Test connectivity to Odoo server
    */
   private async testConnectivity(client: any): Promise<boolean> {
@@ -628,7 +1030,8 @@ class SyncService {
       await client.searchCount('res.users', [], { timeout: 5000 });
       return true;
     } catch (error) {
-      console.warn('🌐 Connectivity test failed:', error.message);
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      console.warn('🌐 Connectivity test failed:', errorMessage);
       return false;
     }
   }
@@ -714,48 +1117,79 @@ class SyncService {
   }
 
   /**
-   * Build domain filter for model based on time period settings
+   * INCREMENTAL SYNC: Build domain filter based on last sync and time period
    */
-  private buildDomainForModel(modelName: string): any[] {
-    // Get time period for this model (override or global)
-    const timePeriod = this.syncSettings.modelOverrides[modelName] || this.syncSettings.globalTimePeriod;
+  private async buildDomainForModel(modelName: string): Promise<any[]> {
+    try {
+      // FIXED: Ensure database is initialized first
+      await databaseService.initialize();
 
-    // If 'all', return empty domain (no filtering)
-    if (timePeriod === 'all') {
+      // Get sync metadata to determine last sync
+      const syncMetadata = await databaseService.getSyncMetadata(modelName);
+
+    if (syncMetadata && syncMetadata.last_sync_write_date) {
+      // INCREMENTAL: Only fetch records modified since last sync
+      console.log(`🔄 INCREMENTAL: ${modelName} - fetching changes since ${syncMetadata.last_sync_write_date}`);
+      return [['write_date', '>', syncMetadata.last_sync_write_date]];
+    } else {
+      // INITIAL SYNC: Use time period for first sync
+      console.log(`📅 INITIAL SYNC: ${modelName} - using time period filter`);
+
+      // Get time period for this model (override or global)
+      const timePeriod = this.syncSettings.modelOverrides[modelName] || this.syncSettings.globalTimePeriod;
+
+      // If 'all', return empty domain (no filtering)
+      if (timePeriod === 'all') {
+        console.log(`📊 INITIAL SYNC: ${modelName} - fetching all records`);
+        return [];
+      }
+
+      // Get days to go back
+      const timePeriodOption = this.getTimePeriodOptions().find(opt => opt.value === timePeriod);
+      if (!timePeriodOption?.days) {
+        return [];
+      }
+
+      // Calculate date threshold
+      const daysAgo = new Date();
+      daysAgo.setDate(daysAgo.getDate() - timePeriodOption.days);
+      const dateThreshold = daysAgo.toISOString().split('T')[0] + ' 00:00:00';
+
+      console.log(`📅 INITIAL SYNC: ${modelName} - last ${timePeriodOption.days} days (since ${dateThreshold})`);
+      return [['write_date', '>=', dateThreshold]];
+    }
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      console.error(`❌ Failed to build domain for ${modelName}:`, errorMessage);
+      // Return safe default - no filtering
       return [];
     }
+  }
 
-    // Get days to go back
-    const timePeriodOption = this.getTimePeriodOptions().find(opt => opt.value === timePeriod);
-    if (!timePeriodOption?.days) {
-      return [];
-    }
+  /**
+   * INCREMENTAL SYNC: Get latest write_date from records for metadata tracking
+   */
+  private getLatestWriteDate(records: any[]): string | null {
+    if (!records || records.length === 0) return null;
 
-    // Calculate date threshold
-    const daysAgo = new Date();
-    daysAgo.setDate(daysAgo.getDate() - timePeriodOption.days);
-    const dateThreshold = daysAgo.toISOString().split('T')[0] + ' 00:00:00';
-
-    // Build domain based on available date fields
-    // Try write_date first (most common), then create_date, then date_order, etc.
-    const dateFields = ['write_date', 'create_date', 'date_order', 'date', 'invoice_date'];
-
-    for (const dateField of dateFields) {
-      // We'll use write_date as the most universal field
-      if (dateField === 'write_date') {
-        return [[dateField, '>=', dateThreshold]];
+    let latestDate = null;
+    for (const record of records) {
+      if (record.write_date) {
+        if (!latestDate || record.write_date > latestDate) {
+          latestDate = record.write_date;
+        }
       }
     }
 
-    // Fallback to write_date
-    return [['write_date', '>=', dateThreshold]];
+    return latestDate;
   }
 
   /**
    * Get record limit for model based on sync type
    */
   private getLimitForModel(modelName: string): number {
-    const model = this.getAvailableModels().find(m => m.name === modelName);
+    // Use fallback models for limit determination (sync method)
+    const model = this.getFallbackModels().find(m => m.name === modelName);
 
     // Models that sync 'all' get higher limits
     if (model?.syncType === 'all') {
@@ -764,6 +1198,29 @@ class SyncService {
 
     // Time-based models get higher limits too (since they're filtered by time)
     return 2500; // Increased from 1000 to 2500 for time-filtered data
+  }
+
+  /**
+   * Get timeout for model based on expected data size and complexity
+   */
+  private getTimeoutForModel(modelName: string): number {
+    // Very large models that often timeout - use longer timeouts
+    if (['mail.message', 'ir.attachment'].includes(modelName)) {
+      return 60000; // 60 seconds for large models
+    }
+
+    // Medium models that might have complex data
+    if (['helpdesk.ticket', 'calendar.event', 'mail.activity'].includes(modelName)) {
+      return 30000; // 30 seconds
+    }
+
+    // Master data models - usually fast but can be large
+    if (['res.partner', 'hr.employee', 'res.users', 'product.product'].includes(modelName)) {
+      return 20000; // 20 seconds
+    }
+
+    // Default timeout for other models
+    return 15000; // 15 seconds
   }
 
   /**

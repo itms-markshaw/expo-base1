@@ -34,6 +34,7 @@ interface AppStore {
   updateSyncSettings: (settings: Partial<SyncSettings>) => void;
   updateModelTimePeriod: (modelName: string, timePeriod: TimePeriod) => void;
   loadDatabaseStats: () => Promise<void>;
+  loadAvailableModels: () => Promise<void>;
 }
 
 export const useAppStore = create<AppStore>((set, get) => ({
@@ -48,7 +49,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
     syncedRecords: 0,
     errors: [],
   },
-  availableModels: syncService.getAvailableModels(),
+  availableModels: [], // Will be loaded dynamically
   selectedModels: [
     'discuss.channel',
     'mail.message',
@@ -187,6 +188,28 @@ export const useAppStore = create<AppStore>((set, get) => ({
       set({ databaseStats: stats });
     } catch (error) {
       console.error('Failed to load database stats:', error);
+    }
+  },
+
+  loadAvailableModels: async () => {
+    try {
+      console.log('🔍 Loading available models from Odoo server...');
+      const models = await syncService.discoverAvailableModels();
+
+      // Update selected models to only include accessible ones
+      const accessibleModelNames = models.map(m => m.name);
+      const currentSelected = get().selectedModels;
+      const validSelected = currentSelected.filter(name => accessibleModelNames.includes(name));
+
+      set({
+        availableModels: models,
+        selectedModels: validSelected.length > 0 ? validSelected : models.filter(m => m.enabled).map(m => m.name)
+      });
+
+      console.log(`✅ Loaded ${models.length} available models`);
+    } catch (error) {
+      console.error('❌ Failed to load available models:', error);
+      // Keep existing models if loading fails
     }
   },
 }));

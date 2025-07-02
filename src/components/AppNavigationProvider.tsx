@@ -66,6 +66,7 @@ export default function AppNavigationProvider({ children }: AppNavigationProvide
       'Projects': 'Projects',
       'Attachments': 'Attachments',
       'Helpdesk': 'Helpdesk',
+      'Helpdesk Ticket Detail': 'HelpdeskTicketDetail',
       'CRM': 'CRMLeads',
       'CRM Leads': 'CRMLeads',
       'Employees': 'Employees',

@@ -1,8 +1,8 @@
 /**
- * Sync Screen - Actually functional sync interface
+ * Sync Dashboard - Main Hub for Offline Sync Management
  */
 
-import React, { useState, useRef, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
@@ -10,38 +10,109 @@ import {
   SafeAreaView,
   TouchableOpacity,
   ScrollView,
-  Switch,
   Alert,
+  ActivityIndicator,
 } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
-import BottomSheet, { BottomSheetView, BottomSheetScrollView } from '@gorhom/bottom-sheet';
+import { useRouter } from 'expo-router';
+import NetInfo from '@react-native-async-storage/async-storage';
+
 import { useAppStore } from '../store';
 import { syncService } from '../services/sync';
-import { TimePeriod } from '../types';
+import { databaseService } from '../services/database';
 
-export default function SyncScreen() {
-  const {
-    availableModels,
-    selectedModels,
-    syncStatus,
-    syncSettings,
-    toggleModel,
-    startSync,
-    cancelSync,
-    updateSyncSettings,
-    updateModelTimePeriod,
-  } = useAppStore();
+interface SyncStats {
+  totalModels: number;
+  syncedModels: number;
+  totalRecords: number;
+  dataSize: string;
+  lastSync: Date | null;
+  conflicts: number;
+}
 
-  const [selectedModelForTimePeriod, setSelectedModelForTimePeriod] = useState<string | null>(null);
+export default function SyncDashboard() {
+  const router = useRouter();
+  const { syncStatus, selectedModels, syncSettings } = useAppStore();
 
-  // Bottom sheet refs and snap points
-  const bottomSheetRef = useRef<BottomSheet>(null);
-  const snapPoints = useMemo(() => ['50%', '90%'], []); // Start at 50% as requested
+  const [isOnline, setIsOnline] = useState(true);
+  const [syncStats, setSyncStats] = useState<SyncStats>({
+    totalModels: 844,
+    syncedModels: 0,
+    totalRecords: 0,
+    dataSize: '0 MB',
+    lastSync: null,
+    conflicts: 0,
+  });
+  const [isLoading, setIsLoading] = useState(false);
 
-  const timePeriodOptions = syncService.getTimePeriodOptions();
+  // Helper function to format data size
+  const formatDataSize = (bytes: number): string => {
+    if (bytes === 0) return '0 MB';
+    const k = 1024;
+    const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+  };
 
-  // Filter out mail.thread from available models
+  // Load sync statistics
+  const loadSyncStats = useCallback(async () => {
+    try {
+      const metadata = await databaseService.getAllSyncMetadata();
+      const syncedModels = metadata.length;
+      const totalRecords = metadata.reduce((sum, m) => sum + (m.record_count || 0), 0);
+      const dataSize = formatDataSize(totalRecords * 1024); // Rough estimate
+
+      // Get last sync time
+      const lastSyncTimes = metadata.map(m => m.last_sync).filter(Boolean);
+      const lastSync = lastSyncTimes.length > 0 ? new Date(Math.max(...lastSyncTimes.map(d => new Date(d).getTime()))) : null;
+
+      // TODO: Get actual conflicts from database
+      const conflicts = 2; // Mock data for now
+
+      setSyncStats({
+        totalModels: 844,
+        syncedModels,
+        totalRecords,
+        dataSize,
+        lastSync,
+        conflicts,
+      });
+    } catch (error) {
+      console.error('Failed to load sync stats:', error);
+    }
+  }, []);
+
+  // Perform quick sync
+  const handleQuickSync = useCallback(async () => {
+    if (!isOnline) {
+      Alert.alert('Offline', 'Cannot sync while offline');
+      return;
+    }
+
+    setIsLoading(true);
+    try {
+      // Navigate to sync progress screen
+      router.push('/sync/progress');
+    } catch (error) {
+      console.error('Sync failed:', error);
+      Alert.alert('Sync Failed', 'Unable to start sync process');
+    } finally {
+      setIsLoading(false);
+    }
+  }, [isOnline, router]);
+
+  // Load data on mount
+  useEffect(() => {
+    loadSyncStats();
+  }, [loadSyncStats]);
+
+  // Filter out mail.thread from available models (it's abstract)
   const filteredModels = availableModels.filter(model => model.name !== 'mail.thread');
+
+  // Helper to get sync metadata for a model
+  const getModelSyncMetadata = (modelName: string) => {
+    return syncMetadata.find(meta => meta.model_name === modelName);
+  };
 
   const handleStartSync = async () => {
     if (selectedModels.length === 0) {
@@ -198,6 +269,21 @@ export default function SyncScreen() {
                   <View style={styles.modelText}>
                     <Text style={styles.modelName}>{model.displayName}</Text>
                     <Text style={styles.modelDescription}>{model.description}</Text>
+
+                    {/* INCREMENTAL SYNC: Show sync metadata */}
+                    {(() => {
+                      const metadata = getModelSyncMetadata(model.name);
+                      return metadata && (
+                        <View style={styles.syncMetadata}>
+                          <MaterialIcons name="sync" size={12} color="#28a745" />
+                          <Text style={styles.syncMetadataText}>
+                            Last sync: {new Date(metadata.last_sync_timestamp).toLocaleDateString()}
+                            {metadata.total_records > 0 && ` • ${metadata.total_records} records`}
+                            {metadata.last_error && ' • Error'}
+                          </Text>
+                        </View>
+                      );
+                    })()}
 
                     {/* Time Period Info */}
                     <TouchableOpacity
@@ -583,6 +669,19 @@ const styles = StyleSheet.create({
     paddingVertical: 16,
     borderBottomWidth: 1,
     borderBottomColor: '#F0F0F0',
+  },
+  // INCREMENTAL SYNC: Sync metadata styles
+  syncMetadata: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 4,
+    marginBottom: 2,
+  },
+  syncMetadataText: {
+    fontSize: 11,
+    color: '#28a745',
+    marginLeft: 4,
+    fontWeight: '500',
   },
   bottomSheetOptionContent: {
     flex: 1,

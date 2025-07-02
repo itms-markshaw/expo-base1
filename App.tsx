@@ -25,7 +25,14 @@ import ContactsScreen from './src/screens/ContactsScreen';
 import ActivitiesScreen from './src/screens/ActivitiesScreen';
 import CalendarScreen from './src/screens/CalendarScreen';
 import ChatScreen from './src/screens/ChatScreen';
-import SyncScreen from './src/screens/SyncScreen';
+import SyncDashboard from './src/screens/SyncDashboard';
+import ModelSelectionScreen from './src/screens/sync/ModelSelectionScreen';
+import CustomModelSelectionScreen from './src/screens/sync/CustomModelSelectionScreen';
+import TemplateModelSelectionScreen from './src/screens/sync/TemplateModelSelectionScreen';
+import SyncSettingsScreen from './src/screens/sync/SyncSettingsScreen';
+import SyncProgressScreen from './src/screens/sync/SyncProgressScreen';
+import ConflictResolutionScreen from './src/screens/sync/ConflictResolutionScreen';
+import DatabaseManagerScreen from './src/screens/DatabaseManagerScreen';
 import CRMLeadsScreen from './src/screens/CRMLeadsScreen';
 import SalesOrderScreen from './src/screens/SalesOrderScreen';
 
@@ -37,6 +44,7 @@ import AttachmentsScreen from './src/screens/AttachmentsScreen';
 import ProjectsScreen from './src/screens/ProjectsScreen';
 import HelpdeskScreen from './src/screens/HelpdeskScreen';
 import HelpdeskTeamsScreen from './src/screens/HelpdeskTeamsScreen';
+import HelpdeskTicketDetailScreen from './src/screens/HelpdeskTicketDetailScreen';
 import SettingsScreen from './src/screens/SettingsScreen';
 import DataScreen from './src/screens/DataScreen';
 import TestScreen from './src/screens/TestScreen';
@@ -133,6 +141,14 @@ function AllScreensStack() {
         options={{ title: 'Helpdesk Teams' }}
       />
       <Stack.Screen
+        name="HelpdeskTicketDetail"
+        component={HelpdeskTicketDetailScreen}
+        options={{
+          title: 'Ticket Details',
+          headerShown: false // We handle our own header in the component
+        }}
+      />
+      <Stack.Screen
         name="Mobile"
         component={withBottomNav(MobileScreen, 'Mobile')}
         options={{ title: 'Mobile' }}
@@ -144,8 +160,43 @@ function AllScreensStack() {
       />
       <Stack.Screen
         name="SyncStack"
-        component={withBottomNav(SyncScreen, 'Sync')}
-        options={{ title: 'Data Sync' }}
+        component={withBottomNav(SyncDashboard, 'Sync')}
+        options={{ title: 'Sync Dashboard' }}
+      />
+      <Stack.Screen
+        name="SyncModels"
+        component={withBottomNav(ModelSelectionScreen, 'Sync')}
+        options={{ title: 'Select Models' }}
+      />
+      <Stack.Screen
+        name="CustomModelSelection"
+        component={withBottomNav(CustomModelSelectionScreen, 'Sync')}
+        options={{ title: 'Custom Model Selection' }}
+      />
+      <Stack.Screen
+        name="TemplateModelSelection"
+        component={withBottomNav(TemplateModelSelectionScreen, 'Sync')}
+        options={{ title: 'Template Models' }}
+      />
+      <Stack.Screen
+        name="SyncSettings"
+        component={withBottomNav(SyncSettingsScreen, 'Sync')}
+        options={{ title: 'Sync Settings' }}
+      />
+      <Stack.Screen
+        name="SyncProgress"
+        component={withBottomNav(SyncProgressScreen, 'Sync')}
+        options={{ title: 'Sync Progress' }}
+      />
+      <Stack.Screen
+        name="SyncConflicts"
+        component={withBottomNav(ConflictResolutionScreen, 'Sync')}
+        options={{ title: 'Resolve Conflicts' }}
+      />
+      <Stack.Screen
+        name="DatabaseManager"
+        component={withBottomNav(DatabaseManagerScreen, 'Sync')}
+        options={{ title: 'Database Manager' }}
       />
       <Stack.Screen
         name="Data"
