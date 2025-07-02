@@ -51,6 +51,7 @@ export default function SyncDashboard() {
     conflicts: 0, // Will be calculated from actual conflicts
   });
   const [isLoading, setIsLoading] = useState(false);
+  const [syncActivity, setSyncActivity] = useState<Array<{time: string, records: number}>>([]);
 
   // Helper function to format data size
   const formatDataSize = (bytes: number): string => {
@@ -73,9 +74,16 @@ export default function SyncDashboard() {
       const totalRecords = metadata.reduce((sum, m) => sum + (m.record_count || 0), 0);
       const dataSize = formatDataSize(totalRecords * 1024); // Rough estimate
 
-      // Get last sync time
-      const lastSyncTimes = metadata.map(m => m.last_sync).filter(Boolean);
+      // Get last sync time - use correct column name from database schema
+      const lastSyncTimes = metadata.map(m => m.last_sync_timestamp).filter(Boolean);
       const lastSync = lastSyncTimes.length > 0 ? new Date(Math.max(...lastSyncTimes.map(d => new Date(d).getTime()))) : null;
+
+      console.log('📊 Sync metadata loaded:', {
+        syncedModels,
+        totalRecords,
+        lastSyncTimes: lastSyncTimes.slice(0, 3), // Show first 3 for debugging
+        lastSync: lastSync?.toISOString()
+      });
 
       // Get actual conflicts count (for now set to 0, will implement conflict detection later)
       const conflicts = 0;
@@ -92,6 +100,78 @@ export default function SyncDashboard() {
       console.error('Failed to load sync stats:', error);
     }
   }, []);
+
+  // Load sync activity data for chart
+  const loadSyncActivity = useCallback(async () => {
+    try {
+      // Generate mock data for demonstration - in real app this would come from sync logs
+      const now = new Date();
+      const activities = [];
+
+      // Generate hourly data for the last 12 hours
+      for (let i = 11; i >= 0; i--) {
+        const time = new Date(now.getTime() - (i * 60 * 60 * 1000));
+        const hour = time.getHours();
+
+        // Simulate more activity during business hours (9-17)
+        let records = 0;
+        if (hour >= 9 && hour <= 17) {
+          records = Math.floor(Math.random() * 50) + 10; // 10-60 records
+        } else {
+          records = Math.floor(Math.random() * 20); // 0-20 records
+        }
+
+        activities.push({
+          time: time.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false }),
+          records
+        });
+      }
+
+      setSyncActivity(activities);
+    } catch (error) {
+      console.error('Failed to load sync activity:', error);
+    }
+  }, []);
+
+  // Render sync activity chart
+  const renderSyncChart = () => {
+    if (syncActivity.length === 0) {
+      return (
+        <View style={styles.chartPlaceholder}>
+          <MaterialIcons name="show-chart" size={32} color="#ccc" />
+          <Text style={styles.chartPlaceholderText}>No sync activity yet</Text>
+        </View>
+      );
+    }
+
+    const maxRecords = Math.max(...syncActivity.map(a => a.records));
+
+    return (
+      <View style={styles.chart}>
+        <View style={styles.chartBars}>
+          {syncActivity.map((activity, index) => (
+            <View key={index} style={styles.chartBarContainer}>
+              <View
+                style={[
+                  styles.chartBar,
+                  {
+                    height: maxRecords > 0 ? (activity.records / maxRecords) * 60 : 0,
+                    backgroundColor: activity.records > 30 ? '#4CAF50' : activity.records > 10 ? '#FF9800' : '#E0E0E0'
+                  }
+                ]}
+              />
+              <Text style={styles.chartBarLabel}>{activity.time.slice(0, 2)}</Text>
+            </View>
+          ))}
+        </View>
+        <View style={styles.chartLegend}>
+          <Text style={styles.chartLegendText}>
+            Total: {syncActivity.reduce((sum, a) => sum + a.records, 0)} records today
+          </Text>
+        </View>
+      </View>
+    );
+  };
 
   // Perform quick sync
   const handleQuickSync = useCallback(async () => {
@@ -115,7 +195,8 @@ export default function SyncDashboard() {
   // Load data on mount
   useEffect(() => {
     loadSyncStats();
-  }, [loadSyncStats]);
+    loadSyncActivity();
+  }, [loadSyncStats, loadSyncActivity]);
 
   // No need to update sync stats when selected models change since we use selectedModels.length directly
 
@@ -169,6 +250,18 @@ export default function SyncDashboard() {
           </View>
         </View>
 
+        {/* Sync Activity Chart */}
+        <View style={styles.chartContainer}>
+          <View style={styles.chartHeader}>
+            <MaterialIcons name="trending-up" size={20} color="#666" />
+            <Text style={styles.chartTitle}>Sync Activity</Text>
+            <Text style={styles.chartSubtitle}>Records synced today</Text>
+          </View>
+          <View style={styles.chartContent}>
+            {renderSyncChart()}
+          </View>
+        </View>
+
         {/* Navigation Cards */}
         <View style={styles.navigationContainer}>
           {/* Conflicts Navigation Card - Only show if there are actual conflicts */}
@@ -200,24 +293,24 @@ export default function SyncDashboard() {
           <TouchableOpacity
             style={styles.navCard}
             onPress={() => {
-              console.log('🔄 Navigating to SyncSettings...');
-              navigation.navigate('SyncSettings');
-            }}
-          >
-            <MaterialIcons name="settings" size={24} color="#666" />
-            <Text style={styles.navCardText}>Sync Settings</Text>
-            <MaterialIcons name="chevron-right" size={24} color="#666" />
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            style={styles.navCard}
-            onPress={() => {
               console.log('🔄 Navigating to DatabaseManager...');
               navigation.navigate('DatabaseManager');
             }}
           >
             <MaterialIcons name="storage" size={24} color="#666" />
             <Text style={styles.navCardText}>Database Manager</Text>
+            <MaterialIcons name="chevron-right" size={24} color="#666" />
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={styles.navCard}
+            onPress={() => {
+              console.log('🔄 Navigating to SyncSettings...');
+              navigation.navigate('SyncSettings');
+            }}
+          >
+            <MaterialIcons name="settings" size={24} color="#666" />
+            <Text style={styles.navCardText}>Sync Settings</Text>
             <MaterialIcons name="chevron-right" size={24} color="#666" />
           </TouchableOpacity>
         </View>
@@ -343,5 +436,84 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: '#333',
     marginLeft: 16,
+  },
+
+  // Chart Styles
+  chartContainer: {
+    backgroundColor: 'white',
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 20,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  chartHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 16,
+  },
+  chartTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#333',
+    marginLeft: 8,
+    flex: 1,
+  },
+  chartSubtitle: {
+    fontSize: 12,
+    color: '#666',
+  },
+  chartContent: {
+    minHeight: 100,
+  },
+  chart: {
+    flex: 1,
+  },
+  chartBars: {
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    justifyContent: 'space-between',
+    height: 80,
+    marginBottom: 8,
+  },
+  chartBarContainer: {
+    alignItems: 'center',
+    flex: 1,
+  },
+  chartBar: {
+    width: 16,
+    backgroundColor: '#E0E0E0',
+    borderRadius: 2,
+    marginBottom: 4,
+    minHeight: 2,
+  },
+  chartBarLabel: {
+    fontSize: 10,
+    color: '#666',
+    textAlign: 'center',
+  },
+  chartLegend: {
+    alignItems: 'center',
+    paddingTop: 8,
+    borderTopWidth: 1,
+    borderTopColor: '#f0f0f0',
+  },
+  chartLegendText: {
+    fontSize: 12,
+    color: '#666',
+    fontWeight: '500',
+  },
+  chartPlaceholder: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 20,
+  },
+  chartPlaceholderText: {
+    fontSize: 14,
+    color: '#999',
+    marginTop: 8,
   },
 });

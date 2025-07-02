@@ -166,7 +166,7 @@ export default function SyncSettingsScreen() {
             <View style={styles.switchLeft}>
               <Text style={styles.switchTitle}>Background sync</Text>
               <Text style={styles.switchDescription}>
-                Sync data when app is in background
+                Sync data every 15 minutes when app is in background
               </Text>
             </View>
             <Switch
