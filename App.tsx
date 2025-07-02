@@ -32,6 +32,7 @@ import TemplateModelSelectionScreen from './src/screens/sync/TemplateModelSelect
 import SyncSettingsScreen from './src/screens/sync/SyncSettingsScreen';
 import SyncProgressScreen from './src/screens/sync/SyncProgressScreen';
 import ConflictResolutionScreen from './src/screens/sync/ConflictResolutionScreen';
+import OfflineQueueScreen from './src/screens/sync/OfflineQueueScreen';
 import DatabaseManagerScreen from './src/screens/DatabaseManagerScreen';
 import CRMLeadsScreen from './src/screens/CRMLeadsScreen';
 import SalesOrderScreen from './src/screens/SalesOrderScreen';
@@ -49,6 +50,7 @@ import SettingsScreen from './src/screens/SettingsScreen';
 import DataScreen from './src/screens/DataScreen';
 import TestScreen from './src/screens/TestScreen';
 import { useAppStore } from './src/store';
+import { autoSyncService } from './src/services/autoSync';
 import AppStoreProvider from './src/store/AppStoreProvider';
 import AppNavigationProvider from './src/components/AppNavigationProvider';
 import LoadingScreen from './src/components/LoadingScreen';
@@ -194,6 +196,11 @@ function AllScreensStack() {
         options={{ title: 'Resolve Conflicts' }}
       />
       <Stack.Screen
+        name="OfflineQueue"
+        component={withBottomNav(OfflineQueueScreen, 'Sync')}
+        options={{ title: 'Offline Queue' }}
+      />
+      <Stack.Screen
         name="DatabaseManager"
         component={withBottomNav(DatabaseManagerScreen, 'Sync')}
         options={{ title: 'Database Manager' }}
@@ -285,6 +292,22 @@ function AppContent() {
   useEffect(() => {
     checkAuth();
   }, []);
+
+  // Initialize auto-sync service when authenticated
+  useEffect(() => {
+    if (isAuthenticated) {
+      autoSyncService.initialize().catch(error => {
+        console.warn('Failed to initialize auto-sync service:', error);
+      });
+    }
+
+    // Cleanup on unmount
+    return () => {
+      if (isAuthenticated) {
+        autoSyncService.cleanup();
+      }
+    };
+  }, [isAuthenticated]);
 
   if (authLoading) {
     return <LoadingScreen />;

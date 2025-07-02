@@ -20,6 +20,7 @@ import { useNavigation } from '@react-navigation/native';
 import { useAppStore } from '../../store';
 import { syncService } from '../../services/sync';
 import { authService } from '../../services/auth';
+import { TimePeriod } from '../../types';
 
 interface ModelInfo {
   name: string;
@@ -29,6 +30,7 @@ interface ModelInfo {
   estimatedSize: string;
   isSelected: boolean;
   fields?: string[];
+  syncAllOverride?: boolean; // Whether this model has "sync all" override
 }
 
 interface ModelTemplate {
@@ -115,7 +117,7 @@ export default function ModelSelectionScreen() {
   console.log('🔍 ModelSelectionScreen mounted');
 
   const navigation = useNavigation();
-  const { selectedModels, toggleModel } = useAppStore();
+  const { selectedModels, toggleModel, syncSettings, updateModelTimePeriod } = useAppStore();
 
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedTemplates, setSelectedTemplates] = useState<string[]>([]);
@@ -242,6 +244,38 @@ export default function ModelSelectionScreen() {
     ));
   };
 
+  // Check if model has "sync all" override
+  const hasSyncAllOverride = (modelName: string): boolean => {
+    return syncSettings.modelOverrides[modelName] === 'all';
+  };
+
+  // Toggle sync all override for a model
+  const toggleSyncAllOverride = (modelName: string) => {
+    const currentOverride = syncSettings.modelOverrides[modelName];
+    if (currentOverride === 'all') {
+      // Remove override (use global setting)
+      updateModelTimePeriod(modelName, syncSettings.globalTimePeriod);
+    } else {
+      // Set to sync all
+      updateModelTimePeriod(modelName, 'all');
+    }
+  };
+
+  // Models that should default to "sync all"
+  const shouldDefaultToSyncAll = (modelName: string): boolean => {
+    const syncAllModels = [
+      'res.partner',      // Contacts
+      'hr.employee',      // Employees
+      'res.users',        // Users
+      'product.product',  // Products
+      'product.template', // Product templates
+      'res.company',      // Companies
+      'res.country',      // Countries
+      'res.currency',     // Currencies
+    ];
+    return syncAllModels.includes(modelName);
+  };
+
   // Calculate counts based on current template selection
   const getDisplayedModelsCount = () => {
     if (selectedTemplates.includes('custom')) {
@@ -273,38 +307,77 @@ export default function ModelSelectionScreen() {
     })));
   }, [selectedModels]);
 
-  const renderModelItem = ({ item }: { item: ModelInfo }) => (
-    <TouchableOpacity 
-      style={styles.modelItem}
-      onPress={() => handleToggleModel(item.name)}
-    >
-      <View style={styles.modelLeft}>
-        <MaterialIcons 
-          name={item.isSelected ? "check-box" : "check-box-outline-blank"} 
-          size={24} 
-          color={item.isSelected ? "#2196F3" : "#666"} 
-        />
-        <View style={styles.modelInfo}>
-          <Text style={styles.modelName}>{item.displayName}</Text>
-          <Text style={styles.modelTechnicalName}>{item.name}</Text>
-          <View style={styles.modelStats}>
-            <Text style={styles.modelStat}>Model from ir.model</Text>
-            {item.fields && (
-              <>
-                <Text style={styles.modelStat}>•</Text>
-                <Text style={styles.modelStat}>{item.fields.length} fields</Text>
-              </>
-            )}
+  const renderModelItem = ({ item }: { item: ModelInfo }) => {
+    const hasOverride = hasSyncAllOverride(item.name);
+    const shouldDefault = shouldDefaultToSyncAll(item.name);
+
+    return (
+      <View style={styles.modelItem}>
+        {/* Main model selection */}
+        <TouchableOpacity
+          style={styles.modelMainContent}
+          onPress={() => handleToggleModel(item.name)}
+        >
+          <View style={styles.modelLeft}>
+            <MaterialIcons
+              name={item.isSelected ? "check-box" : "check-box-outline-blank"}
+              size={24}
+              color={item.isSelected ? "#2196F3" : "#666"}
+            />
+            <View style={styles.modelInfo}>
+              <Text style={styles.modelName}>{item.displayName}</Text>
+              <Text style={styles.modelTechnicalName}>{item.name}</Text>
+              <View style={styles.modelStats}>
+                <Text style={styles.modelStat}>Model from ir.model</Text>
+                {item.fields && (
+                  <>
+                    <Text style={styles.modelStat}>•</Text>
+                    <Text style={styles.modelStat}>{item.fields.length} fields</Text>
+                  </>
+                )}
+                {/* Show sync type indicator */}
+                {item.isSelected && (
+                  <>
+                    <Text style={styles.modelStat}>•</Text>
+                    <Text style={[styles.modelStat, hasOverride && styles.syncAllIndicator]}>
+                      {hasOverride ? 'Sync All' : 'Time-based'}
+                    </Text>
+                  </>
+                )}
+              </View>
+            </View>
           </View>
-        </View>
+          <View style={[styles.priorityBadge, styles[`priority${item.priority}`]]}>
+            <Text style={[styles.priorityText, styles[`priority${item.priority}Text`]]}>
+              {item.priority}
+            </Text>
+          </View>
+        </TouchableOpacity>
+
+        {/* Sync All Override Option - only show if model is selected */}
+        {item.isSelected && (
+          <View style={styles.syncAllContainer}>
+            <TouchableOpacity
+              style={styles.syncAllOption}
+              onPress={() => toggleSyncAllOverride(item.name)}
+            >
+              <MaterialIcons
+                name={hasOverride ? "radio-button-checked" : "radio-button-unchecked"}
+                size={20}
+                color={hasOverride ? "#4CAF50" : "#666"}
+              />
+              <Text style={[styles.syncAllText, hasOverride && styles.syncAllTextActive]}>
+                Sync all records
+              </Text>
+              {shouldDefault && !hasOverride && (
+                <Text style={styles.recommendedText}>(Recommended)</Text>
+              )}
+            </TouchableOpacity>
+          </View>
+        )}
       </View>
-      <View style={[styles.priorityBadge, styles[`priority${item.priority}`]]}>
-        <Text style={[styles.priorityText, styles[`priority${item.priority}Text`]]}>
-          {item.priority}
-        </Text>
-      </View>
-    </TouchableOpacity>
-  );
+    );
+  };
 
 
 
@@ -477,6 +550,16 @@ export default function ModelSelectionScreen() {
           style={[styles.saveButton, selectedCount === 0 && styles.saveButtonDisabled]}
           onPress={() => {
             if (selectedCount > 0) {
+              // Save sync all overrides to sync settings
+              const syncAllOverrides: Record<string, boolean> = {};
+              Array.from(selectedModels).forEach(modelName => {
+                syncAllOverrides[modelName] = modelSyncAllOverrides[modelName] || false;
+              });
+              updateSyncSettings({
+                ...syncSettings,
+                modelSyncAllOverrides: syncAllOverrides
+              });
+
               Alert.alert(
                 'Selection Saved',
                 `${selectedCount} models have been selected for sync.\n\nYou can now go to the Sync Dashboard to start syncing.`,
@@ -638,6 +721,9 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     padding: 16,
     marginBottom: 8,
+    flexDirection: 'column',
+  },
+  modelMainContent: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
@@ -670,6 +756,37 @@ const styles = StyleSheet.create({
   modelStat: {
     fontSize: 12,
     color: '#999',
+  },
+  syncAllIndicator: {
+    color: '#4CAF50',
+    fontWeight: '600',
+  },
+  syncAllContainer: {
+    marginTop: 12,
+    paddingTop: 12,
+    borderTopWidth: 1,
+    borderTopColor: '#f0f0f0',
+  },
+  syncAllOption: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 8,
+  },
+  syncAllText: {
+    fontSize: 14,
+    color: '#666',
+    marginLeft: 8,
+    flex: 1,
+  },
+  syncAllTextActive: {
+    color: '#4CAF50',
+    fontWeight: '500',
+  },
+  recommendedText: {
+    fontSize: 12,
+    color: '#FF9800',
+    fontStyle: 'italic',
+    marginLeft: 8,
   },
   priorityBadge: {
     paddingHorizontal: 8,

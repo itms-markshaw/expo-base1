@@ -29,6 +29,13 @@ class DatabaseService {
   }
 
   /**
+   * Get database instance
+   */
+  getDatabase(): SQLite.SQLiteDatabase | null {
+    return this.db;
+  }
+
+  /**
    * Create essential system tables only
    */
   private async createSystemTables(): Promise<void> {
@@ -355,6 +362,69 @@ class DatabaseService {
     );
 
     return results || [];
+  }
+
+  /**
+   * Get records ordered by modification time (most recent first)
+   * Prioritizes write_date, then create_date, then id DESC
+   */
+  async getRecordsOrderedByModification(tableName: string, limit: number = 50, offset: number = 0): Promise<any[]> {
+    if (!this.db) throw new Error('Database not initialized');
+
+    const tableExists = await this.tableExists(tableName);
+    if (!tableExists) {
+      console.log(`⚠️ Table ${tableName} does not exist`);
+      return [];
+    }
+
+    // Check which timestamp columns exist in the table
+    const tableInfo = await this.db.getAllAsync(`PRAGMA table_info(${tableName})`);
+    const columns = tableInfo.map((col: any) => col.name);
+
+    let orderClause = '';
+    if (columns.includes('write_date')) {
+      orderClause = 'ORDER BY write_date DESC, id DESC';
+    } else if (columns.includes('create_date')) {
+      orderClause = 'ORDER BY create_date DESC, id DESC';
+    } else if (columns.includes('updated_at')) {
+      orderClause = 'ORDER BY updated_at DESC, id DESC';
+    } else if (columns.includes('created_at')) {
+      orderClause = 'ORDER BY created_at DESC, id DESC';
+    } else {
+      orderClause = 'ORDER BY id DESC';
+    }
+
+    const results = await this.db.getAllAsync(
+      `SELECT * FROM ${tableName} ${orderClause} LIMIT ? OFFSET ?`,
+      [limit, offset]
+    );
+
+    console.log(`📋 Retrieved ${results?.length || 0} records from ${tableName} ordered by modification time`);
+    return results || [];
+  }
+
+  /**
+   * Update a specific record in a table
+   */
+  async updateRecord(tableName: string, recordId: number, data: any): Promise<void> {
+    if (!this.db) throw new Error('Database not initialized');
+
+    const tableExists = await this.tableExists(tableName);
+    if (!tableExists) {
+      throw new Error(`Table ${tableName} does not exist`);
+    }
+
+    // Build update query dynamically
+    const fields = Object.keys(data).filter(key => key !== 'id');
+    const setClause = fields.map(field => `${field} = ?`).join(', ');
+    const values = fields.map(field => this.sanitizeValue(data[field]));
+
+    await this.db.runAsync(
+      `UPDATE ${tableName} SET ${setClause} WHERE id = ?`,
+      [...values, recordId]
+    );
+
+    console.log(`✅ Updated record ${recordId} in ${tableName}`);
   }
 
   /**

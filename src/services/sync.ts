@@ -5,7 +5,10 @@
 
 import { authService } from './auth';
 import { databaseService } from './database';
+import { conflictResolutionService } from './conflictResolution';
+import { offlineQueueService } from './offlineQueue';
 import { OdooModel, SyncStatus, TimePeriod, TimePeriodOption, SyncSettings } from '../types';
+import { useAppStore } from '../store';
 
 class SyncService {
   private isRunning = false;
@@ -33,7 +36,7 @@ class SyncService {
 
   // Default sync settings
   private syncSettings: SyncSettings = {
-    globalTimePeriod: '1month',
+    globalTimePeriod: '1week',
     modelOverrides: {
       'res.partner': 'all',      // Contacts - sync all
       'hr.employee': 'all',      // Employees - sync all
@@ -307,6 +310,19 @@ class SyncService {
       // Initialize database first (offline-first approach)
       await databaseService.initialize();
 
+      // Initialize conflict resolution service
+      await conflictResolutionService.initialize();
+
+      // Clear false positive conflicts from previous syncs
+      try {
+        const clearedCount = await conflictResolutionService.clearFalsePositiveConflicts();
+        if (clearedCount > 0) {
+          console.log(`🧹 Cleared ${clearedCount} false positive conflicts`);
+        }
+      } catch (error) {
+        console.warn('⚠️ Failed to clear false positive conflicts:', error);
+      }
+
       // Check if we're online and authenticated
       const isAuth = await authService.isAuthenticated();
       if (!isAuth) {
@@ -456,15 +472,76 @@ class SyncService {
       // Set timeout based on model type - longer for problematic models
       const timeout = this.getTimeoutForModel(modelName);
 
+      console.log(`🔍 Searching ${modelName} with domain:`, domain);
+      console.log(`📋 Fields to fetch:`, fields.slice(0, 10), fields.length > 10 ? `... and ${fields.length - 10} more` : '');
+
       const records = await client.searchRead(modelName, domain, fields, {
         limit,
         order: 'write_date desc', // Get most recent records first
         timeout // Add timeout to prevent hanging
       });
 
+      console.log(`📥 Retrieved ${records.length} records for ${modelName}`);
+
       if (records.length === 0) {
-        console.log(`📭 No records found for ${modelName}`);
+        console.log(`📭 No records found for ${modelName} - this could mean:`);
+        console.log(`   • No new/modified records since last sync`);
+        console.log(`   • Domain filter is too restrictive`);
+        console.log(`   • Model has no data in the specified time period`);
         return 0;
+      }
+
+      // Log sample of retrieved records for debugging
+      if (records.length > 0) {
+        const sampleRecord = records[0];
+        console.log(`📄 Sample record from ${modelName}:`, {
+          id: sampleRecord.id,
+          write_date: sampleRecord.write_date,
+          create_date: sampleRecord.create_date,
+          name: sampleRecord.name || 'N/A'
+        });
+      }
+
+      // Check for conflicts before saving
+      try {
+        const existingRecords = await databaseService.getRecords(tableName, 10000, 0);
+        const conflicts = await conflictResolutionService.detectConflicts(
+          modelName,
+          existingRecords,
+          records
+        );
+
+        if (conflicts.length > 0) {
+          console.log(`⚠️ Detected ${conflicts.length} conflicts for ${modelName}`);
+
+          // Log conflict details for debugging
+          conflicts.forEach((conflict, index) => {
+            console.log(`   Conflict ${index + 1}: Record ${conflict.recordId}`);
+            console.log(`   Fields: ${conflict.conflictFields.join(', ')}`);
+          });
+
+          // Handle conflicts based on user's conflict resolution setting
+          const { syncSettings } = useAppStore.getState();
+          const conflictStrategy = syncSettings.conflictResolution || 'ask_user';
+
+          if (conflictStrategy === 'ask_user') {
+            // Don't auto-resolve - let user handle conflicts manually
+            console.log(`⏸️ Conflicts detected - user will resolve manually via Conflict Resolution screen`);
+            // Save conflicts to database for manual resolution
+            await conflictResolutionService.saveConflictsToDatabase(conflicts);
+          } else {
+            // Auto-resolve based on user's preference
+            const strategy = conflictStrategy === 'server_wins' ? 'server' : 'local';
+            console.log(`🤖 Auto-resolving conflicts using strategy: ${strategy} (setting: ${conflictStrategy})`);
+
+            for (const conflict of conflicts) {
+              await conflictResolutionService.resolveConflictAuto(conflict.id, strategy);
+            }
+          }
+        }
+      } catch (conflictError) {
+        console.warn(`⚠️ Conflict detection failed for ${modelName}:`, conflictError);
+        // Continue with sync even if conflict detection fails
       }
 
       // Save to database
@@ -984,7 +1061,7 @@ class SyncService {
   /**
    * INCREMENTAL SYNC: Build domain filter based on last sync and time period
    */
-  private async buildDomainForModel(modelName: string): Promise<any[]> {
+  private async buildDomainForModel(modelName: string, forceFullSync: boolean = false): Promise<any[]> {
     try {
       // FIXED: Ensure database is initialized first
       await databaseService.initialize();
@@ -992,10 +1069,17 @@ class SyncService {
       // Get sync metadata to determine last sync
       const syncMetadata = await databaseService.getSyncMetadata(modelName);
 
-    if (syncMetadata && syncMetadata.last_sync_write_date) {
+    if (syncMetadata && syncMetadata.last_sync_write_date && !forceFullSync) {
       // INCREMENTAL: Only fetch records modified since last sync
       console.log(`🔄 INCREMENTAL: ${modelName} - fetching changes since ${syncMetadata.last_sync_write_date}`);
-      return [['write_date', '>', syncMetadata.last_sync_write_date]];
+      console.log(`📊 Sync metadata for ${modelName}:`, {
+        lastSyncTimestamp: syncMetadata.last_sync_timestamp,
+        lastSyncWriteDate: syncMetadata.last_sync_write_date,
+        totalRecords: syncMetadata.total_records
+      });
+      const domain = [['write_date', '>=', syncMetadata.last_sync_write_date]];
+      console.log(`🔍 INCREMENTAL DOMAIN for ${modelName}:`, domain);
+      return domain;
     } else {
       // INITIAL SYNC: Use time period for first sync
       console.log(`📅 INITIAL SYNC: ${modelName} - using time period filter`);

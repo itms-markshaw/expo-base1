@@ -14,6 +14,7 @@ import {
 } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
+import { conflictResolutionService, SyncConflict } from '../../services/conflictResolution';
 
 interface DataConflict {
   id: string;
@@ -25,37 +26,69 @@ interface DataConflict {
   localTimestamp: Date;
   serverTimestamp: Date;
   resolved: boolean;
+  conflictFields?: string[];
 }
 
 export default function ConflictResolutionScreen() {
   const navigation = useNavigation();
-  
-  const [conflicts, setConflicts] = useState<DataConflict[]>([
-    {
-      id: '1',
-      modelName: 'res.partner',
-      recordId: 123,
-      fieldName: 'email',
-      localValue: 'john.doe@company.com',
-      serverValue: 'j.doe@newcompany.com',
-      localTimestamp: new Date('2025-07-02T09:30:00'),
-      serverTimestamp: new Date('2025-07-02T10:15:00'),
-      resolved: false,
-    },
-    {
-      id: '2',
-      modelName: 'sale.order',
-      recordId: 456,
-      fieldName: 'amount_total',
-      localValue: 1250.00,
-      serverValue: 1350.00,
-      localTimestamp: new Date('2025-07-02T08:45:00'),
-      serverTimestamp: new Date('2025-07-02T10:20:00'),
-      resolved: false,
-    },
-  ]);
 
+  const [conflicts, setConflicts] = useState<DataConflict[]>([]);
   const [selectedConflicts, setSelectedConflicts] = useState<string[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  // Load real conflicts from service
+  useEffect(() => {
+    loadConflicts();
+  }, []);
+
+  const loadConflicts = async () => {
+    try {
+      setLoading(true);
+      const realConflicts = await conflictResolutionService.getPendingConflicts();
+
+      // Convert service conflicts to UI format
+      const uiConflicts: DataConflict[] = realConflicts.map(conflict => ({
+        id: conflict.id,
+        modelName: conflict.modelName,
+        recordId: conflict.recordId,
+        fieldName: conflict.conflictFields.length > 1
+          ? `${conflict.conflictFields.length} fields`
+          : conflict.conflictFields[0] || 'data',
+        localValue: conflict.localData,
+        serverValue: conflict.serverData,
+        localTimestamp: new Date(conflict.timestamp),
+        serverTimestamp: new Date(conflict.timestamp),
+        resolved: conflict.status === 'resolved',
+        conflictFields: conflict.conflictFields // Add this for detailed display
+      }));
+
+      setConflicts(uiConflicts);
+    } catch (error) {
+      console.error('Failed to load conflicts:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Clear false positive conflicts
+  const clearFalsePositives = async () => {
+    try {
+      setLoading(true);
+      const clearedCount = await conflictResolutionService.clearFalsePositiveConflicts();
+
+      Alert.alert(
+        'Conflicts Cleared',
+        `Cleared ${clearedCount} false positive conflicts caused by data type mismatches.`,
+        [{ text: 'OK' }]
+      );
+
+      // Reload conflicts to show updated list
+      await loadConflicts();
+    } catch (error) {
+      console.error('Failed to clear false positives:', error);
+      Alert.alert('Error', 'Failed to clear false positive conflicts');
+    }
+  };
 
   // Format model display name
   const formatModelName = (modelName: string): string => {
@@ -75,29 +108,72 @@ export default function ConflictResolutionScreen() {
 
   // Format value for display
   const formatValue = (value: any): string => {
+    if (value === null || value === undefined) {
+      return '(empty)';
+    }
+    if (typeof value === 'string') {
+      return value || '(empty)';
+    }
     if (typeof value === 'number') {
       return value.toLocaleString();
     }
     if (typeof value === 'boolean') {
       return value ? 'Yes' : 'No';
     }
+    if (Array.isArray(value)) {
+      if (value.length === 0) {
+        return '(empty array)';
+      }
+      if (value.length <= 3) {
+        return `[${value.join(', ')}]`;
+      }
+      return `Array with ${value.length} items: [${value.slice(0, 2).join(', ')}, ...]`;
+    }
+    if (typeof value === 'object') {
+      const entries = Object.entries(value);
+      if (entries.length === 0) {
+        return '(empty object)';
+      }
+
+      // Show key-value pairs in a readable format
+      const formatted = entries.slice(0, 3).map(([key, val]) => {
+        let formattedVal = val;
+        if (typeof val === 'string' && val.length > 30) {
+          formattedVal = val.substring(0, 30) + '...';
+        } else if (typeof val === 'object' && val !== null) {
+          formattedVal = Array.isArray(val) ? `[${val.length} items]` : '{object}';
+        }
+        return `${key}: ${formattedVal}`;
+      }).join('\n');
+
+      const hasMore = entries.length > 3;
+      return formatted + (hasMore ? `\n... and ${entries.length - 3} more fields` : '');
+    }
     return String(value);
   };
 
   // Resolve single conflict
-  const resolveConflict = (conflictId: string, resolution: 'local' | 'server') => {
-    setConflicts(prev => prev.map(conflict => 
-      conflict.id === conflictId 
-        ? { ...conflict, resolved: true }
-        : conflict
-    ));
-    
-    // TODO: Apply resolution to database
-    console.log(`Resolved conflict ${conflictId} with ${resolution} value`);
+  const resolveConflict = async (conflictId: string, resolution: 'local' | 'server') => {
+    try {
+      // Apply resolution using the service
+      await conflictResolutionService.resolveConflict(conflictId, resolution);
+
+      // Update UI state
+      setConflicts(prev => prev.map(conflict =>
+        conflict.id === conflictId
+          ? { ...conflict, resolved: true }
+          : conflict
+      ));
+
+      console.log(`✅ Resolved conflict ${conflictId} with ${resolution} value`);
+    } catch (error) {
+      console.error(`❌ Failed to resolve conflict ${conflictId}:`, error);
+      Alert.alert('Resolution Failed', 'Failed to resolve conflict. Please try again.');
+    }
   };
 
   // Batch resolve conflicts
-  const batchResolve = (resolution: 'local' | 'server') => {
+  const batchResolve = async (resolution: 'local' | 'server') => {
     if (selectedConflicts.length === 0) {
       Alert.alert('No Selection', 'Please select conflicts to resolve');
       return;
@@ -108,15 +184,28 @@ export default function ConflictResolutionScreen() {
       `Resolve ${selectedConflicts.length} conflicts using ${resolution} values?`,
       [
         { text: 'Cancel', style: 'cancel' },
-        { 
-          text: 'Resolve', 
-          onPress: () => {
-            setConflicts(prev => prev.map(conflict => 
-              selectedConflicts.includes(conflict.id)
-                ? { ...conflict, resolved: true }
-                : conflict
-            ));
-            setSelectedConflicts([]);
+        {
+          text: 'Resolve',
+          onPress: async () => {
+            try {
+              // Resolve each conflict using the service
+              for (const conflictId of selectedConflicts) {
+                await conflictResolutionService.resolveConflict(conflictId, resolution);
+              }
+
+              // Update UI state
+              setConflicts(prev => prev.map(conflict =>
+                selectedConflicts.includes(conflict.id)
+                  ? { ...conflict, resolved: true }
+                  : conflict
+              ));
+              setSelectedConflicts([]);
+
+              console.log(`✅ Batch resolved ${selectedConflicts.length} conflicts`);
+            } catch (error) {
+              console.error('❌ Batch resolution failed:', error);
+              Alert.alert('Batch Resolution Failed', 'Some conflicts could not be resolved. Please try again.');
+            }
           }
         },
       ]
@@ -151,12 +240,40 @@ export default function ConflictResolutionScreen() {
         </TouchableOpacity>
         <View style={styles.conflictInfo}>
           <Text style={styles.conflictModel}>{formatModelName(conflict.modelName)}</Text>
-          <Text style={styles.conflictField}>{formatFieldName(conflict.fieldName)}</Text>
+          <Text style={styles.conflictField}>Record ID: {conflict.recordId}</Text>
+          <Text style={styles.conflictField}>Field: {formatFieldName(conflict.fieldName)}</Text>
         </View>
         <MaterialIcons name="warning" size={24} color="#FF9800" />
       </View>
 
-      {/* Values Comparison */}
+      {/* Conflicting Fields Details */}
+      {conflict.conflictFields && conflict.conflictFields.length > 0 && (
+        <View style={styles.fieldsContainer}>
+          <Text style={styles.fieldsTitle}>Conflicting Fields:</Text>
+          {conflict.conflictFields.map((fieldName, index) => {
+            const localFieldValue = conflict.localValue?.[fieldName];
+            const serverFieldValue = conflict.serverValue?.[fieldName];
+
+            return (
+              <View key={index} style={styles.fieldConflict}>
+                <Text style={styles.fieldName}>{formatFieldName(fieldName)}</Text>
+                <View style={styles.fieldValues}>
+                  <View style={styles.fieldValueCard}>
+                    <Text style={styles.fieldValueLabel}>Local:</Text>
+                    <Text style={styles.fieldValueText}>{formatValue(localFieldValue)}</Text>
+                  </View>
+                  <View style={styles.fieldValueCard}>
+                    <Text style={styles.fieldValueLabel}>Server:</Text>
+                    <Text style={styles.fieldValueText}>{formatValue(serverFieldValue)}</Text>
+                  </View>
+                </View>
+              </View>
+            );
+          })}
+        </View>
+      )}
+
+      {/* Full Record Comparison (fallback) */}
       <View style={styles.valuesContainer}>
         {/* Local Value */}
         <View style={styles.valueCard}>
@@ -210,7 +327,12 @@ export default function ConflictResolutionScreen() {
           <MaterialIcons name="arrow-back" size={24} color="#333" />
         </TouchableOpacity>
         <Text style={styles.title}>Resolve Conflicts</Text>
-        <View style={{ width: 24 }} />
+        <TouchableOpacity
+          onPress={clearFalsePositives}
+          style={styles.clearButton}
+        >
+          <MaterialIcons name="cleaning-services" size={20} color="#007AFF" />
+        </TouchableOpacity>
       </View>
 
       {/* Stats */}
@@ -364,6 +486,50 @@ const styles = StyleSheet.create({
     color: '#666',
     marginTop: 2,
   },
+  fieldsContainer: {
+    marginBottom: 16,
+    backgroundColor: '#f8f9fa',
+    borderRadius: 8,
+    padding: 12,
+  },
+  fieldsTitle: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#333',
+    marginBottom: 8,
+  },
+  fieldConflict: {
+    marginBottom: 12,
+    paddingBottom: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: '#e0e0e0',
+  },
+  fieldName: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#333',
+    marginBottom: 6,
+  },
+  fieldValues: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  fieldValueCard: {
+    flex: 1,
+    backgroundColor: 'white',
+    borderRadius: 6,
+    padding: 8,
+  },
+  fieldValueLabel: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#666',
+    marginBottom: 4,
+  },
+  fieldValueText: {
+    fontSize: 14,
+    color: '#333',
+  },
   valuesContainer: {
     flexDirection: 'row',
     gap: 12,
@@ -443,5 +609,9 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     marginTop: 8,
     paddingHorizontal: 32,
+  },
+  clearButton: {
+    padding: 4,
+    borderRadius: 4,
   },
 });

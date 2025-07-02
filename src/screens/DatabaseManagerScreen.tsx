@@ -43,9 +43,9 @@ export default function DatabaseManagerScreen() {
       // Get actual tables from SQLite database
       const actualTables = await databaseService.getAllTables();
 
-      // Filter out system tables
+      // Filter out system tables (but keep sync_metadata for debugging)
       const userTables = actualTables.filter(table =>
-        !['sync_metadata', 'sync_queue', 'sqlite_sequence'].includes(table)
+        !['sync_queue', 'sqlite_sequence'].includes(table)
       );
 
       const tableInfos: TableInfo[] = [];
@@ -103,7 +103,8 @@ export default function DatabaseManagerScreen() {
   const loadTableRecords = async (tableName: string) => {
     try {
       setLoading(true);
-      const tableRecords = await databaseService.getRecords(tableName, 50, 0);
+      // Get records ordered by modification time (write_date, then create_date, then id DESC)
+      const tableRecords = await databaseService.getRecordsOrderedByModification(tableName, 50, 0);
       setRecords(tableRecords);
       setFilteredRecords(tableRecords);
       setSelectedTable(tableName);

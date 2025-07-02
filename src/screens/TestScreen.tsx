@@ -16,6 +16,7 @@ import {
 } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
 import { crudTestingService } from '../services/crudTesting';
+import { testSync } from '../utils/testSync';
 
 interface TestSuite {
   name: string;
@@ -30,6 +31,9 @@ export default function TestScreen() {
   const [isRunning, setIsRunning] = useState(false);
   const [testResults, setTestResults] = useState<TestSuite[]>([]);
   const [hasRun, setHasRun] = useState(false);
+  const [isRunningConflictTests, setIsRunningConflictTests] = useState(false);
+  const [conflictTestResults, setConflictTestResults] = useState<any>(null);
+  const [isRunningIncrementalTest, setIsRunningIncrementalTest] = useState(false);
 
   const handleRunTests = async () => {
     setIsRunning(true);
@@ -63,6 +67,55 @@ export default function TestScreen() {
     }
   };
 
+  const handleRunConflictTests = async () => {
+    setIsRunningConflictTests(true);
+
+    try {
+      console.log('🧪 Starting conflict resolution tests...');
+
+      // Run all sync tests
+      await testSync.runAllTests();
+
+      // Get system status
+      const systemStatus = await testSync.getSystemStatus();
+      setConflictTestResults(systemStatus);
+
+      Alert.alert(
+        '🧪 Conflict Tests Complete',
+        `Auto-sync: ${systemStatus.autoSync?.isOnline ? 'Online' : 'Offline'}\n` +
+        `Conflicts: ${systemStatus.conflicts}\n` +
+        `Queue: ${systemStatus.queueStatus.pending} pending, ${systemStatus.queueStatus.failed} failed`
+      );
+
+    } catch (error) {
+      console.error('Conflict tests failed:', error);
+      Alert.alert('Test Error', 'Failed to run conflict tests');
+    } finally {
+      setIsRunningConflictTests(false);
+    }
+  };
+
+  const handleTestIncrementalSync = async () => {
+    setIsRunningIncrementalTest(true);
+
+    try {
+      console.log('🧪 Testing incremental sync...');
+
+      await testSync.testIncrementalSync();
+
+      Alert.alert(
+        '🔄 Incremental Sync Test Complete',
+        'Check the console logs to see if incremental sync is working correctly. Look for "INCREMENTAL" vs "INITIAL SYNC" messages.'
+      );
+
+    } catch (error) {
+      console.error('Incremental sync test failed:', error);
+      Alert.alert('Test Error', 'Failed to run incremental sync test');
+    } finally {
+      setIsRunningIncrementalTest(false);
+    }
+  };
+
   const getStatusIcon = (success: boolean) => {
     return success ? '✅' : '❌';
   };
@@ -82,7 +135,7 @@ export default function TestScreen() {
           </Text>
         </View>
 
-        {/* Run Tests Button */}
+        {/* Run Tests Buttons */}
         <View style={styles.buttonContainer}>
           <TouchableOpacity
             style={[styles.testButton, isRunning && styles.testButtonDisabled]}
@@ -98,7 +151,78 @@ export default function TestScreen() {
               {isRunning ? 'Running Tests...' : 'Run CRUD Tests'}
             </Text>
           </TouchableOpacity>
+
+          <TouchableOpacity
+            style={[styles.conflictTestButton, isRunningConflictTests && styles.testButtonDisabled]}
+            onPress={handleRunConflictTests}
+            disabled={isRunningConflictTests}
+          >
+            {isRunningConflictTests ? (
+              <ActivityIndicator size="small" color="#FFF" />
+            ) : (
+              <MaterialIcons name="merge-type" size={20} color="#FFF" />
+            )}
+            <Text style={styles.testButtonText}>
+              {isRunningConflictTests ? 'Testing Conflicts...' : 'Test Conflict Resolution'}
+            </Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={[styles.incrementalTestButton, isRunningIncrementalTest && styles.testButtonDisabled]}
+            onPress={handleTestIncrementalSync}
+            disabled={isRunningIncrementalTest}
+          >
+            {isRunningIncrementalTest ? (
+              <ActivityIndicator size="small" color="#FFF" />
+            ) : (
+              <MaterialIcons name="sync" size={20} color="#FFF" />
+            )}
+            <Text style={styles.testButtonText}>
+              {isRunningIncrementalTest ? 'Testing Incremental...' : 'Test Incremental Sync'}
+            </Text>
+          </TouchableOpacity>
         </View>
+
+        {/* Conflict Test Results */}
+        {conflictTestResults && (
+          <View style={styles.resultsContainer}>
+            <Text style={styles.resultsTitle}>🧪 Conflict Resolution Test Results</Text>
+
+            <View style={styles.conflictResultCard}>
+              <Text style={styles.conflictResultTitle}>Auto-Sync Status</Text>
+              <Text style={styles.conflictResultText}>
+                Online: {conflictTestResults.autoSync?.isOnline ? '✅ Yes' : '❌ No'}{'\n'}
+                App State: {conflictTestResults.autoSync?.appState || 'Unknown'}{'\n'}
+                Background Sync: {conflictTestResults.autoSync?.backgroundSyncActive ? '✅ Active' : '❌ Inactive'}
+              </Text>
+            </View>
+
+            <View style={styles.conflictResultCard}>
+              <Text style={styles.conflictResultTitle}>Conflicts</Text>
+              <Text style={styles.conflictResultText}>
+                Pending Conflicts: {conflictTestResults.conflicts}
+              </Text>
+            </View>
+
+            <View style={styles.conflictResultCard}>
+              <Text style={styles.conflictResultTitle}>Offline Queue</Text>
+              <Text style={styles.conflictResultText}>
+                Pending: {conflictTestResults.queueStatus.pending}{'\n'}
+                Failed: {conflictTestResults.queueStatus.failed}{'\n'}
+                Total: {conflictTestResults.queueStatus.total}
+              </Text>
+            </View>
+
+            <View style={styles.conflictResultCard}>
+              <Text style={styles.conflictResultTitle}>Sync Status</Text>
+              <Text style={styles.conflictResultText}>
+                Running: {conflictTestResults.syncStatus?.isRunning ? '✅ Yes' : '❌ No'}{'\n'}
+                Progress: {conflictTestResults.syncStatus?.progress || 0}%{'\n'}
+                Records Synced: {conflictTestResults.syncStatus?.syncedRecords || 0}
+              </Text>
+            </View>
+          </View>
+        )}
 
         {/* Test Results */}
         {hasRun && testResults.length > 0 && (
@@ -186,6 +310,8 @@ export default function TestScreen() {
           <Text style={styles.instructionsText}>
             • <Text style={styles.bold}>Users CRUD:</Text> Create, read, update, and delete test users{'\n'}
             • <Text style={styles.bold}>Contacts CRUD:</Text> Create, read, update, and delete test contacts{'\n'}
+            • <Text style={styles.bold}>Conflict Resolution:</Text> Auto-sync, offline queue, and conflict detection{'\n'}
+            • <Text style={styles.bold}>Incremental Sync:</Text> Tests if only modified records are synced{'\n'}
             • <Text style={styles.bold}>Error Handling:</Text> Proper error reporting and recovery{'\n'}
             • <Text style={styles.bold}>Performance:</Text> Response times for each operation
           </Text>
@@ -239,6 +365,45 @@ const styles = StyleSheet.create({
   },
   testButtonDisabled: {
     opacity: 0.6,
+  },
+  conflictTestButton: {
+    backgroundColor: '#FF9800',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 12,
+    paddingHorizontal: 24,
+    borderRadius: 8,
+    marginTop: 12,
+  },
+  conflictResultCard: {
+    backgroundColor: '#f8f9fa',
+    padding: 12,
+    borderRadius: 8,
+    marginBottom: 8,
+    borderLeftWidth: 4,
+    borderLeftColor: '#FF9800',
+  },
+  conflictResultTitle: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#333',
+    marginBottom: 4,
+  },
+  conflictResultText: {
+    fontSize: 12,
+    color: '#666',
+    lineHeight: 16,
+  },
+  incrementalTestButton: {
+    backgroundColor: '#4CAF50',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 12,
+    paddingHorizontal: 24,
+    borderRadius: 8,
+    marginTop: 12,
   },
   testButtonText: {
     fontSize: 18,

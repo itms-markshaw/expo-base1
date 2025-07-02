@@ -59,11 +59,11 @@ export default function SyncDashboard() {
     try {
       const metadata = await databaseService.getAllSyncMetadata();
       const syncedModels = metadata.length;
-      const totalRecords = metadata.reduce((sum, m) => sum + (m.record_count || 0), 0);
+      const totalRecords = metadata.reduce((sum, m) => sum + (m.total_records || 0), 0);
       const dataSize = formatDataSize(totalRecords * 1024); // Rough estimate
 
-      // Get last sync time
-      const lastSyncTimes = metadata.map(m => m.last_sync).filter(Boolean);
+      // Get last sync time - use correct column name from database schema
+      const lastSyncTimes = metadata.map(m => m.last_sync_timestamp).filter(Boolean);
       const lastSync = lastSyncTimes.length > 0 ? new Date(Math.max(...lastSyncTimes.map(d => new Date(d).getTime()))) : null;
 
       // Get actual conflicts from database (for now set to 0, will implement conflict detection later)

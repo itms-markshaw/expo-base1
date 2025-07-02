@@ -327,6 +327,18 @@ export const navigationItems: NavigationItem[] = [
         color: '#FF9800',
       },
       {
+        id: 'offline-queue',
+        name: 'Offline Queue',
+        shortName: 'Queue',
+        icon: 'cloud-queue',
+        component: 'OfflineQueueScreen',
+        route: '/sync/queue',
+        category: 'tools',
+        available: true,
+        description: 'Manage offline operations queue',
+        color: '#2196F3',
+      },
+      {
         id: 'database-manager',
         name: 'Database Manager',
         shortName: 'Database',

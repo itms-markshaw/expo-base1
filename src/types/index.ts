@@ -43,6 +43,10 @@ export type TimePeriod = 'all' | '1day' | '3days' | '1week' | '2weeks' | '1month
 export interface SyncSettings {
   globalTimePeriod: TimePeriod;
   modelOverrides: { [modelName: string]: TimePeriod };
+  modelSyncAllOverrides?: { [modelName: string]: boolean };
+  autoSync?: boolean;
+  conflictResolution?: 'ask_user' | 'server_wins' | 'keep_local';
+  backgroundSync?: boolean;
 }
 
 export interface TimePeriodOption {

@@ -14,12 +14,15 @@ import {
   ActivityIndicator,
 } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
-import { useNavigation } from '@react-navigation/native';
+import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import type { StackNavigationProp } from '@react-navigation/stack';
 
 import { useAppStore } from '../store';
 import { syncService } from '../services/sync';
 import { databaseService } from '../services/database';
+import { conflictResolutionService } from '../services/conflictResolution';
+import { offlineQueueService } from '../services/offlineQueue';
+import { testSync } from '../utils/testSync';
 
 interface SyncStats {
   totalModels: number;
@@ -28,6 +31,7 @@ interface SyncStats {
   dataSize: string;
   lastSync: Date | null;
   conflicts: number;
+  queuedOperations: number;
 }
 
 type RootStackParamList = {
@@ -35,6 +39,7 @@ type RootStackParamList = {
   SyncSettings: undefined;
   SyncProgress: undefined;
   SyncConflicts: undefined;
+  OfflineQueue: undefined;
 };
 
 export default function SyncDashboard() {
@@ -49,6 +54,7 @@ export default function SyncDashboard() {
     dataSize: '0 MB',
     lastSync: null, // Will be loaded from database
     conflicts: 0, // Will be calculated from actual conflicts
+    queuedOperations: 0, // Will be loaded from offline queue
   });
   const [isLoading, setIsLoading] = useState(false);
   const [syncActivity, setSyncActivity] = useState<Array<{time: string, records: number}>>([]);
@@ -71,7 +77,7 @@ export default function SyncDashboard() {
 
       const metadata = await databaseService.getAllSyncMetadata();
       const syncedModels = metadata.length;
-      const totalRecords = metadata.reduce((sum, m) => sum + (m.record_count || 0), 0);
+      const totalRecords = metadata.reduce((sum, m) => sum + (m.total_records || 0), 0);
       const dataSize = formatDataSize(totalRecords * 1024); // Rough estimate
 
       // Get last sync time - use correct column name from database schema
@@ -85,8 +91,25 @@ export default function SyncDashboard() {
         lastSync: lastSync?.toISOString()
       });
 
-      // Get actual conflicts count (for now set to 0, will implement conflict detection later)
-      const conflicts = 0;
+      // Get actual conflicts count from conflict resolution service
+      let conflicts = 0;
+      try {
+        await conflictResolutionService.initialize();
+        const pendingConflicts = await conflictResolutionService.getPendingConflicts();
+        conflicts = pendingConflicts.length;
+      } catch (error) {
+        console.warn('Failed to load conflicts count:', error);
+      }
+
+      // Get queued operations count from offline queue service
+      let queuedOperations = 0;
+      try {
+        await offlineQueueService.initialize();
+        const queueStats = offlineQueueService.getQueueStats();
+        queuedOperations = queueStats.pending;
+      } catch (error) {
+        console.warn('Failed to load queue status:', error);
+      }
 
       setSyncStats(prev => ({
         ...prev,
@@ -95,6 +118,7 @@ export default function SyncDashboard() {
         dataSize,
         lastSync,
         conflicts,
+        queuedOperations,
       }));
     } catch (error) {
       console.error('Failed to load sync stats:', error);
@@ -192,11 +216,21 @@ export default function SyncDashboard() {
     }
   }, [isOnline, navigation]);
 
-  // Load data on mount
+
+
+  // Load data on mount and when screen comes into focus
   useEffect(() => {
     loadSyncStats();
     loadSyncActivity();
   }, [loadSyncStats, loadSyncActivity]);
+
+  // Refresh stats when screen comes into focus
+  useEffect(() => {
+    const unsubscribe = navigation.addListener('focus', () => {
+      loadSyncStats();
+    });
+    return unsubscribe;
+  }, [navigation, loadSyncStats]);
 
   // No need to update sync stats when selected models change since we use selectedModels.length directly
 
@@ -262,21 +296,27 @@ export default function SyncDashboard() {
           </View>
         </View>
 
+        {/* Offline Queue Status */}
+        <View style={styles.queueStatusCard}>
+          <Text style={styles.queueStatusTitle}>Offline Queue</Text>
+          <View style={styles.queueStatusRow}>
+            <View style={styles.queueStatusItem}>
+              <Text style={styles.queueStatusNumber}>
+                {offlineQueueService.getPendingCount()}
+              </Text>
+              <Text style={styles.queueStatusLabel}>Pending</Text>
+            </View>
+            <View style={styles.queueStatusItem}>
+              <Text style={styles.queueStatusNumber}>
+                {offlineQueueService.getFailedCount()}
+              </Text>
+              <Text style={styles.queueStatusLabel}>Failed</Text>
+            </View>
+          </View>
+        </View>
+
         {/* Navigation Cards */}
         <View style={styles.navigationContainer}>
-          {/* Conflicts Navigation Card - Only show if there are actual conflicts */}
-          {syncStats.conflicts > 0 && (
-            <TouchableOpacity
-              style={styles.navCard}
-              onPress={() => navigation.navigate('SyncConflicts')}
-            >
-              <MaterialIcons name="warning" size={24} color="#FF9800" />
-              <Text style={styles.navCardText}>
-                {syncStats.conflicts} conflicts need attention
-              </Text>
-              <MaterialIcons name="chevron-right" size={24} color="#666" />
-            </TouchableOpacity>
-          )}
 
           <TouchableOpacity
             style={styles.navCard}
@@ -299,6 +339,45 @@ export default function SyncDashboard() {
           >
             <MaterialIcons name="storage" size={24} color="#666" />
             <Text style={styles.navCardText}>Database Manager</Text>
+            <MaterialIcons name="chevron-right" size={24} color="#666" />
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={styles.navCard}
+            onPress={() => {
+              console.log('🔄 Navigating to ConflictResolution...');
+              navigation.navigate('SyncConflicts');
+            }}
+          >
+            <MaterialIcons name="merge-type" size={24} color="#FF9800" />
+            <View style={styles.navCardTextContainer}>
+              <Text style={styles.navCardText}>Conflict Resolution</Text>
+              {syncStats.conflicts > 0 && (
+                <View style={styles.conflictBadge}>
+                  <Text style={styles.conflictBadgeText}>{syncStats.conflicts}</Text>
+                </View>
+              )}
+            </View>
+            <MaterialIcons name="chevron-right" size={24} color="#666" />
+          </TouchableOpacity>
+
+          {/* Offline Queue */}
+          <TouchableOpacity
+            style={styles.navCard}
+            onPress={() => {
+              console.log('🔄 Navigating to OfflineQueue...');
+              navigation.navigate('OfflineQueue');
+            }}
+          >
+            <MaterialIcons name="cloud-queue" size={24} color="#2196F3" />
+            <View style={styles.navCardTextContainer}>
+              <Text style={styles.navCardText}>Offline Queue</Text>
+              {syncStats.queuedOperations > 0 && (
+                <View style={styles.queueBadge}>
+                  <Text style={styles.queueBadgeText}>{syncStats.queuedOperations}</Text>
+                </View>
+              )}
+            </View>
             <MaterialIcons name="chevron-right" size={24} color="#666" />
           </TouchableOpacity>
 
@@ -437,6 +516,40 @@ const styles = StyleSheet.create({
     color: '#333',
     marginLeft: 16,
   },
+  navCardTextContainer: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginLeft: 16,
+  },
+  conflictBadge: {
+    backgroundColor: '#FF9800',
+    borderRadius: 12,
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    marginLeft: 8,
+    minWidth: 24,
+    alignItems: 'center',
+  },
+  conflictBadgeText: {
+    color: 'white',
+    fontSize: 12,
+    fontWeight: 'bold',
+  },
+  queueBadge: {
+    backgroundColor: '#2196F3',
+    borderRadius: 12,
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    marginLeft: 8,
+    minWidth: 24,
+    alignItems: 'center',
+  },
+  queueBadgeText: {
+    color: 'white',
+    fontSize: 12,
+    fontWeight: 'bold',
+  },
 
   // Chart Styles
   chartContainer: {
@@ -515,5 +628,40 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#999',
     marginTop: 8,
+  },
+
+  queueStatusCard: {
+    backgroundColor: 'white',
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 16,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  queueStatusTitle: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#333',
+    marginBottom: 12,
+  },
+  queueStatusRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-around',
+  },
+  queueStatusItem: {
+    alignItems: 'center',
+  },
+  queueStatusNumber: {
+    fontSize: 24,
+    fontWeight: 'bold',
+    color: '#2196F3',
+  },
+  queueStatusLabel: {
+    fontSize: 12,
+    color: '#666',
+    marginTop: 4,
   },
 });

@@ -17,6 +17,8 @@ import { MaterialIcons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 
 import { useAppStore } from '../../store';
+import { syncService } from '../../services/sync';
+import { autoSyncService, AutoSyncSettings } from '../../services/autoSync';
 import { databaseService } from '../../services/database';
 import { TimePeriod } from '../../types';
 
@@ -25,18 +27,15 @@ export default function SyncSettingsScreen() {
   const { syncSettings, updateSyncSettings } = useAppStore();
   
   const [localSettings, setLocalSettings] = useState({
-    globalTimePeriod: syncSettings.globalTimePeriod || '3_days',
-    autoSync: syncSettings.autoSync || false,
+    globalTimePeriod: syncSettings.globalTimePeriod || '1week',
+    autoSync: syncSettings.autoSync || true,
     conflictResolution: syncSettings.conflictResolution || 'ask_user',
-    backgroundSync: syncSettings.backgroundSync || false,
+    backgroundSync: syncSettings.backgroundSync || true,
   });
 
-  const timePeriodOptions = [
-    { value: '1_day', label: '1 Day', description: 'Last 24 hours' },
-    { value: '3_days', label: '3 Days', description: 'Last 3 days' },
-    { value: '1_week', label: '1 Week', description: 'Last 7 days' },
-    { value: '1_month', label: '1 Month', description: 'Last 30 days' },
-  ];
+  const [autoSyncSettings, setAutoSyncSettings] = useState<AutoSyncSettings>(autoSyncService.getSettings());
+
+  const timePeriodOptions = syncService.getTimePeriodOptions();
 
   const conflictOptions = [
     { value: 'ask_user', label: 'Ask User', description: 'Prompt for each conflict' },
@@ -156,7 +155,15 @@ export default function SyncSettingsScreen() {
             </View>
             <Switch
               value={localSettings.autoSync}
-              onValueChange={(value) => setLocalSettings(prev => ({ ...prev, autoSync: value }))}
+              onValueChange={(value) => {
+                setLocalSettings(prev => ({ ...prev, autoSync: value }));
+                // Update auto-sync service settings
+                autoSyncService.updateSettings({
+                  autoSyncOnLaunch: value,
+                  autoSyncOnForeground: value,
+                  autoSyncOnNetworkReconnect: value
+                });
+              }}
               trackColor={{ false: '#e0e0e0', true: '#2196F3' }}
               thumbColor={localSettings.autoSync ? '#fff' : '#f4f3f4'}
             />
@@ -171,7 +178,13 @@ export default function SyncSettingsScreen() {
             </View>
             <Switch
               value={localSettings.backgroundSync}
-              onValueChange={(value) => setLocalSettings(prev => ({ ...prev, backgroundSync: value }))}
+              onValueChange={(value) => {
+                setLocalSettings(prev => ({ ...prev, backgroundSync: value }));
+                // Update auto-sync service settings
+                autoSyncService.updateSettings({
+                  backgroundSyncEnabled: value
+                });
+              }}
               trackColor={{ false: '#e0e0e0', true: '#2196F3' }}
               thumbColor={localSettings.backgroundSync ? '#fff' : '#f4f3f4'}
             />
