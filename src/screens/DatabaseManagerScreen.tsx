@@ -36,24 +36,36 @@ export default function DatabaseManagerScreen() {
   const loadTables = async () => {
     try {
       setLoading(true);
-      
-      // Get all sync metadata to see which tables exist
-      const syncMetadata = await databaseService.getAllSyncMetadata();
-      
+
+      // Get actual tables from SQLite database
+      const actualTables = await databaseService.getAllTables();
+
+      // Filter out system tables
+      const userTables = actualTables.filter(table =>
+        !['sync_metadata', 'sync_queue', 'sqlite_sequence'].includes(table)
+      );
+
       const tableInfos: TableInfo[] = [];
-      
-      for (const metadata of syncMetadata) {
-        const tableName = getTableName(metadata.model_name);
-        const records = await databaseService.getRecords(tableName, 1, 0);
-        const totalRecords = await getTotalRecordCount(tableName);
-        
-        tableInfos.push({
-          name: tableName,
-          recordCount: totalRecords,
-          lastSync: metadata.last_sync_timestamp,
-        });
+
+      for (const tableName of userTables) {
+        try {
+          const totalRecords = await getTotalRecordCount(tableName);
+
+          // Try to get sync metadata for this table
+          const syncMetadata = await databaseService.getAllSyncMetadata();
+          const modelName = getModelNameFromTable(tableName);
+          const metadata = syncMetadata.find(m => getTableName(m.model_name) === tableName);
+
+          tableInfos.push({
+            name: tableName,
+            recordCount: totalRecords,
+            lastSync: metadata?.last_sync_timestamp,
+          });
+        } catch (error) {
+          console.warn(`⚠️ Failed to get info for table ${tableName}:`, error);
+        }
       }
-      
+
       setTables(tableInfos.sort((a, b) => b.recordCount - a.recordCount));
     } catch (error) {
       console.error('❌ Failed to load tables:', error);
@@ -93,8 +105,33 @@ export default function DatabaseManagerScreen() {
       'helpdesk.ticket': 'helpdesk_tickets',
       'helpdesk.team': 'helpdesk_teams',
     };
-    
+
     return tableMap[modelName] || modelName.replace('.', '_');
+  };
+
+  const getModelNameFromTable = (tableName: string): string => {
+    const reverseTableMap: { [key: string]: string } = {
+      'contacts': 'res.partner',
+      'users': 'res.users',
+      'employees': 'hr.employee',
+      'messages': 'mail.message',
+      'activities': 'mail.activity',
+      'attachments': 'ir.attachment',
+      'chat_channels': 'discuss.channel',
+      'sale_orders': 'sale.order',
+      'crm_leads': 'crm.lead',
+      'calendar_events': 'calendar.event',
+      'products': 'product.product',
+      'product_templates': 'product.template',
+      'invoices': 'account.move',
+      'deliveries': 'stock.picking',
+      'projects': 'project.project',
+      'project_tasks': 'project.task',
+      'helpdesk_tickets': 'helpdesk.ticket',
+      'helpdesk_teams': 'helpdesk.team',
+    };
+
+    return reverseTableMap[tableName] || tableName.replace('_', '.');
   };
 
   const loadTableRecords = async (tableName: string) => {

@@ -312,6 +312,19 @@ class DatabaseService {
   }
 
   /**
+   * Get all table names from SQLite database
+   */
+  async getAllTables(): Promise<string[]> {
+    if (!this.db) throw new Error('Database not initialized');
+
+    const tables = await this.db.getAllAsync(
+      "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'"
+    );
+
+    return tables.map((table: any) => table.name);
+  }
+
+  /**
    * Get records from a table
    */
   async getRecords(tableName: string, limit: number = 100, offset: number = 0): Promise<any[]> {

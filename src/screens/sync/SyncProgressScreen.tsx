@@ -76,10 +76,33 @@ export default function SyncProgressScreen() {
         totalModels: models.length,
         syncType,
         isFirstSync,
+        currentOperation: isFirstSync ? 'Calculating total records...' : 'Calculating incremental records...'
+      }));
+
+      // Calculate total records to sync
+      let totalRecordsToSync = 0;
+      const client = authService.getClient();
+      if (client) {
+        for (const modelName of models) {
+          try {
+            // Use the same logic as sync service to count records
+            const domain = await buildDomainForModel(modelName, syncType);
+            const count = await client.searchCount(modelName, domain);
+            const limit = getLimitForModel(modelName);
+            totalRecordsToSync += Math.min(count, limit);
+          } catch (error) {
+            console.warn(`⚠️ Could not count records for ${modelName}:`, error);
+          }
+        }
+      }
+
+      setProgress(prev => ({
+        ...prev,
+        totalRecords: totalRecordsToSync,
         currentOperation: isFirstSync ? 'Starting full sync...' : 'Starting incremental sync...'
       }));
 
-      console.log(`🔄 Starting ${syncType} sync for ${models.length} models`);
+      console.log(`🔄 Starting ${syncType} sync for ${models.length} models (${totalRecordsToSync} total records)`);
 
       let totalRecordsProcessed = 0;
       let totalDataSize = 0;
