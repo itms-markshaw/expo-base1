@@ -103,8 +103,10 @@ export default function DatabaseManagerScreen() {
   const loadTableRecords = async (tableName: string) => {
     try {
       setLoading(true);
+
       // Get records ordered by modification time (write_date, then create_date, then id DESC)
-      const tableRecords = await databaseService.getRecordsOrderedByModification(tableName, 50, 0);
+      const tableRecords = await databaseService.getRecordsOrderedByModification(tableName, 15, 0);
+
       setRecords(tableRecords);
       setFilteredRecords(tableRecords);
       setSelectedTable(tableName);

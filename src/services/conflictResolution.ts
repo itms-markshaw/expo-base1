@@ -86,23 +86,44 @@ class ConflictResolutionService {
    * Detect conflicts between local and server data
    */
   async detectConflicts(
-    modelName: string, 
-    localRecords: any[], 
+    modelName: string,
+    localRecords: any[],
     serverRecords: any[]
   ): Promise<SyncConflict[]> {
     const conflicts: SyncConflict[] = [];
-    
+
+    console.log(`🔍 Conflict detection for ${modelName}: ${localRecords.length} local, ${serverRecords.length} server records`);
+
+    // EARLY EXIT: If no local records, there can't be any conflicts
+    if (localRecords.length === 0) {
+      console.log(`✅ No local records for ${modelName} - no conflicts possible`);
+      return conflicts;
+    }
+
     // Create maps for efficient lookup
     const localMap = new Map(localRecords.map(r => [r.id, r]));
     const serverMap = new Map(serverRecords.map(r => [r.id, r]));
+
+    console.log(`📋 Local record IDs: [${Array.from(localMap.keys()).slice(0, 5).join(', ')}${localMap.size > 5 ? '...' : ''}]`);
+    console.log(`📋 Server record IDs: [${Array.from(serverMap.keys()).slice(0, 5).join(', ')}${serverMap.size > 5 ? '...' : ''}]`);
 
     // Check for conflicts in records that exist in both local and server
     for (const [recordId, localRecord] of localMap) {
       const serverRecord = serverMap.get(recordId);
       if (!serverRecord) continue;
 
+      // CRITICAL FIX: Only detect conflicts if local record was modified AFTER server record
+      const localWriteDate = new Date(localRecord.write_date || localRecord.synced_at || 0);
+      const serverWriteDate = new Date(serverRecord.write_date || 0);
+
+      // If server is newer or same, no conflict - just update
+      if (serverWriteDate >= localWriteDate) {
+        console.log(`✅ No conflict for record ${recordId}: server is newer or same (${serverWriteDate.toISOString()} >= ${localWriteDate.toISOString()})`);
+        continue;
+      }
+
       const conflictFields = this.findConflictingFields(localRecord, serverRecord);
-      
+
       if (conflictFields.length > 0) {
         const conflict: SyncConflict = {
           id: `${modelName}_${recordId}_${Date.now()}`,

@@ -23,7 +23,7 @@ export default function TemplateModelSelectionScreen() {
   const route = useRoute();
   const { templateId, templateName, templateModels } = route.params as RouteParams;
   
-  const { selectedModels, toggleModel } = useAppStore();
+  const { selectedModels, toggleModel, syncSettings, updateModelSyncAllOverride } = useAppStore();
   const [localSelectedModels, setLocalSelectedModels] = useState<string[]>([]);
 
   useEffect(() => {
@@ -47,6 +47,23 @@ export default function TemplateModelSelectionScreen() {
 
   const handleDeselectAll = () => {
     setLocalSelectedModels([]);
+  };
+
+  // Check if model has sync all override
+  const hasSyncAllOverride = (modelName: string): boolean => {
+    return syncSettings.modelSyncAllOverrides?.[modelName] === true;
+  };
+
+  // Check if model should default to sync all (employees, users)
+  const shouldDefaultToSyncAll = (modelName: string): boolean => {
+    return ['hr.employee', 'res.users'].includes(modelName);
+  };
+
+  // Toggle sync all override for a model
+  const toggleSyncAllOverride = (modelName: string) => {
+    const currentValue = hasSyncAllOverride(modelName);
+    updateModelSyncAllOverride(modelName, !currentValue);
+    console.log(`🔄 Toggled sync all override for ${modelName}: ${!currentValue}`);
   };
 
   const handleApply = () => {
@@ -73,27 +90,59 @@ export default function TemplateModelSelectionScreen() {
 
   const renderModelItem = ({ item: modelName }: { item: string }) => {
     const isSelected = localSelectedModels.includes(modelName);
-    
+    const hasOverride = hasSyncAllOverride(modelName);
+    const shouldDefault = shouldDefaultToSyncAll(modelName);
+
     return (
-      <TouchableOpacity
-        style={[styles.modelItem, isSelected && styles.modelItemSelected]}
-        onPress={() => handleToggleModel(modelName)}
-      >
-        <View style={styles.modelInfo}>
-          <Text style={[styles.modelName, isSelected && styles.modelNameSelected]}>
-            {modelName}
-          </Text>
-          <Text style={styles.modelDescription}>
-            {getModelDescription(modelName)}
-          </Text>
-        </View>
-        
-        <View style={[styles.checkbox, isSelected && styles.checkboxSelected]}>
-          {isSelected && (
-            <MaterialIcons name="check" size={16} color="#FFFFFF" />
-          )}
-        </View>
-      </TouchableOpacity>
+      <View style={styles.modelItemContainer}>
+        <TouchableOpacity
+          style={[styles.modelItem, isSelected && styles.modelItemSelected]}
+          onPress={() => handleToggleModel(modelName)}
+        >
+          <View style={styles.modelInfo}>
+            <Text style={[styles.modelName, isSelected && styles.modelNameSelected]}>
+              {modelName}
+            </Text>
+            <Text style={styles.modelDescription}>
+              {getModelDescription(modelName)}
+            </Text>
+            {/* Show sync type indicator */}
+            {isSelected && (
+              <Text style={[styles.syncTypeIndicator, hasOverride && styles.syncAllIndicator]}>
+                {hasOverride ? '📊 Sync All Records' : '📅 Time-based Sync'}
+              </Text>
+            )}
+          </View>
+
+          <View style={[styles.checkbox, isSelected && styles.checkboxSelected]}>
+            {isSelected && (
+              <MaterialIcons name="check" size={16} color="#FFFFFF" />
+            )}
+          </View>
+        </TouchableOpacity>
+
+        {/* Sync All Override Option - only show if model is selected */}
+        {isSelected && (
+          <View style={styles.syncAllContainer}>
+            <TouchableOpacity
+              style={styles.syncAllOption}
+              onPress={() => toggleSyncAllOverride(modelName)}
+            >
+              <MaterialIcons
+                name={hasOverride ? "radio-button-checked" : "radio-button-unchecked"}
+                size={20}
+                color={hasOverride ? "#4CAF50" : "#666"}
+              />
+              <Text style={[styles.syncAllText, hasOverride && styles.syncAllTextActive]}>
+                Sync all records
+              </Text>
+              {shouldDefault && !hasOverride && (
+                <Text style={styles.recommendedText}>(Recommended)</Text>
+              )}
+            </TouchableOpacity>
+          </View>
+        )}
+      </View>
     );
   };
 
@@ -260,12 +309,14 @@ const styles = StyleSheet.create({
     flex: 1,
     paddingHorizontal: 16,
   },
+  modelItemContainer: {
+    marginVertical: 4,
+  },
   modelItem: {
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: '#FFFFFF',
     padding: 16,
-    marginVertical: 4,
     borderRadius: 12,
     borderWidth: 1,
     borderColor: '#E5E5EA',
@@ -326,5 +377,45 @@ const styles = StyleSheet.create({
   },
   applyButtonTextDisabled: {
     color: '#8E8E93',
+  },
+  syncTypeIndicator: {
+    fontSize: 12,
+    color: '#666',
+    marginTop: 4,
+  },
+  syncAllIndicator: {
+    color: '#4CAF50',
+    fontWeight: '600',
+  },
+  syncAllContainer: {
+    marginTop: 12,
+    paddingTop: 12,
+    paddingHorizontal: 16,
+    borderTopWidth: 1,
+    borderTopColor: '#f0f0f0',
+    backgroundColor: '#FFFFFF',
+    borderBottomLeftRadius: 12,
+    borderBottomRightRadius: 12,
+  },
+  syncAllOption: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 8,
+  },
+  syncAllText: {
+    fontSize: 14,
+    color: '#666',
+    marginLeft: 8,
+    flex: 1,
+  },
+  syncAllTextActive: {
+    color: '#4CAF50',
+    fontWeight: '500',
+  },
+  recommendedText: {
+    fontSize: 12,
+    color: '#4CAF50',
+    fontWeight: '500',
+    marginLeft: 8,
   },
 });

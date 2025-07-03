@@ -46,8 +46,11 @@ export default function ConflictResolutionScreen() {
       setLoading(true);
       const realConflicts = await conflictResolutionService.getPendingConflicts();
 
+      // LIMIT CONFLICTS: Only load first 50 to prevent UI freezing
+      const limitedConflicts = realConflicts.slice(0, 50);
+
       // Convert service conflicts to UI format
-      const uiConflicts: DataConflict[] = realConflicts.map(conflict => ({
+      const uiConflicts: DataConflict[] = limitedConflicts.map(conflict => ({
         id: conflict.id,
         modelName: conflict.modelName,
         recordId: conflict.recordId,
@@ -63,6 +66,11 @@ export default function ConflictResolutionScreen() {
       }));
 
       setConflicts(uiConflicts);
+
+      // Log if there are more conflicts than displayed
+      if (realConflicts.length > 50) {
+        console.log(`📊 Showing first 50 of ${realConflicts.length} total conflicts`);
+      }
     } catch (error) {
       console.error('Failed to load conflicts:', error);
     } finally {

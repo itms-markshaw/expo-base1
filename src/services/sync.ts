@@ -43,7 +43,15 @@ class SyncService {
       'res.users': 'all',        // Users - sync all
       'product.product': 'all',  // Products - sync all
       'product.template': 'all', // Product templates - sync all
-    }
+    },
+    modelSyncAllOverrides: {
+      'hr.employee': true,       // Always sync ALL employees
+      'res.users': true,         // Always sync ALL users
+      'res.partner': false,      // Use time-based for contacts (can be overridden)
+    },
+    autoSync: true,
+    conflictResolution: 'ask_user',
+    backgroundSync: true,
   };
 
   /**
@@ -94,8 +102,14 @@ class SyncService {
    * Get current sync settings
    */
   getSyncSettings(): SyncSettings {
-    return { ...this.syncSettings };
+    // Ensure all properties exist with defaults
+    return {
+      ...this.syncSettings,
+      modelSyncAllOverrides: this.syncSettings.modelSyncAllOverrides || {}
+    };
   }
+
+
 
   /**
    * Update sync settings
@@ -307,6 +321,9 @@ class SyncService {
 
       console.log('🚀 Starting sync process...');
 
+      // Clear field cache to force re-detection with improved validation
+      this.clearFieldCache();
+
       // Initialize database first (offline-first approach)
       await databaseService.initialize();
 
@@ -502,47 +519,8 @@ class SyncService {
         });
       }
 
-      // Check for conflicts before saving
-      try {
-        const existingRecords = await databaseService.getRecords(tableName, 10000, 0);
-        const conflicts = await conflictResolutionService.detectConflicts(
-          modelName,
-          existingRecords,
-          records
-        );
-
-        if (conflicts.length > 0) {
-          console.log(`⚠️ Detected ${conflicts.length} conflicts for ${modelName}`);
-
-          // Log conflict details for debugging
-          conflicts.forEach((conflict, index) => {
-            console.log(`   Conflict ${index + 1}: Record ${conflict.recordId}`);
-            console.log(`   Fields: ${conflict.conflictFields.join(', ')}`);
-          });
-
-          // Handle conflicts based on user's conflict resolution setting
-          const { syncSettings } = useAppStore.getState();
-          const conflictStrategy = syncSettings.conflictResolution || 'ask_user';
-
-          if (conflictStrategy === 'ask_user') {
-            // Don't auto-resolve - let user handle conflicts manually
-            console.log(`⏸️ Conflicts detected - user will resolve manually via Conflict Resolution screen`);
-            // Save conflicts to database for manual resolution
-            await conflictResolutionService.saveConflictsToDatabase(conflicts);
-          } else {
-            // Auto-resolve based on user's preference
-            const strategy = conflictStrategy === 'server_wins' ? 'server' : 'local';
-            console.log(`🤖 Auto-resolving conflicts using strategy: ${strategy} (setting: ${conflictStrategy})`);
-
-            for (const conflict of conflicts) {
-              await conflictResolutionService.resolveConflictAuto(conflict.id, strategy);
-            }
-          }
-        }
-      } catch (conflictError) {
-        console.warn(`⚠️ Conflict detection failed for ${modelName}:`, conflictError);
-        // Continue with sync even if conflict detection fails
-      }
+      // CONFLICT DETECTION DISABLED: Too many false positives
+      console.log(`🚫 Conflict detection disabled - saving ${records.length} records directly`);
 
       // Save to database
       await databaseService.saveRecords(tableName, records);
@@ -600,7 +578,7 @@ class SyncService {
    * Get fields to sync for model using automatic field detection
    */
   private async getFieldsForModel(modelName: string): Promise<string[]> {
-    // Check cache first
+    // Check cache first (re-enabled after fixing field filtering)
     if (this.fieldCache[modelName]) {
       console.log(`📋 Using cached fields for ${modelName} (${this.fieldCache[modelName].length} fields)`);
       return this.fieldCache[modelName];
@@ -619,20 +597,29 @@ class SyncService {
 
       console.log(`🔍 Auto-detected ${availableFieldNames.length} fields for ${modelName}`);
 
-      // Define priority fields we want to sync (if they exist)
-      const priorityFields = this.getPriorityFields(modelName);
+      // FILTER OUT PROBLEMATIC FIELDS: Exclude metadata and fields that cause server errors
+      const problematicFields = [
+        // Field metadata (not actual database fields)
+        'string', 'type', 'required', 'readonly', 'domain', 'context', 'help',
+        // Binary/attachment fields that cause filestore errors
+        'datas', 'raw', 'db_datas', 'store_fname', 'file_size',
+        // Image fields that can cause binary issues
+        'image_1920', 'image_1024', 'image_512', 'image_256', 'image_128',
+        'avatar_1920', 'avatar_1024', 'avatar_512', 'avatar_256', 'avatar_128'
+      ];
 
-      // Filter priority fields to only include ones that actually exist
-      const validPriorityFields = priorityFields.filter(field => availableFieldNames.includes(field));
-
-      // Add essential fields that should always be included if they exist
-      const essentialFields = ['id', 'name', 'create_date', 'write_date', 'active'];
-      const validEssentialFields = essentialFields.filter(field =>
-        availableFieldNames.includes(field) && !validPriorityFields.includes(field)
+      let fieldsToSync = availableFieldNames.filter(fieldName =>
+        !problematicFields.includes(fieldName)
       );
 
-      // Combine priority and essential fields
-      const fieldsToSync = [...validPriorityFields, ...validEssentialFields];
+      // SPECIAL HANDLING: For ir.attachment, only sync safe metadata fields
+      if (modelName === 'ir.attachment') {
+        const safeAttachmentFields = ['id', 'name', 'res_name', 'res_model', 'res_id', 'mimetype', 'create_date', 'write_date', 'create_uid', 'write_uid'];
+        fieldsToSync = fieldsToSync.filter(field => safeAttachmentFields.includes(field));
+        console.log(`🔒 ir.attachment: Using only safe metadata fields (${fieldsToSync.length} fields)`);
+      }
+
+      console.log(`✅ Filtered out ${availableFieldNames.length - fieldsToSync.length} problematic fields, using ${fieldsToSync.length} safe fields`);
 
       // Cache the result
       this.fieldCache[modelName] = fieldsToSync;
@@ -643,8 +630,10 @@ class SyncService {
 
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
-      console.warn(`⚠️ Field detection failed for ${modelName}, using fallback:`, errorMessage);
+      console.error(`❌ FIELD DETECTION FAILED for ${modelName}:`, errorMessage);
+      console.error(`❌ Full error:`, error);
       const fallbackFields = this.getFallbackFields(modelName);
+      console.warn(`⚠️ Using fallback fields (${fallbackFields.length}):`, fallbackFields);
       this.fieldCache[modelName] = fallbackFields; // Cache fallback too
       return fallbackFields;
     }
@@ -665,12 +654,17 @@ class SyncService {
   private getFallbackFields(modelName: string): string[] {
     // Model-specific fallback fields
     const fallbackMap: { [key: string]: string[] } = {
-      'mail.message': ['subject', 'body', 'date', 'author_id', 'create_date', 'write_date'],
-      'mail.activity': ['summary', 'note', 'date_deadline', 'user_id', 'res_model', 'res_id', 'create_date', 'write_date'],
+      'mail.message': ['id', 'subject', 'body', 'date', 'author_id', 'partner_ids', 'model', 'res_id', 'message_type', 'create_date', 'write_date', 'create_uid'],
+      'mail.activity': ['id', 'summary', 'note', 'date_deadline', 'user_id', 'res_model', 'res_id', 'activity_type_id', 'state', 'create_date', 'write_date', 'create_uid'],
+      'res.partner': ['id', 'name', 'email', 'phone', 'mobile', 'street', 'city', 'country_id', 'is_company', 'parent_id', 'create_date', 'write_date'],
+      'res.users': ['id', 'name', 'login', 'email', 'phone', 'mobile', 'partner_id', 'company_id', 'active', 'groups_id', 'create_date', 'write_date'],
     };
 
-    // Return model-specific fallback or safe default
-    return fallbackMap[modelName] || ['name', 'create_date', 'write_date'];
+    // Return model-specific fallback or comprehensive default (12+ fields)
+    return fallbackMap[modelName] || [
+      'id', 'name', 'create_date', 'write_date', 'active', 'create_uid', 'write_uid',
+      'display_name', 'sequence', 'state', 'company_id', 'user_id'
+    ];
   }
 
   /**
@@ -678,7 +672,7 @@ class SyncService {
    */
   clearFieldCache(): void {
     this.fieldCache = {};
-    console.log('🗑️ Field cache cleared');
+    console.log('🗑️ Field cache cleared - will re-detect fields with improved validation');
   }
 
   /**
@@ -1083,6 +1077,13 @@ class SyncService {
     } else {
       // INITIAL SYNC: Use time period for first sync
       console.log(`📅 INITIAL SYNC: ${modelName} - using time period filter`);
+
+      // Check if model has "sync all" override
+      const hasSyncAllOverride = this.syncSettings.modelSyncAllOverrides?.[modelName] === true;
+      if (hasSyncAllOverride) {
+        console.log(`📊 INITIAL SYNC: ${modelName} - sync all override enabled, fetching all records`);
+        return [];
+      }
 
       // Get time period for this model (override or global)
       const timePeriod = this.syncSettings.modelOverrides[modelName] || this.syncSettings.globalTimePeriod;

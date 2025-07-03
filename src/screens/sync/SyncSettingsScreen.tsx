@@ -51,20 +51,21 @@ export default function SyncSettingsScreen() {
 
   const handleClearData = () => {
     Alert.alert(
-      'Clear Offline Data',
-      'This will delete all locally stored data. Are you sure?',
+      'Reset Database',
+      'This will completely drop and recreate the SQLite database, removing all tables and data. This fixes database corruption issues. Are you sure?',
       [
         { text: 'Cancel', style: 'cancel' },
         {
-          text: 'Clear Data',
+          text: 'Reset Database',
           style: 'destructive',
           onPress: async () => {
             try {
-              await databaseService.clearAllData();
-              Alert.alert('Data Cleared', 'All offline data has been removed.');
+              console.log('🗑️ Resetting entire SQLite database...');
+              await databaseService.resetDatabase();
+              Alert.alert('Database Reset', 'SQLite database has been completely recreated. All tables and data have been removed.');
             } catch (error) {
-              console.error('Failed to clear data:', error);
-              Alert.alert('Error', 'Failed to clear offline data. Please try again.');
+              console.error('Failed to reset database:', error);
+              Alert.alert('Error', 'Failed to reset database. Please try again.');
             }
           }
         },
@@ -206,11 +207,11 @@ export default function SyncSettingsScreen() {
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Data Management</Text>
           <TouchableOpacity style={styles.dangerButton} onPress={handleClearData}>
-            <MaterialIcons name="delete-forever" size={24} color="#F44336" />
+            <MaterialIcons name="refresh" size={24} color="#F44336" />
             <View style={styles.dangerButtonText}>
-              <Text style={styles.dangerButtonTitle}>Clear Offline Data</Text>
+              <Text style={styles.dangerButtonTitle}>Reset Database</Text>
               <Text style={styles.dangerButtonDescription}>
-                Remove all locally stored data
+                Drop and recreate SQLite database (fixes corruption)
               </Text>
             </View>
           </TouchableOpacity>

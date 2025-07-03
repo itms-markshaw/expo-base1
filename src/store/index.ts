@@ -33,6 +33,7 @@ interface AppStore {
   toggleModel: (modelName: string) => void;
   updateSyncSettings: (settings: Partial<SyncSettings>) => void;
   updateModelTimePeriod: (modelName: string, timePeriod: TimePeriod) => void;
+  updateModelSyncAllOverride: (modelName: string, syncAll: boolean) => void;
   loadDatabaseStats: () => Promise<void>;
   loadAvailableModels: () => Promise<void>;
 }
@@ -177,6 +178,20 @@ export const useAppStore = create<AppStore>((set, get) => ({
     const { syncSettings } = get();
     const newOverrides = { ...syncSettings.modelOverrides, [modelName]: timePeriod };
     const newSettings = { ...syncSettings, modelOverrides: newOverrides };
+    set({ syncSettings: newSettings });
+    syncService.updateSyncSettings(newSettings);
+  },
+
+  updateModelSyncAllOverride: (modelName: string, syncAll: boolean) => {
+    const { syncSettings } = get();
+    const newOverrides = {
+      ...(syncSettings.modelSyncAllOverrides || {}), // Safety check
+      [modelName]: syncAll
+    };
+    const newSettings = {
+      ...syncSettings,
+      modelSyncAllOverrides: newOverrides
+    };
     set({ syncSettings: newSettings });
     syncService.updateSyncSettings(newSettings);
   },

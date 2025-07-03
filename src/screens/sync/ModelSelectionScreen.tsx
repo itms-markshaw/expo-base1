@@ -117,7 +117,7 @@ export default function ModelSelectionScreen() {
   console.log('🔍 ModelSelectionScreen mounted');
 
   const navigation = useNavigation();
-  const { selectedModels, toggleModel, syncSettings, updateModelTimePeriod } = useAppStore();
+  const { selectedModels, toggleModel, syncSettings, updateModelTimePeriod, updateModelSyncAllOverride } = useAppStore();
 
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedTemplates, setSelectedTemplates] = useState<string[]>([]);
@@ -200,6 +200,7 @@ export default function ModelSelectionScreen() {
         recordCount: 0,
         estimatedSize: '0 MB',
         isSelected: selectedModels.includes(model.model),
+        syncAllOverride: (syncSettings.modelSyncAllOverrides || {})[model.model] || false,
       }));
 
       setModels(modelInfos);
@@ -239,26 +240,25 @@ export default function ModelSelectionScreen() {
     toggleModel(modelName);
     setModels(prev => prev.map(model =>
       model.name === modelName
-        ? { ...model, isSelected: !model.isSelected }
+        ? {
+            ...model,
+            isSelected: !model.isSelected,
+            syncAllOverride: (syncSettings.modelSyncAllOverrides || {})[modelName] || false
+          }
         : model
     ));
   };
 
   // Check if model has "sync all" override
   const hasSyncAllOverride = (modelName: string): boolean => {
-    return syncSettings.modelOverrides[modelName] === 'all';
+    return (syncSettings.modelSyncAllOverrides || {})[modelName] === true;
   };
 
   // Toggle sync all override for a model
   const toggleSyncAllOverride = (modelName: string) => {
-    const currentOverride = syncSettings.modelOverrides[modelName];
-    if (currentOverride === 'all') {
-      // Remove override (use global setting)
-      updateModelTimePeriod(modelName, syncSettings.globalTimePeriod);
-    } else {
-      // Set to sync all
-      updateModelTimePeriod(modelName, 'all');
-    }
+    const currentValue = hasSyncAllOverride(modelName);
+    updateModelSyncAllOverride(modelName, !currentValue);
+    console.log(`🔄 Toggled sync all override for ${modelName}: ${!currentValue}`);
   };
 
   // Models that should default to "sync all"
@@ -553,9 +553,9 @@ export default function ModelSelectionScreen() {
               // Save sync all overrides to sync settings
               const syncAllOverrides: Record<string, boolean> = {};
               Array.from(selectedModels).forEach(modelName => {
-                syncAllOverrides[modelName] = modelSyncAllOverrides[modelName] || false;
+                syncAllOverrides[modelName] = (syncSettings.modelSyncAllOverrides || {})[modelName] || false;
               });
-              updateSyncSettings({
+              syncService.updateSyncSettings({
                 ...syncSettings,
                 modelSyncAllOverrides: syncAllOverrides
               });
