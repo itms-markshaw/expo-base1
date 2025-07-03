@@ -546,7 +546,7 @@ class SyncService {
           const safeFields = [
             'id', 'name', 'start', 'stop', 'start_date', 'stop_date', 'allday',
             'description', 'location', 'user_id', 'partner_ids', 'categ_ids',
-            'privacy', 'show_as', 'state', 'recurrency', 'rrule', 'duration',
+            'privacy', 'show_as', 'recurrency', 'rrule', 'duration',
             'alarm_ids', 'attendee_ids', 'create_date', 'write_date', 'create_uid', 'write_uid'
           ];
           records = await client.searchRead(modelName, domain, safeFields, {
@@ -649,6 +649,13 @@ class SyncService {
    * Get fields to sync for model using automatic field detection
    */
   private async getFieldsForModel(modelName: string): Promise<string[]> {
+    // FORCE FALLBACK for problematic models that have field detection issues
+    const problematicModels = ['res.users', 'calendar.event', 'stock.picking'];
+    if (problematicModels.includes(modelName)) {
+      console.log(`🔒 ${modelName}: Using fallback fields only (skipping auto-detection)`);
+      return this.getFallbackFields(modelName);
+    }
+
     // Check cache first (re-enabled after fixing field filtering)
     if (this.fieldCache[modelName]) {
       console.log(`📋 Using cached fields for ${modelName} (${this.fieldCache[modelName].length} fields)`);
@@ -675,7 +682,9 @@ class SyncService {
         // Skip fields that are clearly metadata (not actual database fields)
         const metadataFields = [
           'string', 'type', 'required', 'readonly', 'domain', 'context', 'help', 'selection',
-          'store', 'compute', 'inverse', 'search', 'related', 'depends', 'default'
+          'store', 'compute', 'inverse', 'search', 'related', 'depends', 'default',
+          'exportable', 'sortable', 'searchable', 'groupable', 'aggregatable',
+          'selectable', 'manual', 'translate', 'trim', 'size', 'digits'
         ];
         if (metadataFields.includes(fieldName)) {
           return false;
@@ -720,7 +729,10 @@ class SyncService {
 
       // SPECIAL HANDLING: For res.users, exclude problematic fields that cause "Invalid field" errors
       if (modelName === 'res.users') {
-        const userProblematicFields = ['selection', 'groups', 'user_groups', 'implied_ids'];
+        const userProblematicFields = [
+          'selection', 'groups', 'user_groups', 'implied_ids', 'exportable',
+          'password', 'new_password', 'api_key', 'totp_secret', 'totp_enabled'
+        ];
         fieldsToSync = fieldsToSync.filter(field => !userProblematicFields.includes(field));
         console.log(`🔒 res.users: Excluded ${userProblematicFields.length} problematic fields`);
       }
@@ -798,12 +810,21 @@ class SyncService {
         'message_ids', 'message_follower_ids', 'activity_ids', 'activity_state', 'activity_user_id',
         'create_date', 'write_date', 'create_uid', 'write_uid'
       ],
-      'res.users': ['id', 'name', 'login', 'email', 'phone', 'mobile', 'partner_id', 'company_id', 'active', 'groups_id', 'create_date', 'write_date'],
+      'res.users': [
+        'id', 'name', 'login', 'email', 'phone', 'mobile', 'partner_id', 'company_id',
+        'active', 'lang', 'tz', 'signature', 'notification_type', 'odoobot_state',
+        'create_date', 'write_date', 'create_uid', 'write_uid'
+      ],
       'calendar.event': [
         'id', 'name', 'start', 'stop', 'start_date', 'stop_date', 'allday',
         'description', 'location', 'user_id', 'partner_ids', 'categ_ids',
-        'privacy', 'show_as', 'state', 'recurrency', 'rrule', 'duration',
+        'privacy', 'show_as', 'recurrency', 'rrule', 'duration',
         'alarm_ids', 'attendee_ids', 'create_date', 'write_date', 'create_uid', 'write_uid'
+      ],
+      'stock.picking': [
+        'id', 'name', 'origin', 'state', 'picking_type_id', 'partner_id', 'location_id',
+        'location_dest_id', 'scheduled_date', 'date_done', 'user_id', 'company_id',
+        'move_ids_without_package', 'priority', 'note', 'create_date', 'write_date', 'create_uid', 'write_uid'
       ],
     };
 

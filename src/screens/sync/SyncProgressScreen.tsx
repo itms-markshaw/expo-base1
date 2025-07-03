@@ -228,20 +228,41 @@ export default function SyncProgressScreen() {
   // Determine if this is a full sync or incremental sync
   const determineSyncType = useCallback(async (models: string[]): Promise<'full' | 'incremental'> => {
     try {
-      // Check if any model has never been synced
+      let neverSyncedCount = 0;
+      let totalModels = models.length;
+
+      // Check sync status for each model (excluding restricted models)
       for (const modelName of models) {
+        // Skip restricted models that shouldn't be synced
+        if (modelName === 'account.move') {
+          console.log(`🚫 ${modelName} is restricted - skipping from sync type detection`);
+          totalModels--; // Don't count restricted models
+          continue;
+        }
+
         const metadata = await databaseService.getSyncMetadata(modelName);
         if (!metadata || !metadata.last_sync_timestamp || !metadata.last_sync_write_date) {
-          console.log(`🔄 ${modelName} has never been synced - full sync required`);
-          return 'full';
+          neverSyncedCount++;
+          console.log(`🔄 ${modelName} has never been synced`);
+        } else {
+          console.log(`✅ ${modelName} has been synced before (last: ${metadata.last_sync_write_date})`);
         }
       }
 
-      console.log('🔄 All models have been synced before - incremental sync');
-      return 'incremental';
+      // Determine sync type based on ratio of never-synced models
+      if (neverSyncedCount === 0) {
+        console.log('🔄 All models have been synced before - incremental sync');
+        return 'incremental';
+      } else if (neverSyncedCount === totalModels) {
+        console.log('🔄 No models have been synced before - full sync (first time)');
+        return 'full';
+      } else {
+        console.log(`🔄 Mixed sync: ${neverSyncedCount}/${totalModels} models never synced - treating as incremental`);
+        return 'incremental';
+      }
     } catch (error) {
-      console.warn('⚠️ Could not determine sync type, defaulting to full sync:', error);
-      return 'full';
+      console.warn('⚠️ Could not determine sync type, defaulting to incremental sync:', error);
+      return 'incremental';
     }
   }, []);
 
@@ -355,8 +376,8 @@ export default function SyncProgressScreen() {
                 {progress.isComplete ? "Sync Complete" : progress.hasError ? "Sync Failed" : "Syncing..."}
               </Text>
               <Text style={styles.syncTypeLabel}>
-                {progress.isFirstSync ? "Full Sync" : "Incremental Sync"}
-                {progress.isFirstSync && " (First Time)"}
+                {progress.syncType === 'full' ? "Full Sync" : "Incremental Sync"}
+                {progress.syncType === 'full' && " (First Time)"}
               </Text>
             </View>
           </View>
