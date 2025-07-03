@@ -113,7 +113,8 @@ class DatabaseService {
     // Add each field as TEXT (we'll handle type conversion in the app)
     for (const field of fields) {
       if (!standardColumns.has(field)) {
-        columns.push(`${field} TEXT`);
+        const sanitizedField = this.sanitizeColumnName(field);
+        columns.push(`${sanitizedField} TEXT`);
       } else if (field === 'create_date' || field === 'write_date') {
         // Add the field from Odoo data (don't duplicate)
         columns.push(`${field} TEXT`);
@@ -176,16 +177,15 @@ class DatabaseService {
       // Create table dynamically if it doesn't exist
       await this.createTableForModel(tableName, Array.from(allFields));
 
-      await this.db.withTransactionAsync(async () => {
-        for (const record of records) {
-          await this.insertOrUpdateRecord(tableName, record);
-        }
+      // Process records individually to avoid transaction nesting issues
+      for (const record of records) {
+        await this.insertOrUpdateRecord(tableName, record);
+      }
 
-        // Update sync metadata
-        await this.updateSyncMetadata(tableName, {
-          totalRecords: records.length,
-          lastSyncTimestamp: new Date().toISOString()
-        });
+      // Update sync metadata
+      await this.updateSyncMetadata(tableName, {
+        totalRecords: records.length,
+        lastSyncTimestamp: new Date().toISOString()
       });
 
       console.log(`✅ Saved ${records.length} records to ${tableName}`);
@@ -204,11 +204,16 @@ class DatabaseService {
     // Get table columns
     const columns = await this.getTableColumns(tableName);
     
-    // Filter record to only include existing columns
+    // Filter record to only include existing columns, mapping original field names to sanitized column names
     const filteredRecord: any = {};
     for (const column of columns) {
-      if (record.hasOwnProperty(column) && column !== 'synced_at') {
-        filteredRecord[column] = this.sanitizeValue(record[column]);
+      // Try to find the original field name that maps to this sanitized column
+      const originalField = Object.keys(record).find(field =>
+        this.sanitizeColumnName(field) === column || field === column
+      );
+
+      if (originalField && record.hasOwnProperty(originalField) && column !== 'synced_at') {
+        filteredRecord[column] = this.sanitizeValue(record[originalField]);
       }
     }
 
@@ -233,6 +238,28 @@ class DatabaseService {
 
     const tableInfo = await this.db.getAllAsync(`PRAGMA table_info(${tableName})`);
     return tableInfo.map((column: any) => column.name);
+  }
+
+  /**
+   * Sanitize column name for SQLite
+   */
+  private sanitizeColumnName(columnName: string): string {
+    // SQLite column names must:
+    // 1. Not start with a number
+    // 2. Only contain letters, numbers, and underscores
+    // 3. Not be SQLite reserved words
+
+    let sanitized = columnName
+      .replace(/[^a-zA-Z0-9_]/g, '_')  // Replace invalid chars with underscore
+      .replace(/^(\d)/, 'col_$1');     // Prefix with 'col_' if starts with number
+
+    // Handle SQLite reserved words
+    const reservedWords = ['order', 'group', 'select', 'from', 'where', 'table', 'index', 'create', 'drop', 'alter'];
+    if (reservedWords.includes(sanitized.toLowerCase())) {
+      sanitized = `col_${sanitized}`;
+    }
+
+    return sanitized;
   }
 
   /**

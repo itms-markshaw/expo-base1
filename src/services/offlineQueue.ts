@@ -73,8 +73,15 @@ class OfflineQueueService {
     `);
 
     await db.execAsync(`
-      CREATE INDEX IF NOT EXISTS idx_offline_queue_timestamp 
+      CREATE INDEX IF NOT EXISTS idx_offline_queue_timestamp
       ON offline_queue(timestamp);
+    `);
+
+    // Add unique constraint for duplicate prevention
+    await db.execAsync(`
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_offline_queue_unique
+      ON offline_queue(type, model_name, record_id, data)
+      WHERE status IN ('pending', 'processing');
     `);
   }
 
@@ -88,6 +95,13 @@ class OfflineQueueService {
     recordId?: number,
     maxRetries: number = 3
   ): Promise<string> {
+    // Check for existing pending/processing operations to prevent duplicates
+    const existingOp = await this.findDuplicateOperation(type, modelName, data, recordId);
+    if (existingOp) {
+      console.log(`⚠️ Duplicate operation detected, skipping: ${type} ${modelName}:${recordId || 'new'}`);
+      return existingOp.id;
+    }
+
     const operation: QueuedOperation = {
       id: `${type}_${modelName}_${recordId || 'new'}_${Date.now()}`,
       type,
@@ -114,24 +128,69 @@ class OfflineQueueService {
   }
 
   /**
+   * Find duplicate operation to prevent multiple queuing
+   */
+  private async findDuplicateOperation(
+    type: string,
+    modelName: string,
+    data: any,
+    recordId?: number
+  ): Promise<QueuedOperation | null> {
+    const db = databaseService.getDatabase();
+    if (!db) return null;
+
+    try {
+      const dataStr = JSON.stringify(data);
+      const result = await db.getFirstAsync(`
+        SELECT * FROM offline_queue
+        WHERE type = ? AND model_name = ? AND record_id = ? AND data = ?
+        AND status IN ('pending', 'processing')
+        LIMIT 1
+      `, [type, modelName, recordId || null, dataStr]);
+
+      if (result) {
+        return {
+          id: result.id as string,
+          type: result.type as any,
+          modelName: result.model_name as string,
+          recordId: result.record_id as number,
+          data: JSON.parse(result.data as string),
+          timestamp: result.timestamp as string,
+          retryCount: result.retry_count as number,
+          maxRetries: result.max_retries as number,
+          status: result.status as any,
+          error: result.error as string,
+          lastAttempt: result.last_attempt as string
+        };
+      }
+
+      return null;
+    } catch (error) {
+      console.error('Error checking for duplicate operation:', error);
+      return null;
+    }
+  }
+
+  /**
    * Process all pending operations
    */
-  async processQueue(): Promise<void> {
+  async processQueue(): Promise<{ success: boolean; message: string; processed: number }> {
     if (this.isProcessing) {
       console.log('⏳ Queue processing already in progress');
-      return;
+      return { success: false, message: 'Queue processing already in progress', processed: 0 };
     }
 
     // Check if we're online
     const isOnline = await this.checkConnectivity();
     if (!isOnline) {
-      console.log('📴 Offline - skipping queue processing');
-      return;
+      console.log('📴 Offline - cannot process queue');
+      return { success: false, message: 'Cannot process queue while offline', processed: 0 };
     }
 
     this.isProcessing = true;
     console.log('🔄 Processing offline queue...');
 
+    let processedCount = 0;
     try {
       const pendingOps = Array.from(this.queue.values())
         .filter(op => op.status === 'pending')
@@ -139,16 +198,26 @@ class OfflineQueueService {
 
       console.log(`📋 Found ${pendingOps.length} pending operations`);
 
+      if (pendingOps.length === 0) {
+        return { success: true, message: 'No pending operations to process', processed: 0 };
+      }
+
       for (const operation of pendingOps) {
-        await this.processOperation(operation);
-        
+        const success = await this.processOperation(operation);
+        if (success) {
+          processedCount++;
+        }
+
         // Small delay between operations to avoid overwhelming the server
         await new Promise(resolve => setTimeout(resolve, 100));
       }
 
-      console.log('✅ Queue processing completed');
+      const message = `Successfully processed ${processedCount} of ${pendingOps.length} operations`;
+      console.log(`✅ ${message}`);
+      return { success: true, message, processed: processedCount };
     } catch (error) {
       console.error('❌ Queue processing failed:', error);
+      return { success: false, message: `Queue processing failed: ${error.message}`, processed: processedCount };
     } finally {
       this.isProcessing = false;
     }
@@ -157,7 +226,7 @@ class OfflineQueueService {
   /**
    * Process a single operation
    */
-  private async processOperation(operation: QueuedOperation): Promise<void> {
+  private async processOperation(operation: QueuedOperation): Promise<boolean> {
     try {
       operation.status = 'processing';
       operation.lastAttempt = new Date().toISOString();
@@ -181,14 +250,14 @@ class OfflineQueueService {
 
         case 'update':
           if (!operation.recordId) throw new Error('Record ID required for update');
-          await client.write(operation.modelName, [operation.recordId], operation.data);
+          await client.update(operation.modelName, operation.recordId, operation.data);
           console.log(`✅ Updated record ${operation.recordId} in ${operation.modelName}`);
           success = true;
           break;
 
         case 'delete':
           if (!operation.recordId) throw new Error('Record ID required for delete');
-          await client.unlink(operation.modelName, [operation.recordId]);
+          await client.delete(operation.modelName, operation.recordId);
           console.log(`✅ Deleted record ${operation.recordId} from ${operation.modelName}`);
           success = true;
           break;
@@ -206,9 +275,18 @@ class OfflineQueueService {
       if (success) {
         operation.status = 'completed';
         await this.updateOperation(operation);
+
+        // Remove from memory queue after successful completion
         this.queue.delete(operation.id);
-        console.log(`✅ Operation ${operation.id} completed successfully`);
+
+        console.log(`✅ Operation ${operation.id} completed successfully and removed from queue`);
+
+        // Also save updated queue to storage
+        await this.saveQueueToStorage();
+        return true;
       }
+
+      return false;
 
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
@@ -226,6 +304,7 @@ class OfflineQueueService {
       }
 
       await this.updateOperation(operation);
+      return false;
     }
   }
 
@@ -296,6 +375,43 @@ class OfflineQueueService {
   }
 
   /**
+   * Get queued operations (including from database for debugging)
+   */
+  async getQueuedOperations(): Promise<QueuedOperation[]> {
+    const db = databaseService.getDatabase();
+    if (!db) return this.getAllOperations();
+
+    try {
+      const results = await db.getAllAsync(`
+        SELECT * FROM offline_queue
+        ORDER BY timestamp DESC
+      `);
+
+      const operations: QueuedOperation[] = [];
+      for (const row of results || []) {
+        operations.push({
+          id: row.id,
+          type: row.type,
+          modelName: row.model_name,
+          recordId: row.record_id,
+          data: JSON.parse(row.data),
+          timestamp: row.timestamp,
+          retryCount: row.retry_count,
+          maxRetries: row.max_retries,
+          status: row.status,
+          error: row.error,
+          lastAttempt: row.last_attempt
+        });
+      }
+
+      return operations;
+    } catch (error) {
+      console.error('Failed to get queued operations from database:', error);
+      return this.getAllOperations();
+    }
+  }
+
+  /**
    * Clear completed operations
    */
   async clearCompleted(): Promise<void> {
@@ -314,6 +430,21 @@ class OfflineQueueService {
     }
 
     console.log('🧹 Cleared completed operations from queue');
+  }
+
+  /**
+   * Clear all operations
+   */
+  async clearAll(): Promise<void> {
+    const db = databaseService.getDatabase();
+    if (!db) return;
+
+    await db.runAsync(`DELETE FROM offline_queue`);
+
+    // Clear memory queue
+    this.queue.clear();
+
+    console.log('🧹 Cleared all operations from queue');
   }
 
   /**

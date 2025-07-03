@@ -59,20 +59,21 @@ export default function OfflineQueueScreen() {
     }
   };
 
-  const clearCompleted = async () => {
+  const clearAll = () => {
     Alert.alert(
-      'Clear Completed',
-      'Remove all completed operations from the queue?',
+      'Clear All Operations',
+      'Are you sure you want to clear all operations from the queue? This cannot be undone.',
       [
         { text: 'Cancel', style: 'cancel' },
         {
-          text: 'Clear',
+          text: 'Clear All',
+          style: 'destructive',
           onPress: async () => {
             try {
-              await offlineQueueService.clearCompleted();
+              await offlineQueueService.clearAll();
               await loadOperations();
             } catch (error) {
-              Alert.alert('Error', 'Failed to clear completed operations');
+              Alert.alert('Error', 'Failed to clear operations');
             }
           }
         }
@@ -82,9 +83,14 @@ export default function OfflineQueueScreen() {
 
   const processQueue = async () => {
     try {
-      await offlineQueueService.processQueue();
+      const result = await offlineQueueService.processQueue();
       await loadOperations();
-      Alert.alert('Success', 'Queue processing completed');
+
+      if (result.success) {
+        Alert.alert('Success', result.message);
+      } else {
+        Alert.alert('Error', result.message);
+      }
     } catch (error) {
       Alert.alert('Error', 'Failed to process queue');
     }
@@ -133,7 +139,6 @@ export default function OfflineQueueScreen() {
 
   const pendingOps = operations.filter(op => op.status === 'pending');
   const failedOps = operations.filter(op => op.status === 'failed');
-  const completedOps = operations.filter(op => op.status === 'completed');
 
   return (
     <SafeAreaView style={styles.container}>
@@ -148,25 +153,19 @@ export default function OfflineQueueScreen() {
         </TouchableOpacity>
       </View>
 
-      {/* Stats */}
-      <View style={styles.statsContainer}>
-        <View style={styles.statCard}>
-          <Text style={styles.statNumber}>{pendingOps.length}</Text>
-          <Text style={styles.statLabel}>Pending</Text>
-        </View>
-        <View style={styles.statCard}>
-          <Text style={[styles.statNumber, { color: '#F44336' }]}>{failedOps.length}</Text>
-          <Text style={styles.statLabel}>Failed</Text>
-        </View>
-        <View style={styles.statCard}>
-          <Text style={[styles.statNumber, { color: '#4CAF50' }]}>{completedOps.length}</Text>
-          <Text style={styles.statLabel}>Completed</Text>
-        </View>
+      {/* Summary */}
+      <View style={styles.summaryContainer}>
+        <Text style={styles.summaryText}>
+          {operations.length === 0
+            ? 'No queued operations'
+            : `${pendingOps.length} pending • ${failedOps.length} failed • ${operations.length} total`
+          }
+        </Text>
       </View>
 
       {/* Action Buttons */}
       <View style={styles.actionContainer}>
-        <TouchableOpacity 
+        <TouchableOpacity
           style={[styles.actionButton, { backgroundColor: '#2196F3' }]}
           onPress={processQueue}
           disabled={pendingOps.length === 0}
@@ -174,14 +173,13 @@ export default function OfflineQueueScreen() {
           <MaterialIcons name="play-arrow" size={20} color="white" />
           <Text style={styles.actionButtonText}>Process Queue</Text>
         </TouchableOpacity>
-        
-        <TouchableOpacity 
-          style={[styles.actionButton, { backgroundColor: '#FF9800' }]}
-          onPress={clearCompleted}
-          disabled={completedOps.length === 0}
+
+        <TouchableOpacity
+          style={[styles.actionButton, { backgroundColor: '#FF5722' }]}
+          onPress={clearAll}
         >
-          <MaterialIcons name="clear-all" size={20} color="white" />
-          <Text style={styles.actionButtonText}>Clear Completed</Text>
+          <MaterialIcons name="delete-sweep" size={20} color="white" />
+          <Text style={styles.actionButtonText}>Clear All</Text>
         </TouchableOpacity>
       </View>
 
@@ -279,27 +277,16 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: '#333',
   },
-  statsContainer: {
-    flexDirection: 'row',
+  summaryContainer: {
     paddingHorizontal: 16,
     paddingVertical: 12,
     backgroundColor: 'white',
     marginBottom: 8,
   },
-  statCard: {
-    flex: 1,
-    alignItems: 'center',
-    paddingVertical: 8,
-  },
-  statNumber: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    color: '#2196F3',
-  },
-  statLabel: {
-    fontSize: 12,
+  summaryText: {
+    fontSize: 14,
     color: '#666',
-    marginTop: 4,
+    textAlign: 'center',
   },
   actionContainer: {
     flexDirection: 'row',

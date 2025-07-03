@@ -22,7 +22,7 @@ import { syncService } from '../services/sync';
 import { databaseService } from '../services/database';
 import { conflictResolutionService } from '../services/conflictResolution';
 import { offlineQueueService } from '../services/offlineQueue';
-import { OfflineTestingPanel } from '../components/OfflineTestingPanel';
+
 import { testSync } from '../utils/testSync';
 
 interface SyncStats {
@@ -395,8 +395,7 @@ export default function SyncDashboard() {
           </TouchableOpacity>
         </View>
 
-        {/* Offline Testing Panel - Only show in development */}
-        {__DEV__ && <OfflineTestingPanel />}
+
       </ScrollView>
     </SafeAreaView>
   );

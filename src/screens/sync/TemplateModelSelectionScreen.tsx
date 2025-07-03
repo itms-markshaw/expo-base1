@@ -227,7 +227,7 @@ function getModelDescription(modelName: string): string {
     'sale.order': 'Sales orders and quotations',
     'product.product': 'Product variants and items',
     'product.template': 'Product templates and categories',
-    'account.move': 'Invoices and accounting entries',
+    // 'account.move': 'RESTRICTED - XML-RPC serialization issues',
     'stock.picking': 'Deliveries and stock movements',
     'project.project': 'Projects and project management',
     'project.task': 'Tasks and project activities',

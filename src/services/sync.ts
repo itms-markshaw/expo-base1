@@ -191,11 +191,15 @@ class SyncService {
 
       console.log(`📋 Found ${allModels.length} total models in Odoo`);
 
-      // RETURN ALL 844 MODELS - NO FILTERING
+      // FILTER OUT RESTRICTED MODELS
       console.log(`🔍 Found ${allModels.length} total models from ir.model`);
 
-      // Convert ALL models to OdooModel format
-      const allOdooModels = allModels.map(model => ({
+      // Filter out system/problematic models
+      const filteredModels = allModels.filter(model => !this.isSystemModel(model.model));
+      console.log(`🚫 Filtered out ${allModels.length - filteredModels.length} restricted models (including account.move)`);
+
+      // Convert filtered models to OdooModel format
+      const allOdooModels = filteredModels.map(model => ({
         name: model.model,
         displayName: model.name || model.model,
         description: `Model: ${model.model}`,
@@ -298,7 +302,7 @@ class SyncService {
     'res.users',
     'product.product',
     'product.template',
-    'account.move',
+    // 'account.move',    // EXCLUDED: Server-side data corruption
     'stock.picking',      // Deliveries
     'helpdesk.ticket',    // This one works fine
     'helpdesk.team',      // Now using auto-detection with proper table
@@ -473,6 +477,12 @@ class SyncService {
     const client = authService.getClient();
     if (!client) throw new Error('No Odoo client available');
 
+    // CRITICAL: Double-check for restricted models
+    if (this.isSystemModel(modelName)) {
+      console.log(`🚫 RESTRICTED: Skipping ${modelName} - model is in restricted list`);
+      return 0;
+    }
+
     try {
       // Get table name
       const tableName = this.getTableName(modelName);
@@ -492,11 +502,37 @@ class SyncService {
       console.log(`🔍 Searching ${modelName} with domain:`, domain);
       console.log(`📋 Fields to fetch:`, fields.slice(0, 10), fields.length > 10 ? `... and ${fields.length - 10} more` : '');
 
-      const records = await client.searchRead(modelName, domain, fields, {
-        limit,
-        order: 'write_date desc', // Get most recent records first
-        timeout // Add timeout to prevent hanging
-      });
+      let records;
+      try {
+        records = await client.searchRead(modelName, domain, fields, {
+          limit,
+          order: 'write_date desc', // Get most recent records first
+          timeout // Add timeout to prevent hanging
+        });
+      } catch (searchError) {
+        const errorMessage = searchError instanceof Error ? searchError.message : String(searchError);
+
+        // Handle specific server-side data corruption issues
+        if (errorMessage.includes('too many values to unpack') && modelName === 'calendar.event') {
+          console.warn(`⚠️ calendar.event has data serialization issues, trying with comprehensive safe fields...`);
+
+          // Retry with comprehensive safe fields for calendar.event (avoiding problematic computed fields)
+          const safeFields = [
+            'id', 'name', 'start', 'stop', 'start_date', 'stop_date', 'allday',
+            'description', 'location', 'user_id', 'partner_ids', 'categ_ids',
+            'privacy', 'show_as', 'state', 'recurrency', 'rrule', 'duration',
+            'alarm_ids', 'attendee_ids', 'create_date', 'write_date', 'create_uid', 'write_uid'
+          ];
+          records = await client.searchRead(modelName, domain, safeFields, {
+            limit,
+            order: 'write_date desc',
+            timeout
+          });
+          console.log(`✅ calendar.event field-limited sync successful with ${safeFields.length} comprehensive fields`);
+        } else {
+          throw searchError; // Re-throw if it's not a known issue
+        }
+      }
 
       console.log(`📥 Retrieved ${records.length} records for ${modelName}`);
 
@@ -508,19 +544,17 @@ class SyncService {
         return 0;
       }
 
-      // Log sample of retrieved records for debugging
-      if (records.length > 0) {
-        const sampleRecord = records[0];
-        console.log(`📄 Sample record from ${modelName}:`, {
-          id: sampleRecord.id,
-          write_date: sampleRecord.write_date,
-          create_date: sampleRecord.create_date,
-          name: sampleRecord.name || 'N/A'
-        });
-      }
+      // Records retrieved successfully
 
       // CONFLICT DETECTION DISABLED: Too many false positives
       console.log(`🚫 Conflict detection disabled - saving ${records.length} records directly`);
+
+      // Clear any old conflicts for this model (cleanup from when conflict detection was enabled)
+      try {
+        await conflictResolutionService.clearConflictsForModel(modelName);
+      } catch (error) {
+        // Ignore cleanup errors
+      }
 
       // Save to database
       await databaseService.saveRecords(tableName, records);
@@ -767,9 +801,9 @@ class SyncService {
       'sale.order',       // Sales Orders
       'sale.order.line',  // Sales Order Lines
 
-      // Accounting models
-      'account.move',     // Invoices
-      'account.payment',  // Payments
+      // Accounting models - RESTRICTED due to XML-RPC serialization issues
+      // 'account.move',     // EXCLUDED: Dictionary key serialization errors
+      // 'account.payment',  // EXCLUDED: Complex financial data
 
       // Inventory models
       'stock.picking',    // Deliveries
@@ -824,7 +858,22 @@ class SyncService {
       'stock.immediate.', // Stock wizards
     ];
 
-    return systemPatterns.some(pattern => modelName.startsWith(pattern));
+    // Specific models with server-side data corruption issues
+    const problematicModels = [
+      'account.move',           // Dictionary key must be string error - XML-RPC serialization issues
+      'account.move.line',      // Related to account.move - also problematic
+      'account.payment',        // Financial data - complex serialization
+      'account.bank.statement', // Banking data - complex fields
+    ];
+
+    const isRestricted = systemPatterns.some(pattern => modelName.startsWith(pattern)) ||
+                        problematicModels.includes(modelName);
+
+    if (isRestricted && problematicModels.includes(modelName)) {
+      console.log(`🚫 RESTRICTED MODEL: ${modelName} - XML-RPC serialization issues`);
+    }
+
+    return isRestricted;
   }
 
   /**
@@ -939,7 +988,7 @@ class SyncService {
       'hr.employee': 'Company employees and HR data',
       'crm.lead': 'Sales leads and opportunities',
       'sale.order': 'Sales orders and quotations',
-      'account.move': 'Invoices and accounting entries',
+      // 'account.move': 'RESTRICTED - XML-RPC serialization issues',
       'stock.picking': 'Delivery orders and shipments',
       'project.project': 'Project management',
       'project.task': 'Project tasks and milestones',

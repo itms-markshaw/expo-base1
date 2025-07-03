@@ -3,7 +3,7 @@
  * Interface to run and view CRUD test results
  */
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -13,10 +13,15 @@ import {
   ScrollView,
   Alert,
   ActivityIndicator,
+  TextInput,
 } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
 import { crudTestingService } from '../services/crudTesting';
 import { testSync } from '../utils/testSync';
+import { databaseService } from '../services/database';
+import { offlineQueueService } from '../services/offlineQueue';
+import { authService } from '../services/auth';
+import NetInfo from '@react-native-community/netinfo';
 
 interface TestSuite {
   name: string;
@@ -27,6 +32,14 @@ interface TestSuite {
   totalDuration: number;
 }
 
+interface Contact {
+  id?: number;
+  name: string;
+  email: string;
+  phone: string;
+  is_company: boolean;
+}
+
 export default function TestScreen() {
   const [isRunning, setIsRunning] = useState(false);
   const [testResults, setTestResults] = useState<TestSuite[]>([]);
@@ -34,6 +47,16 @@ export default function TestScreen() {
   const [isRunningConflictTests, setIsRunningConflictTests] = useState(false);
   const [conflictTestResults, setConflictTestResults] = useState<any>(null);
   const [isRunningIncrementalTest, setIsRunningIncrementalTest] = useState(false);
+
+  // Offline sync testing state
+  const [isOnline, setIsOnline] = useState(true);
+  const [contacts, setContacts] = useState<Contact[]>([]);
+  const [testContact, setTestContact] = useState<Contact>({
+    name: 'Test Contact',
+    email: 'test@example.com',
+    phone: '+1234567890',
+    is_company: false,
+  });
 
   const handleRunTests = async () => {
     setIsRunning(true);
@@ -64,6 +87,120 @@ export default function TestScreen() {
       Alert.alert('Test Error', error.message);
     } finally {
       setIsRunning(false);
+    }
+  };
+
+  // Offline sync testing functions
+  useEffect(() => {
+    const unsubscribe = NetInfo.addEventListener(state => {
+      setIsOnline(state.isConnected ?? false);
+    });
+
+    loadTestData();
+    return unsubscribe;
+  }, []);
+
+  const loadTestData = async () => {
+    try {
+      await databaseService.initialize();
+
+      // Load test contacts from local database
+      const db = databaseService.getDatabase();
+      if (db) {
+        const result = await db.getAllAsync(`
+          SELECT * FROM res_partner
+          WHERE name LIKE 'Test Contact%' OR name LIKE '%Test Contact%'
+          ORDER BY write_date DESC
+          LIMIT 10
+        `);
+
+        const loadedContacts = result.map((row: any) => ({
+          id: row.id,
+          name: row.name,
+          email: row.email || '',
+          phone: row.phone || '',
+          is_company: row.is_company || false,
+        }));
+
+        setContacts(loadedContacts);
+      }
+    } catch (error) {
+      console.error('Failed to load test data:', error);
+    }
+  };
+
+  const createTestContact = async () => {
+    try {
+      if (isOnline) {
+        // Create directly via API
+        const client = authService.getClient();
+        if (!client) {
+          Alert.alert('Error', 'Not authenticated');
+          return;
+        }
+
+        const contactId = await client.create('res.partner', {
+          name: testContact.name,
+          email: testContact.email,
+          phone: testContact.phone,
+          is_company: testContact.is_company,
+        });
+
+        Alert.alert('Success', 'Contact created successfully!');
+        console.log('✅ Created contact:', contactId);
+      } else {
+        // Queue for offline sync
+        await offlineQueueService.queueOperation(
+          'create',
+          'res.partner',
+          {
+            name: testContact.name,
+            email: testContact.email,
+            phone: testContact.phone,
+            is_company: testContact.is_company,
+          }
+        );
+        Alert.alert('Queued', 'Contact queued for sync when online!');
+      }
+
+      await loadTestData();
+    } catch (error) {
+      Alert.alert('Error', `Failed to create contact: ${error.message}`);
+      console.error('Create contact error:', error);
+    }
+  };
+
+  const updateTestContact = async (contact: Contact) => {
+    try {
+      const updatedData = {
+        name: `${contact.name} (Modified ${new Date().toLocaleTimeString()})`,
+      };
+
+      if (isOnline) {
+        // Update directly via API
+        const client = authService.getClient();
+        if (!client) {
+          Alert.alert('Error', 'Not authenticated');
+          return;
+        }
+
+        await client.update('res.partner', contact.id!, updatedData);
+        Alert.alert('Success', 'Contact updated successfully!');
+      } else {
+        // Queue for offline sync
+        await offlineQueueService.queueOperation(
+          'update',
+          'res.partner',
+          updatedData,
+          contact.id
+        );
+        Alert.alert('Queued', 'Update queued for sync when online!');
+      }
+
+      await loadTestData();
+    } catch (error) {
+      Alert.alert('Error', `Failed to update contact: ${error.message}`);
+      console.error('Update contact error:', error);
     }
   };
 
@@ -320,6 +457,75 @@ export default function TestScreen() {
             ⚠️ Note: This will create and delete test records in your Odoo database. Make sure you have appropriate permissions.
           </Text>
         </View>
+
+        {/* Offline Sync Testing Panel */}
+        <View style={styles.offlineTestingCard}>
+          <View style={styles.offlineTestingHeader}>
+            <MaterialIcons name="wifi-off" size={24} color="#2196F3" />
+            <Text style={styles.offlineTestingTitle}>Offline Sync Testing</Text>
+            <View style={[styles.onlineIndicator, { backgroundColor: isOnline ? '#4CAF50' : '#F44336' }]}>
+              <Text style={styles.onlineIndicatorText}>{isOnline ? 'Online' : 'Offline'}</Text>
+            </View>
+          </View>
+
+          {/* Create Test Contact */}
+          <View style={styles.offlineSection}>
+            <Text style={styles.offlineSectionTitle}>Create Test Contact</Text>
+            <TextInput
+              style={styles.offlineInput}
+              placeholder="Name"
+              value={testContact.name}
+              onChangeText={(text) => setTestContact(prev => ({ ...prev, name: text }))}
+            />
+            <TextInput
+              style={styles.offlineInput}
+              placeholder="Email"
+              value={testContact.email}
+              onChangeText={(text) => setTestContact(prev => ({ ...prev, email: text }))}
+            />
+            <TextInput
+              style={styles.offlineInput}
+              placeholder="Phone"
+              value={testContact.phone}
+              onChangeText={(text) => setTestContact(prev => ({ ...prev, phone: text }))}
+            />
+            <TouchableOpacity style={styles.offlineCreateButton} onPress={createTestContact}>
+              <MaterialIcons name="add" size={20} color="white" />
+              <Text style={styles.offlineButtonText}>
+                {isOnline ? 'Create Contact' : 'Queue Contact'}
+              </Text>
+            </TouchableOpacity>
+          </View>
+
+          {/* Test Contacts */}
+          <View style={styles.offlineSection}>
+            <Text style={styles.offlineSectionTitle}>Test Contacts ({contacts.length})</Text>
+            {contacts.slice(0, 3).map((contact) => (
+              <View key={contact.id} style={styles.offlineContactCard}>
+                <View style={styles.offlineContactInfo}>
+                  <Text style={styles.offlineContactName}>{contact.name}</Text>
+                  <Text style={styles.offlineContactEmail}>{contact.email}</Text>
+                </View>
+                <TouchableOpacity
+                  style={styles.offlineEditButton}
+                  onPress={() => updateTestContact(contact)}
+                >
+                  <MaterialIcons name="edit" size={16} color="#007AFF" />
+                </TouchableOpacity>
+              </View>
+            ))}
+          </View>
+
+          {/* Testing Instructions */}
+          <View style={styles.offlineSection}>
+            <Text style={styles.offlineSectionTitle}>📋 Testing Instructions</Text>
+            <Text style={styles.offlineInstruction}>1. Turn off WiFi/cellular</Text>
+            <Text style={styles.offlineInstruction}>2. Create or edit contacts</Text>
+            <Text style={styles.offlineInstruction}>3. See operations queue up</Text>
+            <Text style={styles.offlineInstruction}>4. Turn WiFi back on</Text>
+            <Text style={styles.offlineInstruction}>5. Process queue to sync</Text>
+          </View>
+        </View>
       </ScrollView>
     </SafeAreaView>
   );
@@ -556,5 +762,100 @@ const styles = StyleSheet.create({
     color: '#FF9500',
     fontStyle: 'italic',
     lineHeight: 16,
+  },
+  // Offline testing styles
+  offlineTestingCard: {
+    backgroundColor: '#FFF',
+    borderRadius: 12,
+    padding: 20,
+    marginHorizontal: 20,
+    marginBottom: 24,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  offlineTestingHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 20,
+    gap: 12,
+  },
+  offlineTestingTitle: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#1A1A1A',
+    flex: 1,
+  },
+  onlineIndicator: {
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 12,
+  },
+  onlineIndicatorText: {
+    color: 'white',
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  offlineSection: {
+    marginBottom: 20,
+  },
+  offlineSectionTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#1A1A1A',
+    marginBottom: 12,
+  },
+  offlineInput: {
+    borderWidth: 1,
+    borderColor: '#E0E0E0',
+    borderRadius: 8,
+    padding: 12,
+    marginBottom: 8,
+    fontSize: 16,
+  },
+  offlineCreateButton: {
+    backgroundColor: '#4CAF50',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 12,
+    borderRadius: 8,
+    gap: 8,
+  },
+  offlineButtonText: {
+    color: 'white',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  offlineContactCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 12,
+    backgroundColor: '#F8F9FA',
+    borderRadius: 8,
+    marginBottom: 8,
+  },
+  offlineContactInfo: {
+    flex: 1,
+  },
+  offlineContactName: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#1A1A1A',
+  },
+  offlineContactEmail: {
+    fontSize: 14,
+    color: '#666',
+    marginTop: 2,
+  },
+  offlineEditButton: {
+    padding: 8,
+  },
+  offlineInstruction: {
+    fontSize: 14,
+    color: '#666',
+    marginBottom: 4,
   },
 });

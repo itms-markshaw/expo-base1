@@ -31,6 +31,7 @@ export default function DatabaseManagerScreen() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
+  const [expandedRecords, setExpandedRecords] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     loadTables();
@@ -157,7 +158,18 @@ export default function DatabaseManagerScreen() {
       setRecords([]);
       setFilteredRecords([]);
       setSearchQuery('');
+      setExpandedRecords(new Set());
     }
+  };
+
+  const toggleRecordExpansion = (recordId: string) => {
+    const newExpanded = new Set(expandedRecords);
+    if (newExpanded.has(recordId)) {
+      newExpanded.delete(recordId);
+    } else {
+      newExpanded.add(recordId);
+    }
+    setExpandedRecords(newExpanded);
   };
 
   const handleSearch = (query: string) => {
@@ -198,26 +210,56 @@ export default function DatabaseManagerScreen() {
     </TouchableOpacity>
   );
 
-  const renderRecordItem = ({ item, index }: { item: DatabaseRecord; index: number }) => (
-    <View style={styles.recordCard}>
-      <Text style={styles.recordIndex}>#{index + 1}</Text>
-      <View style={styles.recordContent}>
-        {Object.entries(item).slice(0, 10).map(([key, value]) => (
-          <View key={key} style={styles.recordField}>
-            <Text style={styles.fieldName}>{key}:</Text>
-            <Text style={styles.fieldValue} numberOfLines={1}>
-              {value?.toString() || 'null'}
-            </Text>
-          </View>
-        ))}
-        {Object.keys(item).length > 10 && (
-          <Text style={styles.moreFields}>
-            +{Object.keys(item).length - 10} more fields
-          </Text>
-        )}
+  const renderRecordItem = ({ item, index }: { item: DatabaseRecord; index: number }) => {
+    const recordId = `${item.id || index}`;
+    const isExpanded = expandedRecords.has(recordId);
+    const allEntries = Object.entries(item);
+    const visibleEntries = isExpanded ? allEntries : allEntries.slice(0, 10);
+    const hasMoreFields = allEntries.length > 10;
+
+    return (
+      <View style={styles.recordCard}>
+        <View style={styles.recordHeader}>
+          <Text style={styles.recordIndex}>#{index + 1}</Text>
+          {hasMoreFields && (
+            <TouchableOpacity
+              style={styles.expandButton}
+              onPress={() => toggleRecordExpansion(recordId)}
+            >
+              <MaterialIcons
+                name={isExpanded ? "expand-less" : "expand-more"}
+                size={24}
+                color="#2196F3"
+              />
+              <Text style={styles.expandButtonText}>
+                {isExpanded ? 'Show Less' : `Show All (${allEntries.length} fields)`}
+              </Text>
+            </TouchableOpacity>
+          )}
+        </View>
+        <View style={styles.recordContent}>
+          {visibleEntries.map(([key, value]) => (
+            <View key={key} style={styles.recordField}>
+              <Text style={styles.fieldName}>{key}:</Text>
+              <Text style={styles.fieldValue} numberOfLines={isExpanded ? undefined : 1}>
+                {value?.toString() || 'null'}
+              </Text>
+            </View>
+          ))}
+          {!isExpanded && hasMoreFields && (
+            <TouchableOpacity
+              style={styles.moreFieldsButton}
+              onPress={() => toggleRecordExpansion(recordId)}
+            >
+              <Text style={styles.moreFields}>
+                +{allEntries.length - 10} more fields - tap to expand
+              </Text>
+            </TouchableOpacity>
+          )}
+        </View>
       </View>
-    </View>
-  );
+    );
+  };
 
   if (selectedTable) {
     return (
@@ -411,11 +453,30 @@ const styles = StyleSheet.create({
     shadowRadius: 2,
     elevation: 1,
   },
+  recordHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 8,
+  },
   recordIndex: {
     fontSize: 12,
     color: '#999',
-    marginRight: 12,
     minWidth: 30,
+  },
+  expandButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    backgroundColor: '#f0f8ff',
+    borderRadius: 6,
+  },
+  expandButtonText: {
+    fontSize: 11,
+    color: '#2196F3',
+    marginLeft: 4,
+    fontWeight: '500',
   },
   recordContent: {
     flex: 1,
@@ -435,11 +496,15 @@ const styles = StyleSheet.create({
     color: '#333',
     flex: 1,
   },
+  moreFieldsButton: {
+    marginTop: 8,
+    paddingVertical: 4,
+  },
   moreFields: {
     fontSize: 11,
-    color: '#999',
+    color: '#2196F3',
     fontStyle: 'italic',
-    marginTop: 4,
+    textAlign: 'center',
   },
   emptyContainer: {
     alignItems: 'center',
