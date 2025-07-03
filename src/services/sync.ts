@@ -308,7 +308,7 @@ class SyncService {
     'helpdesk.team',      // Now using auto-detection with proper table
     'project.project',    // Now using auto-detection
     'project.task'        // Now using auto-detection
-  ]): Promise<void> {
+  ], forceFullSync: boolean = false): Promise<void> {
     if (this.isRunning) {
       throw new Error('Sync already in progress');
     }
@@ -417,7 +417,7 @@ class SyncService {
 
         try {
           console.log(`📥 Syncing ${modelName}...`);
-          const records = await this.syncModel(modelName);
+          const records = await this.syncModel(modelName, forceFullSync);
           syncedRecords += records;
 
           // Update progress after model completion
@@ -473,7 +473,7 @@ class SyncService {
   /**
    * Sync a single model
    */
-  private async syncModel(modelName: string): Promise<number> {
+  private async syncModel(modelName: string, forceFullSync: boolean = false): Promise<number> {
     const client = authService.getClient();
     if (!client) throw new Error('No Odoo client available');
 
@@ -491,7 +491,7 @@ class SyncService {
       const fields = await this.getFieldsForModel(modelName);
 
       // Build domain based on incremental sync and time period settings
-      const domain = await this.buildDomainForModel(modelName);
+      const domain = await this.buildDomainForModel(modelName, forceFullSync);
 
       // Fetch records with time filtering and smart limits
       const limit = this.getLimitForModel(modelName);
@@ -502,13 +502,39 @@ class SyncService {
       console.log(`🔍 Searching ${modelName} with domain:`, domain);
       console.log(`📋 Fields to fetch:`, fields.slice(0, 10), fields.length > 10 ? `... and ${fields.length - 10} more` : '');
 
+      // SMART INCREMENTAL SYNC: Check count first for large incremental syncs
       let records;
       try {
-        records = await client.searchRead(modelName, domain, fields, {
-          limit,
-          order: 'write_date desc', // Get most recent records first
-          timeout // Add timeout to prevent hanging
-        });
+        // For incremental sync, check count first to detect bulk changes
+        if (domain.length > 0) { // Has write_date filter = incremental sync
+          const changeCount = await client.searchCount(modelName, domain);
+          if (changeCount > 1000) {
+            console.warn(`⚠️ Large incremental sync detected for ${modelName}: ${changeCount} changed records`);
+            console.warn(`⚠️ This suggests bulk data changes in Odoo. Using pagination...`);
+
+            // Use smaller batches for large incremental syncs
+            const batchSize = 500;
+            records = await client.searchRead(modelName, domain, fields, {
+              limit: batchSize,
+              order: 'write_date desc',
+              timeout
+            });
+            console.log(`📦 Retrieved first batch: ${records.length}/${changeCount} records`);
+          } else {
+            records = await client.searchRead(modelName, domain, fields, {
+              limit,
+              order: 'write_date desc',
+              timeout
+            });
+          }
+        } else {
+          // Full sync - use normal limit
+          records = await client.searchRead(modelName, domain, fields, {
+            limit,
+            order: 'write_date desc',
+            timeout
+          });
+        }
       } catch (searchError) {
         const errorMessage = searchError instanceof Error ? searchError.message : String(searchError);
 
@@ -529,6 +555,17 @@ class SyncService {
             timeout
           });
           console.log(`✅ calendar.event field-limited sync successful with ${safeFields.length} comprehensive fields`);
+        } else if (errorMessage.includes('Invalid field') && errorMessage.includes('on model')) {
+          console.warn(`⚠️ ${modelName} has invalid field issues, trying with fallback fields...`);
+
+          // Retry with safe fallback fields
+          const fallbackFields = this.getFallbackFields(modelName);
+          records = await client.searchRead(modelName, domain, fallbackFields, {
+            limit,
+            order: 'write_date desc',
+            timeout
+          });
+          console.log(`✅ ${modelName} fallback sync successful with ${fallbackFields.length} safe fields`);
         } else {
           throw searchError; // Re-throw if it's not a known issue
         }
@@ -631,26 +668,90 @@ class SyncService {
 
       console.log(`🔍 Auto-detected ${availableFieldNames.length} fields for ${modelName}`);
 
-      // FILTER OUT PROBLEMATIC FIELDS: Exclude metadata and fields that cause server errors
-      const problematicFields = [
-        // Field metadata (not actual database fields)
-        'string', 'type', 'required', 'readonly', 'domain', 'context', 'help',
-        // Binary/attachment fields that cause filestore errors
-        'datas', 'raw', 'db_datas', 'store_fname', 'file_size',
-        // Image fields that can cause binary issues
-        'image_1920', 'image_1024', 'image_512', 'image_256', 'image_128',
-        'avatar_1920', 'avatar_1024', 'avatar_512', 'avatar_256', 'avatar_128'
-      ];
+      // SMART FIELD FILTERING: Filter based on field properties and types
+      let fieldsToSync = availableFieldNames.filter(fieldName => {
+        const fieldDef = allFields[fieldName];
 
-      let fieldsToSync = availableFieldNames.filter(fieldName =>
-        !problematicFields.includes(fieldName)
-      );
+        // Skip fields that are clearly metadata (not actual database fields)
+        const metadataFields = [
+          'string', 'type', 'required', 'readonly', 'domain', 'context', 'help', 'selection',
+          'store', 'compute', 'inverse', 'search', 'related', 'depends', 'default'
+        ];
+        if (metadataFields.includes(fieldName)) {
+          return false;
+        }
 
-      // SPECIAL HANDLING: For ir.attachment, only sync safe metadata fields
+        // Skip binary/attachment fields that cause filestore errors
+        const binaryFields = [
+          'datas', 'raw', 'db_datas', 'store_fname', 'file_size'
+        ];
+        if (binaryFields.includes(fieldName) || fieldDef?.type === 'binary') {
+          return false;
+        }
+
+        // Skip image fields that can cause binary issues
+        if (fieldName.includes('image_') || fieldName.includes('avatar_')) {
+          return false;
+        }
+
+        // Skip calendar-specific problematic fields
+        const calendarProblematicFields = [
+          'videocall_redirection', 'videocall_location', 'videocall_channel_id',
+          'access_token', 'appointment_type_id'
+        ];
+        if (calendarProblematicFields.includes(fieldName)) {
+          return false;
+        }
+
+        // Skip computed fields that don't store values (they cause server errors)
+        if (fieldDef?.compute && fieldDef?.store === false) {
+          return false;
+        }
+
+        return true;
+      });
+
+      // SPECIAL HANDLING: Model-specific field restrictions
       if (modelName === 'ir.attachment') {
         const safeAttachmentFields = ['id', 'name', 'res_name', 'res_model', 'res_id', 'mimetype', 'create_date', 'write_date', 'create_uid', 'write_uid'];
         fieldsToSync = fieldsToSync.filter(field => safeAttachmentFields.includes(field));
         console.log(`🔒 ir.attachment: Using only safe metadata fields (${fieldsToSync.length} fields)`);
+      }
+
+      // SPECIAL HANDLING: For res.users, exclude problematic fields that cause "Invalid field" errors
+      if (modelName === 'res.users') {
+        const userProblematicFields = ['selection', 'groups', 'user_groups', 'implied_ids'];
+        fieldsToSync = fieldsToSync.filter(field => !userProblematicFields.includes(field));
+        console.log(`🔒 res.users: Excluded ${userProblematicFields.length} problematic fields`);
+      }
+
+      // SPECIAL HANDLING: For res.partner, use essential fields only to avoid performance issues
+      if (modelName === 'res.partner') {
+        const essentialPartnerFields = [
+          // Core identity
+          'id', 'name', 'display_name', 'ref', 'active',
+          // Contact info
+          'email', 'phone', 'mobile', 'website',
+          // Address
+          'street', 'street2', 'city', 'zip', 'state_id', 'country_id',
+          // Business info
+          'is_company', 'company_type', 'parent_id', 'child_ids',
+          'vat', 'company_registry', 'industry_id',
+          // User/employee links
+          'user_id', 'user_ids', 'employee_ids',
+          // Categories and tags
+          'category_id', 'color',
+          // Financial basics
+          'customer_rank', 'supplier_rank', 'currency_id',
+          // Mail/Chatter (CRITICAL for app functionality)
+          'message_ids', 'message_follower_ids', 'message_partner_ids',
+          'activity_ids', 'activity_state', 'activity_user_id', 'activity_type_id',
+          'activity_date_deadline', 'activity_summary',
+          // Metadata
+          'create_date', 'write_date', 'create_uid', 'write_uid'
+        ];
+        fieldsToSync = fieldsToSync.filter(field => essentialPartnerFields.includes(field));
+        console.log(`🚀 res.partner: Using ${fieldsToSync.length} essential fields for performance`);
       }
 
       console.log(`✅ Filtered out ${availableFieldNames.length - fieldsToSync.length} problematic fields, using ${fieldsToSync.length} safe fields`);
@@ -690,8 +791,20 @@ class SyncService {
     const fallbackMap: { [key: string]: string[] } = {
       'mail.message': ['id', 'subject', 'body', 'date', 'author_id', 'partner_ids', 'model', 'res_id', 'message_type', 'create_date', 'write_date', 'create_uid'],
       'mail.activity': ['id', 'summary', 'note', 'date_deadline', 'user_id', 'res_model', 'res_id', 'activity_type_id', 'state', 'create_date', 'write_date', 'create_uid'],
-      'res.partner': ['id', 'name', 'email', 'phone', 'mobile', 'street', 'city', 'country_id', 'is_company', 'parent_id', 'create_date', 'write_date'],
+      'res.partner': [
+        'id', 'name', 'display_name', 'ref', 'active', 'email', 'phone', 'mobile', 'website',
+        'street', 'street2', 'city', 'zip', 'state_id', 'country_id', 'is_company', 'company_type',
+        'parent_id', 'vat', 'industry_id', 'user_id', 'category_id', 'customer_rank', 'supplier_rank',
+        'message_ids', 'message_follower_ids', 'activity_ids', 'activity_state', 'activity_user_id',
+        'create_date', 'write_date', 'create_uid', 'write_uid'
+      ],
       'res.users': ['id', 'name', 'login', 'email', 'phone', 'mobile', 'partner_id', 'company_id', 'active', 'groups_id', 'create_date', 'write_date'],
+      'calendar.event': [
+        'id', 'name', 'start', 'stop', 'start_date', 'stop_date', 'allday',
+        'description', 'location', 'user_id', 'partner_ids', 'categ_ids',
+        'privacy', 'show_as', 'state', 'recurrency', 'rrule', 'duration',
+        'alarm_ids', 'attendee_ids', 'create_date', 'write_date', 'create_uid', 'write_uid'
+      ],
     };
 
     // Return model-specific fallback or comprehensive default (12+ fields)
@@ -1120,6 +1233,13 @@ class SyncService {
         lastSyncWriteDate: syncMetadata.last_sync_write_date,
         totalRecords: syncMetadata.total_records
       });
+
+      // Calculate time since last sync for analysis
+      const lastSyncTime = new Date(syncMetadata.last_sync_write_date);
+      const now = new Date();
+      const timeDiff = Math.round((now.getTime() - lastSyncTime.getTime()) / 1000 / 60); // minutes
+      console.log(`⏱️ Time since last ${modelName} sync: ${timeDiff} minutes`);
+
       const domain = [['write_date', '>=', syncMetadata.last_sync_write_date]];
       console.log(`🔍 INCREMENTAL DOMAIN for ${modelName}:`, domain);
       return domain;
@@ -1187,6 +1307,11 @@ class SyncService {
    * Get record limit for model based on sync type
    */
   private getLimitForModel(modelName: string): number {
+    // Special handling for res.partner - conservative limit due to performance
+    if (modelName === 'res.partner') {
+      return 1000; // Conservative limit for partner sync to avoid performance issues
+    }
+
     // Use fallback models for limit determination (sync method)
     const model = this.getFallbackModels().find(m => m.name === modelName);
 

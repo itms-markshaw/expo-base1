@@ -231,7 +231,7 @@ export default function SyncProgressScreen() {
       // Check if any model has never been synced
       for (const modelName of models) {
         const metadata = await databaseService.getSyncMetadata(modelName);
-        if (!metadata || !metadata.last_sync_timestamp) {
+        if (!metadata || !metadata.last_sync_timestamp || !metadata.last_sync_write_date) {
           console.log(`🔄 ${modelName} has never been synced - full sync required`);
           return 'full';
         }
