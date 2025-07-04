@@ -15,7 +15,7 @@ import {
   Dimensions,
 } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
-import { odooReportingService } from '../services/odooReporting';
+import { odooReportingService } from '../services/BaseReportingService';
 
 const { width: screenWidth } = Dimensions.get('window');
 

@@ -22,7 +22,7 @@ const components = [
   'src/screens/LoginScreen.tsx',
   'src/components/LoadingScreen.tsx',
   'src/components/NavigationDrawer.tsx',
-  'src/components/UniversalSearchComponent.tsx',
+  'src/models/base/components/UniversalSearchComponent.tsx',
   'src/components/AppNavigationProvider.tsx',
   'src/store/AppStoreProvider.tsx',
 ];

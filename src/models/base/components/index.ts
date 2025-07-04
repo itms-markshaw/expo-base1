@@ -17,3 +17,5 @@ export { default as SimpleChatterComponent } from './SimpleChatterComponent';
 export { default as ImprovedChatterComponent } from './ImprovedChatterComponent';
 export { default as ExpandableChatterComponent } from './ExpandableChatterComponent';
 export { default as ZendeskChatterComponent } from './ZendeskChatterComponent';
+export { default as BusinessIntelligenceComponent } from './BusinessIntelligenceComponent';
+export { default as UniversalSearchComponent } from './UniversalSearchComponent';
