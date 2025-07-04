@@ -35,37 +35,45 @@ if (__DEV__) {
 }
 
 // Import screens and store
-import LoginScreen from './src/screens/LoginScreen';
-import CleanNavigationScreen from './src/screens/CleanNavigationScreen';
-import MoreTabScreen from './src/screens/MoreTabScreen';
-import ContactsScreen from './src/screens/ContactsScreen';
-import ActivitiesScreen from './src/screens/ActivitiesScreen';
-import CalendarScreen from './src/screens/CalendarScreen';
-import ChatScreen from './src/screens/ChatScreen';
-import SyncDashboard from './src/screens/SyncDashboard';
-import ModelSelectionScreen from './src/screens/sync/ModelSelectionScreen';
-import CustomModelSelectionScreen from './src/screens/sync/CustomModelSelectionScreen';
-import TemplateModelSelectionScreen from './src/screens/sync/TemplateModelSelectionScreen';
-import SyncSettingsScreen from './src/screens/sync/SyncSettingsScreen';
-import SyncProgressScreen from './src/screens/sync/SyncProgressScreen';
-import ConflictResolutionScreen from './src/screens/sync/ConflictResolutionScreen';
-import OfflineQueueScreen from './src/screens/sync/OfflineQueueScreen';
-import DatabaseManagerScreen from './src/screens/DatabaseManagerScreen';
-import CRMLeadsScreen from './src/screens/CRMLeadsScreen';
-import SalesOrderScreen from './src/screens/SalesOrderScreen';
+import LoginScreen from './src/models/app_auth/screens/990_LoginScreen';
+import MainDashboard from './src/models/app_dashboard/screens/001_MainDashboard';
+import MoreTabScreen from './src/models/app_navigation/screens/991_MoreTab';
+// Import new numbered screens
+import ContactsList from './src/models/res_partner/screens/101_ContactsList';
+import SalesOrdersList from './src/models/sale_order/screens/201_SalesOrdersList';
+import SettingsMain from './src/models/app_settings/screens/901_SettingsMain';
+import AccountSettings from './src/models/app_settings/screens/902_AccountSettings';
+import ServerSettings from './src/models/app_settings/screens/903_ServerSettings';
+import NotificationSettings from './src/models/app_settings/screens/904_NotificationSettings';
+import PrivacySettings from './src/models/app_settings/screens/905_PrivacySettings';
+import AppearanceSettings from './src/models/app_settings/screens/906_AppearanceSettings';
+import SyncPreferences from './src/models/app_settings/screens/907_SyncPreferences';
+import TestingDashboard from './src/models/app_testing/screens/951_TestingDashboard';
+import SyncDashboard from './src/models/sync_management/screens/981_SyncDashboard';
 
-import EmployeesScreen from './src/screens/EmployeesScreen';
-import UsersScreen from './src/screens/UsersScreen';
-import MobileScreen from './src/screens/MobileScreen';
-import MessagesScreen from './src/screens/MessagesScreen';
-import AttachmentsScreen from './src/screens/AttachmentsScreen';
-import ProjectsScreen from './src/screens/ProjectsScreen';
-import HelpdeskScreen from './src/screens/HelpdeskScreen';
-import HelpdeskTeamsScreen from './src/screens/HelpdeskTeamsScreen';
-import HelpdeskTicketDetailScreen from './src/screens/HelpdeskTicketDetailScreen';
-import SettingsScreen from './src/screens/SettingsScreen';
-import DataScreen from './src/screens/DataScreen';
-import TestScreen from './src/screens/TestScreen';
+// Import migrated screens
+import ActivitiesList from './src/models/mail_activity/screens/501_ActivitiesList';
+import CalendarView from './src/models/calendar_event/screens/701_CalendarView';
+import ChatList from './src/models/discuss_channel/screens/151_ChatList';
+import ModelSelectionScreen from './src/models/sync_management/screens/982_ModelSelection';
+import CustomModelSelectionScreen from './src/models/sync_management/screens/983_CustomModelSelection';
+import TemplateModelSelectionScreen from './src/models/sync_management/screens/984_TemplateModelSelection';
+import SyncSettingsScreen from './src/models/sync_management/screens/985_SyncSettings';
+import SyncProgressScreen from './src/models/sync_management/screens/986_SyncProgress';
+import ConflictResolutionScreen from './src/models/sync_management/screens/987_ConflictResolution';
+import OfflineQueueScreen from './src/models/sync_management/screens/988_OfflineQueue';
+import DatabaseManagerScreen from './src/models/sync_management/screens/989_DatabaseManager';
+import CRMLeadsList from './src/models/crm_lead/screens/301_CRMLeadsList';
+import EmployeesList from './src/models/hr_employee/screens/451_EmployeesList';
+import UsersList from './src/models/res_users/screens/401_UsersList';
+import FieldServiceDashboard from './src/models/app_field_service/screens/801_FieldServiceDashboard';
+import MessagesList from './src/models/mail_message/screens/521_MessagesList';
+import AttachmentsList from './src/models/ir_attachment/screens/551_AttachmentsList';
+import ProjectsList from './src/models/project_project/screens/751_ProjectsList';
+import HelpdeskTicketsList from './src/models/helpdesk_ticket/screens/601_HelpdeskTicketsList';
+import HelpdeskTeamsList from './src/models/helpdesk_team/screens/651_HelpdeskTeamsList';
+import HelpdeskTicketDetail from './src/models/helpdesk_ticket/screens/602_HelpdeskTicketDetail';
+import DataManager from './src/models/app_data/screens/952_DataManager';
 import { useAppStore } from './src/store';
 import { autoSyncService } from './src/services/autoSync';
 import AppStoreProvider from './src/store/AppStoreProvider';
@@ -116,52 +124,52 @@ function AllScreensStack() {
       {/* Secondary Screens - With headers, back buttons, and bottom navigation */}
       <Stack.Screen
         name="SalesOrders"
-        component={withBottomNav(SalesOrderScreen, 'Sales Orders')}
+        component={withBottomNav(SalesOrdersList, 'Sales Orders')}
         options={{ title: 'Sales Orders' }}
       />
       <Stack.Screen
         name="Employees"
-        component={withBottomNav(EmployeesScreen, 'Employees')}
+        component={withBottomNav(EmployeesList, 'Employees')}
         options={{ title: 'Employees' }}
       />
       <Stack.Screen
         name="Users"
-        component={withBottomNav(UsersScreen, 'Users')}
+        component={withBottomNav(UsersList, 'Users')}
         options={{ title: 'Users' }}
       />
       <Stack.Screen
         name="CRMLeads"
-        component={withBottomNav(CRMLeadsScreen, 'CRM Leads')}
+        component={withBottomNav(CRMLeadsList, 'CRM Leads')}
         options={{ title: 'CRM Leads' }}
       />
       <Stack.Screen
         name="Messages"
-        component={withBottomNav(MessagesScreen, 'Messages')}
+        component={withBottomNav(MessagesList, 'Messages')}
         options={{ title: 'Messages' }}
       />
       <Stack.Screen
         name="Attachments"
-        component={withBottomNav(AttachmentsScreen, 'Attachments')}
+        component={withBottomNav(AttachmentsList, 'Attachments')}
         options={{ title: 'Attachments' }}
       />
       <Stack.Screen
         name="Projects"
-        component={withBottomNav(ProjectsScreen, 'Projects')}
+        component={withBottomNav(ProjectsList, 'Projects')}
         options={{ title: 'Projects' }}
       />
       <Stack.Screen
         name="Helpdesk"
-        component={withBottomNav(HelpdeskScreen, 'Helpdesk')}
+        component={withBottomNav(HelpdeskTicketsList, 'Helpdesk')}
         options={{ title: 'Helpdesk' }}
       />
       <Stack.Screen
         name="HelpdeskTeams"
-        component={withBottomNav(HelpdeskTeamsScreen, 'Helpdesk Teams')}
+        component={withBottomNav(HelpdeskTeamsList, 'Helpdesk Teams')}
         options={{ title: 'Helpdesk Teams' }}
       />
       <Stack.Screen
         name="HelpdeskTicketDetail"
-        component={HelpdeskTicketDetailScreen}
+        component={HelpdeskTicketDetail}
         options={{
           title: 'Ticket Details',
           headerShown: false // We handle our own header in the component
@@ -169,18 +177,55 @@ function AllScreensStack() {
       />
       <Stack.Screen
         name="Mobile"
-        component={withBottomNav(MobileScreen, 'Mobile')}
-        options={{ title: 'Mobile' }}
+        component={withBottomNav(FieldServiceDashboard, 'Field Service')}
+        options={{ title: 'Field Service' }}
       />
       <Stack.Screen
         name="Settings"
-        component={withBottomNav(SettingsScreen, 'Settings')}
+        component={withBottomNav(SettingsMain, 'Settings')}
         options={{ title: 'Settings' }}
+      />
+
+      {/* Settings Sub-screens */}
+      <Stack.Screen
+        name="AccountSettings"
+        component={withBottomNav(AccountSettings, 'Settings')}
+        options={{ title: 'Account Settings' }}
+      />
+      <Stack.Screen
+        name="ServerSettings"
+        component={withBottomNav(ServerSettings, 'Settings')}
+        options={{ title: 'Server Settings' }}
+      />
+      <Stack.Screen
+        name="NotificationSettings"
+        component={withBottomNav(NotificationSettings, 'Settings')}
+        options={{ title: 'Notification Settings' }}
+      />
+      <Stack.Screen
+        name="PrivacySettings"
+        component={withBottomNav(PrivacySettings, 'Settings')}
+        options={{ title: 'Privacy Settings' }}
+      />
+      <Stack.Screen
+        name="AppearanceSettings"
+        component={withBottomNav(AppearanceSettings, 'Settings')}
+        options={{ title: 'Appearance Settings' }}
+      />
+      <Stack.Screen
+        name="SyncPreferences"
+        component={withBottomNav(SyncPreferences, 'Settings')}
+        options={{ title: 'Sync Preferences' }}
       />
       <Stack.Screen
         name="SyncStack"
         component={withBottomNav(SyncDashboard, 'Sync')}
         options={{ title: 'Sync Dashboard' }}
+      />
+      <Stack.Screen
+        name="Testing"
+        component={withBottomNav(TestingDashboard, 'Testing')}
+        options={{ title: 'Testing & Diagnostics' }}
       />
       <Stack.Screen
         name="SyncModels"
@@ -224,27 +269,23 @@ function AllScreensStack() {
       />
       <Stack.Screen
         name="Data"
-        component={withBottomNav(DataScreen, 'Data')}
+        component={withBottomNav(DataManager, 'Data')}
         options={{ title: 'Data Management' }}
       />
-      <Stack.Screen
-        name="Testing"
-        component={withBottomNav(TestScreen, 'Testing')}
-        options={{ title: 'Testing & Diagnostics' }}
-      />
+
       <Stack.Screen
         name="Documentation"
-        component={withBottomNav(MobileScreen, 'Documentation')}
+        component={withBottomNav(FieldServiceDashboard, 'Documentation')}
         options={{ title: 'Documentation' }}
       />
       <Stack.Screen
         name="Activities"
-        component={withBottomNav(ActivitiesScreen, 'Activities')}
+        component={withBottomNav(ActivitiesList, 'Activities')}
         options={{ title: 'Activities' }}
       />
       <Stack.Screen
         name="Chat"
-        component={withBottomNav(ChatScreen, 'Chat')}
+        component={withBottomNav(ChatList, 'Chat')}
         options={{ title: 'Chat' }}
       />
     </Stack.Navigator>
@@ -293,10 +334,10 @@ function MainTabs() {
         headerShown: false,
       })}
     >
-        <Tab.Screen name="Dashboard" component={CleanNavigationScreen} />
-        <Tab.Screen name="Sales" component={SalesOrderScreen} />
-        <Tab.Screen name="Contacts" component={ContactsScreen} />
-        <Tab.Screen name="Calendar" component={CalendarScreen} />
+        <Tab.Screen name="Dashboard" component={MainDashboard} />
+        <Tab.Screen name="Sales" component={SalesOrdersList} />
+        <Tab.Screen name="Contacts" component={ContactsList} />
+        <Tab.Screen name="Calendar" component={CalendarView} />
         <Tab.Screen name="More" component={MoreTabScreen} />
       </Tab.Navigator>
   );

@@ -24,6 +24,9 @@ interface AppStore {
   // Database state
   databaseStats: any;
 
+  // UI Settings
+  showScreenBadges: boolean;
+
   // Actions
   login: () => Promise<void>;
   logout: () => Promise<void>;
@@ -36,6 +39,7 @@ interface AppStore {
   updateModelSyncAllOverride: (modelName: string, syncAll: boolean) => void;
   loadDatabaseStats: () => Promise<void>;
   loadAvailableModels: () => Promise<void>;
+  toggleScreenBadges: () => void;
 }
 
 export const useAppStore = create<AppStore>((set, get) => ({
@@ -74,6 +78,9 @@ export const useAppStore = create<AppStore>((set, get) => ({
   ],
   syncSettings: syncService.getSyncSettings(),
   databaseStats: null,
+
+  // UI Settings - Default to true for development
+  showScreenBadges: true,
 
   // Actions
   login: async () => {
@@ -226,5 +233,12 @@ export const useAppStore = create<AppStore>((set, get) => ({
       console.error('❌ Failed to load available models:', error);
       // Keep existing models if loading fails
     }
+  },
+
+  // Toggle screen badges visibility
+  toggleScreenBadges: () => {
+    set((state) => ({
+      showScreenBadges: !state.showScreenBadges
+    }));
   },
 }));
