@@ -17,6 +17,23 @@ import {
   Platform
 } from 'react-native';
 
+// Suppress timeout error console displays
+if (__DEV__) {
+  const originalConsoleError = console.error;
+  console.error = (...args) => {
+    // Suppress XML-RPC timeout errors from showing in red error overlay
+    const message = args.join(' ');
+    if (message.includes('Network request timed out') ||
+        message.includes('XML-RPC call failed') ||
+        message.includes('TimeoutError')) {
+      // Still log to console but don't trigger error overlay
+      console.warn('🔇 Suppressed timeout error:', ...args);
+      return;
+    }
+    originalConsoleError(...args);
+  };
+}
+
 // Import screens and store
 import LoginScreen from './src/screens/LoginScreen';
 import CleanNavigationScreen from './src/screens/CleanNavigationScreen';

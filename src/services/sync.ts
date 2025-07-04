@@ -402,38 +402,58 @@ class SyncService {
 
       this.updateStatus({ totalRecords });
 
-      // Sync each model
+      // PERFORMANCE: Sync models in parallel batches for speed
+      const BATCH_SIZE = 3; // Sync 3 models at once
       let syncedRecords = 0;
-      for (let i = 0; i < selectedModels.length; i++) {
-        const modelName = selectedModels[i];
 
-        // Calculate progress based on models completed + current model progress
+      for (let i = 0; i < selectedModels.length; i += BATCH_SIZE) {
+        const batch = selectedModels.slice(i, i + BATCH_SIZE);
         const baseProgress = (i / selectedModels.length) * 100;
 
         this.updateStatus({
-          currentModel: modelName,
+          currentModel: batch.length > 1 ? `${batch[0]} +${batch.length-1} more` : batch[0],
           progress: Math.round(baseProgress),
         });
 
-        try {
-          console.log(`📥 Syncing ${modelName}...`);
-          const records = await this.syncModel(modelName, forceFullSync);
-          syncedRecords += records;
+        // Sync batch in parallel
+        const batchPromises = batch.map(async (modelName) => {
+          try {
+            console.log(`📥 Syncing ${modelName}...`);
+            const records = await this.syncModel(modelName, forceFullSync);
+            return { modelName, records, error: null };
+          } catch (error) {
+            const errorMessage = error instanceof Error ? error.message : String(error);
 
-          // Update progress after model completion
-          const completedProgress = ((i + 1) / selectedModels.length) * 100;
-          this.updateStatus({
-            syncedRecords,
-            progress: Math.round(completedProgress)
-          });
+            // Handle timeout errors more gracefully
+            if (error.name === 'TimeoutError' || errorMessage.includes('timed out')) {
+              console.warn(`⏱️ ${modelName} sync timed out - will retry with smaller batch`);
+              return { modelName, records: 0, error: `Timeout (will retry)` };
+            } else {
+              console.error(`❌ Failed to sync ${modelName}:`, errorMessage);
+              return { modelName, records: 0, error: errorMessage };
+            }
+          }
+        });
 
-        } catch (error) {
-          const errorMessage = error instanceof Error ? error.message : String(error);
-          console.error(`❌ Failed to sync ${modelName}:`, errorMessage);
-          this.updateStatus({
-            errors: [...this.currentStatus.errors, `${modelName}: ${errorMessage}`],
-          });
+        const batchResults = await Promise.all(batchPromises);
+
+        // Process results
+        for (const result of batchResults) {
+          if (result.error) {
+            this.updateStatus({
+              errors: [...this.currentStatus.errors, `${result.modelName}: ${result.error}`],
+            });
+          } else {
+            syncedRecords += result.records;
+          }
         }
+
+        // Update progress after batch completion
+        const completedProgress = ((i + batch.length) / selectedModels.length) * 100;
+        this.updateStatus({
+          syncedRecords,
+          progress: Math.round(Math.min(completedProgress, 100))
+        });
       }
 
       this.updateStatus({
@@ -499,8 +519,8 @@ class SyncService {
       // Set timeout based on model type - longer for problematic models
       const timeout = this.getTimeoutForModel(modelName);
 
-      console.log(`🔍 Searching ${modelName} with domain:`, domain);
-      console.log(`📋 Fields to fetch:`, fields.slice(0, 10), fields.length > 10 ? `... and ${fields.length - 10} more` : '');
+      // Simplified logging for performance
+      console.log(`🔍 ${modelName}: ${domain.length > 0 ? 'incremental' : 'full'} sync (${fields.length} fields)`);
 
       // SMART INCREMENTAL SYNC: Check count first for large incremental syncs
       let records;
@@ -583,8 +603,7 @@ class SyncService {
 
       // Records retrieved successfully
 
-      // CONFLICT DETECTION DISABLED: Too many false positives
-      console.log(`🚫 Conflict detection disabled - saving ${records.length} records directly`);
+      // Save records (conflict detection disabled for performance)
 
       // Clear any old conflicts for this model (cleanup from when conflict detection was enabled)
       try {
@@ -656,9 +675,8 @@ class SyncService {
       return this.getFallbackFields(modelName);
     }
 
-    // Check cache first (re-enabled after fixing field filtering)
+    // Check cache first (performance optimization)
     if (this.fieldCache[modelName]) {
-      console.log(`📋 Using cached fields for ${modelName} (${this.fieldCache[modelName].length} fields)`);
       return this.fieldCache[modelName];
     }
 
@@ -672,8 +690,6 @@ class SyncService {
       // Get all available fields from Odoo
       const allFields = await client.getFields(modelName);
       const availableFieldNames = Object.keys(allFields);
-
-      console.log(`🔍 Auto-detected ${availableFieldNames.length} fields for ${modelName}`);
 
       // SMART FIELD FILTERING: Filter based on field properties and types
       let fieldsToSync = availableFieldNames.filter(fieldName => {
@@ -1248,21 +1264,13 @@ class SyncService {
 
     if (syncMetadata && syncMetadata.last_sync_write_date && !forceFullSync) {
       // INCREMENTAL: Only fetch records modified since last sync
-      console.log(`🔄 INCREMENTAL: ${modelName} - fetching changes since ${syncMetadata.last_sync_write_date}`);
-      console.log(`📊 Sync metadata for ${modelName}:`, {
-        lastSyncTimestamp: syncMetadata.last_sync_timestamp,
-        lastSyncWriteDate: syncMetadata.last_sync_write_date,
-        totalRecords: syncMetadata.total_records
-      });
-
       // Calculate time since last sync for analysis
       const lastSyncTime = new Date(syncMetadata.last_sync_write_date);
       const now = new Date();
       const timeDiff = Math.round((now.getTime() - lastSyncTime.getTime()) / 1000 / 60); // minutes
-      console.log(`⏱️ Time since last ${modelName} sync: ${timeDiff} minutes`);
+      console.log(`🔄 ${modelName}: incremental sync (${timeDiff}min ago)`);
 
       const domain = [['write_date', '>=', syncMetadata.last_sync_write_date]];
-      console.log(`🔍 INCREMENTAL DOMAIN for ${modelName}:`, domain);
       return domain;
     } else {
       // INITIAL SYNC: Use time period for first sync

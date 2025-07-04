@@ -149,12 +149,13 @@ export class OdooXMLRPCClient {
   /**
    * Call Odoo service (common, object, db)
    */
-  async callService(service: string, method: string, params: any[] = []): Promise<any> {
+  async callService(service: string, method: string, params: any[] = [], timeoutMs: number = 30000): Promise<any> {
     const url = `${this.baseURL}/xmlrpc/2/${service}`;
     const xmlPayload = this.buildXMLRPCCall(method, params);
 
-    // Reduced logging - only log errors
-    // console.log(`📡 XML-RPC: ${service}.${method}(${params.length} params)`);
+    // Create timeout controller
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
 
     try {
       const response = await fetch(url, {
@@ -164,8 +165,11 @@ export class OdooXMLRPCClient {
           'Accept': 'text/xml',
           'User-Agent': 'OdooSyncApp-XMLRPC/1.0'
         },
-        body: xmlPayload
+        body: xmlPayload,
+        signal: controller.signal
       });
+
+      clearTimeout(timeoutId);
 
       if (!response.ok) {
         const errorText = await response.text();
@@ -179,6 +183,16 @@ export class OdooXMLRPCClient {
 
       return this.parseXMLRPCResponse(xmlText);
     } catch (error) {
+      clearTimeout(timeoutId);
+
+      // Handle timeout errors gracefully
+      if (error.name === 'AbortError') {
+        const timeoutError = new Error(`Network request timed out after ${timeoutMs}ms`);
+        timeoutError.name = 'TimeoutError';
+        console.warn(`⏱️ ${service}.${method} timed out after ${timeoutMs}ms`);
+        throw timeoutError;
+      }
+
       console.error(`❌ XML-RPC call failed: ${service}.${method}`, error);
       throw error;
     }
@@ -187,7 +201,7 @@ export class OdooXMLRPCClient {
   /**
    * Call model methods (main API)
    */
-  async callModel(model: string, method: string, args: any[] = [], kwargs: any = {}): Promise<any> {
+  async callModel(model: string, method: string, args: any[] = [], kwargs: any = {}, timeoutMs?: number): Promise<any> {
     await this.authenticate();
 
     return await this.callService('object', 'execute_kw', [
@@ -198,19 +212,19 @@ export class OdooXMLRPCClient {
       method,
       args,
       kwargs
-    ]);
+    ], timeoutMs);
   }
 
   // Additional helper methods for common operations
   async searchRead(model: string, domain: any[] = [], fields: string[] = [], options: any = {}): Promise<any[]> {
-    const { limit = 100, offset = 0, order = 'id desc' } = options;
-    
+    const { limit = 100, offset = 0, order = 'id desc', timeout } = options;
+
     return await this.callModel(model, 'search_read', [domain], {
       fields,
       limit,
       offset,
       order
-    });
+    }, timeout);
   }
 
   async getFields(model: string): Promise<any> {
