@@ -40,7 +40,23 @@ export default function SyncPreferencesScreen({ navigation }: any) {
   ];
 
   const navigateToSyncDashboard = () => {
-    navigation.navigate('SyncDashboard');
+    navigation.navigate('SyncStack');
+  };
+
+  const navigateToSyncModels = () => {
+    navigation.navigate('SyncModels');
+  };
+
+  const navigateToDatabaseManager = () => {
+    navigation.navigate('DatabaseManager');
+  };
+
+  const navigateToOfflineQueue = () => {
+    navigation.navigate('OfflineQueue');
+  };
+
+  const navigateToSyncConflicts = () => {
+    navigation.navigate('SyncConflicts');
   };
 
   return (
@@ -165,20 +181,20 @@ export default function SyncPreferencesScreen({ navigation }: any) {
             <MaterialIcons name="chevron-right" size={24} color="#666" />
           </TouchableOpacity>
 
-          <TouchableOpacity style={styles.actionItem}>
-            <MaterialIcons name="settings" size={24} color="#666" />
+          <TouchableOpacity style={styles.actionItem} onPress={navigateToSyncModels}>
+            <MaterialIcons name="storage" size={24} color="#666" />
             <Text style={styles.actionText}>Model Selection</Text>
             <MaterialIcons name="chevron-right" size={24} color="#666" />
           </TouchableOpacity>
 
-          <TouchableOpacity style={styles.actionItem}>
-            <MaterialIcons name="queue" size={24} color="#FF9500" />
+          <TouchableOpacity style={styles.actionItem} onPress={navigateToOfflineQueue}>
+            <MaterialIcons name="cloud-queue" size={24} color="#FF9500" />
             <Text style={styles.actionText}>Offline Queue</Text>
             <MaterialIcons name="chevron-right" size={24} color="#666" />
           </TouchableOpacity>
 
-          <TouchableOpacity style={styles.actionItem}>
-            <MaterialIcons name="storage" size={24} color="#34C759" />
+          <TouchableOpacity style={styles.actionItem} onPress={navigateToDatabaseManager}>
+            <MaterialIcons name="view-list" size={24} color="#34C759" />
             <Text style={styles.actionText}>Database Manager</Text>
             <MaterialIcons name="chevron-right" size={24} color="#666" />
           </TouchableOpacity>
