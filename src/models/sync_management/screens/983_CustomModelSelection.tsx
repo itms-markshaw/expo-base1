@@ -22,7 +22,7 @@ import { MaterialIcons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 
 import { useAppStore } from '../../../store';
-import { authService } from '../../../services/auth';
+import { authService } from '../../base/services/BaseAuthService';
 import ScreenBadge from '../../../components/ScreenBadge';
 
 interface ModelInfo {

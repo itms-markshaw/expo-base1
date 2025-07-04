@@ -16,7 +16,7 @@ import {
   Dimensions,
 } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
-import { authService } from '../services/auth';
+import { authService } from '../models/base/services/BaseAuthService';
 import { NavigationService, NavigationItem } from '../navigation/NavigationConfig';
 
 const { width: screenWidth } = Dimensions.get('window');

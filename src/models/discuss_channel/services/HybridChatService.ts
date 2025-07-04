@@ -3,8 +3,8 @@
  * Falls back gracefully when WebSocket fails
  */
 
-import { authService } from './auth';
-import { sessionWebSocketService } from './sessionWebSocket';
+import { authService } from '../../base/services/BaseAuthService';
+import { sessionWebSocketService } from '../../base/services/BaseSessionWebSocketService';
 
 class HybridChatService {
   private useWebSocket = false;

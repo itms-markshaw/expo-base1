@@ -4,7 +4,7 @@
  */
 
 import { BaseModelService } from '../../base/services/BaseModelService';
-import { authService } from '../../../services/auth';
+import { authService } from '../../base/services/BaseAuthService';
 import {
   SalesOrder,
   SalesOrderLine,

@@ -1,9 +1,12 @@
 /**
- * Odoo Actions Service - Handle button actions like CONFIRM, CANCEL, etc.
+ * BaseActionsService - Handle button actions like CONFIRM, CANCEL, etc.
+ * Base service for all action functionality across models
+ *
+ * MIGRATED: From src/services/odooActions.ts
  * This service provides the equivalent of clicking buttons in Odoo web interface
  */
 
-import { authService } from './auth';
+import { authService } from './BaseAuthService';
 
 export interface OdooAction {
   id: string;

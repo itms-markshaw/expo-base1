@@ -1,10 +1,13 @@
 /**
- * Conflict Resolution Service
+ * ConflictResolutionService - Conflict Resolution Service
+ * Model-specific service for sync.management
+ *
+ * MIGRATED: From src/services/conflictResolution.ts
  * Handles sync conflicts between local and server data
  */
 
-import { databaseService } from './database';
-import { authService } from './auth';
+import { databaseService } from '../../base/services/BaseDatabaseService';
+import { authService } from '../../base/services/BaseAuthService';
 
 export interface SyncConflict {
   id: string;

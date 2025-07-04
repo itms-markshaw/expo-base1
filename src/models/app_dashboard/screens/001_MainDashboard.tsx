@@ -99,7 +99,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import tw from 'twrnc';
 import { useAppStore } from '../../../store';
 import { useAppNavigation } from '../../../components/AppNavigationProvider';
-import { authService } from '../../../services/auth';
+import { authService } from '../../base/services/BaseAuthService';
 import ScreenBadge from '../../../components/ScreenBadge';
 
 const { width: screenWidth } = Dimensions.get('window');

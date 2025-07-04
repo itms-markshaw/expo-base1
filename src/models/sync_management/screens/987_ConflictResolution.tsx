@@ -19,7 +19,7 @@ import {
 } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
-import { conflictResolutionService, SyncConflict } from '../../../services/conflictResolution';
+import { conflictResolutionService, SyncConflict } from '../services/ConflictResolutionService';
 import ScreenBadge from '../../../components/ScreenBadge';
 
 interface DataConflict {

@@ -14,7 +14,7 @@ import {
 } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
 import BottomSheet, { BottomSheetView, BottomSheetFlatList } from '@gorhom/bottom-sheet';
-import { authService } from '../services/auth';
+import { authService } from '../models/base/services/BaseAuthService';
 
 interface HelpdeskFilters {
   stages: string[];

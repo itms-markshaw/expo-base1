@@ -1,11 +1,14 @@
 /**
- * Offline Queue Service
+ * OfflineQueueService - Offline Queue Service
+ * Model-specific service for sync.management
+ *
+ * MIGRATED: From src/services/offlineQueue.ts
  * Manages operations that failed due to network issues and retries them when online
  */
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { databaseService } from './database';
-import { authService } from './auth';
+import { databaseService } from '../../base/services/BaseDatabaseService';
+import { authService } from '../../base/services/BaseAuthService';
 
 export interface QueuedOperation {
   id: string;

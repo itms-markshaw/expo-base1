@@ -13,7 +13,7 @@ import {
 } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
 import BottomSheet, { BottomSheetFlatList } from '@gorhom/bottom-sheet';
-import { authService } from '../services/auth';
+import { authService } from '../models/base/services/BaseAuthService';
 
 interface SalesOrder {
   id: number;

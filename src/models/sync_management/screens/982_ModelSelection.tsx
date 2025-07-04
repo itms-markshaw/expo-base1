@@ -23,8 +23,8 @@ import { MaterialIcons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 
 import { useAppStore } from '../../../store';
-import { syncService } from '../../../services/sync';
-import { authService } from '../../../services/auth';
+import { syncService } from '../../base/services/BaseSyncService';
+import { authService } from '../../base/services/BaseAuthService';
 import { TimePeriod } from '../../../types';
 import ScreenBadge from '../../../components/ScreenBadge';
 

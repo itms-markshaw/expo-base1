@@ -17,9 +17,9 @@ import {
   ActivityIndicator,
 } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
-import { authService } from '../services/auth';
+import { authService } from '../models/base/services/BaseAuthService';
 import CalendarIntegrationComponent from './CalendarIntegrationComponent';
-import { calendarService } from '../services/calendarService';
+import { calendarService } from '../models/calendar_event/services/CalendarEventService';
 import FilterBottomSheet from './FilterBottomSheet';
 import { formatRelationalField } from '../utils/relationalFieldUtils';
 

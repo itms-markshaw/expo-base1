@@ -20,11 +20,11 @@ import {
   TextInput,
 } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
-import { crudTestingService } from '../../../services/crudTesting';
+import { crudTestingService } from '../services/CRUDTestingService';
 import { testSync } from '../../../utils/testSync';
-import { databaseService } from '../../../services/database';
-import { offlineQueueService } from '../../../services/offlineQueue';
-import { authService } from '../../../services/auth';
+import { databaseService } from '../../base/services/BaseDatabaseService';
+import { offlineQueueService } from '../../sync_management/services/OfflineQueueService';
+import { authService } from '../../base/services/BaseAuthService';
 import NetInfo from '@react-native-community/netinfo';
 import ScreenBadge from '../../../components/ScreenBadge';
 

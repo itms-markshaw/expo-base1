@@ -19,7 +19,7 @@ import {
 import { MaterialIcons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import * as MediaLibrary from 'expo-media-library';
-import { authService } from '../services/auth';
+import { authService } from '../models/base/services/BaseAuthService';
 
 interface CameraDocumentationProps {
   model: string;

@@ -20,7 +20,7 @@ import {
   TextInput,
 } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
-import { databaseService } from '../../../services/database';
+import { databaseService } from '../../base/services/BaseDatabaseService';
 import ScreenBadge from '../../../components/ScreenBadge';
 
 interface TableInfo {

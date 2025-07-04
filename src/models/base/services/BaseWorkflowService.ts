@@ -1,9 +1,12 @@
 /**
- * Odoo Workflows & Automation Service
+ * BaseWorkflowService - Odoo Workflows & Automation Service
+ * Base service for all workflow functionality across models
+ *
+ * MIGRATED: From src/services/odooWorkflows.ts
  * Advanced workflow actions, approvals, and business process automation
  */
 
-import { authService } from './auth';
+import { authService } from './BaseAuthService';
 
 export interface WorkflowAction {
   id: string;

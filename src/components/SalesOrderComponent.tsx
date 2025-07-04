@@ -17,7 +17,7 @@ import {
   ActivityIndicator,
 } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
-import { authService } from '../services/auth';
+import { authService } from '../models/base/services/BaseAuthService';
 import WorkflowActionsComponent from './WorkflowActionsComponent';
 import SalesOrderDetailBottomSheet from './SalesOrderDetailBottomSheet';
 import FilterBottomSheet from './FilterBottomSheet';

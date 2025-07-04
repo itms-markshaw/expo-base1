@@ -22,9 +22,9 @@ import { MaterialIcons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 
 import { useAppStore } from '../../../store';
-import { syncService } from '../../../services/sync';
-import { autoSyncService, AutoSyncSettings } from '../../../services/autoSync';
-import { databaseService } from '../../../services/database';
+import { syncService } from '../../base/services/BaseSyncService';
+import { autoSyncService, AutoSyncSettings } from '../services/AutoSyncService';
+import { databaseService } from '../../base/services/BaseDatabaseService';
 import { TimePeriod } from '../../../types';
 import ScreenBadge from '../../../components/ScreenBadge';
 

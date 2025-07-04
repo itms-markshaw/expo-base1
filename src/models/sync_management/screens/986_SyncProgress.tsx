@@ -25,9 +25,9 @@ import Svg, { Circle } from 'react-native-svg';
 const AnimatedCircle = Animated.createAnimatedComponent(Circle);
 
 import { useAppStore } from '../../../store';
-import { syncService } from '../../../services/sync';
-import { databaseService } from '../../../services/database';
-import { authService } from '../../../services/auth';
+import { syncService } from '../../base/services/BaseSyncService';
+import { databaseService } from '../../base/services/BaseDatabaseService';
+import { authService } from '../../base/services/BaseAuthService';
 import ScreenBadge from '../../../components/ScreenBadge';
 
 interface SyncProgress {

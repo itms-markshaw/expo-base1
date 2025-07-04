@@ -3,7 +3,7 @@
  * Uses proper session authentication instead of API keys
  */
 
-import { authService } from './auth';
+import { authService } from './BaseAuthService';
 
 class SessionWebSocketService {
   private websocket: WebSocket | null = null;

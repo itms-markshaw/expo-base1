@@ -1,14 +1,17 @@
 /**
- * Auto Sync Service
+ * AutoSyncService - Auto Sync Service
+ * Model-specific service for sync.management
+ *
+ * MIGRATED: From src/services/autoSync.ts
  * Handles automatic synchronization based on app state changes and network connectivity
  */
 
 import { AppState, AppStateStatus } from 'react-native';
 import NetInfo from '@react-native-community/netinfo';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { syncService } from './sync';
-import { offlineQueueService } from './offlineQueue';
-import { useAppStore } from '../store';
+import { syncService } from '../../base/services/BaseSyncService';
+import { offlineQueueService } from './OfflineQueueService';
+import { useAppStore } from '../../../store';
 
 export interface AutoSyncSettings {
   autoSyncOnLaunch: boolean;

@@ -1,9 +1,12 @@
 /**
- * Odoo Reporting & Analytics Service
+ * BaseReportingService - Odoo Reporting & Analytics Service
+ * Base service for all reporting functionality across models
+ *
+ * MIGRATED: From src/services/odooReporting.ts
  * Advanced XML-RPC integrations for business intelligence
  */
 
-import { authService } from './auth';
+import { authService } from './BaseAuthService';
 
 export interface SalesReport {
   period: string;

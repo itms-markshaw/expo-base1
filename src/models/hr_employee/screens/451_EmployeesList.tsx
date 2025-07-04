@@ -21,7 +21,7 @@ import {
   TextInput,
 } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
-import { authService } from '../../../services/auth';
+import { authService } from '../../base/services/BaseAuthService';
 import FilterBottomSheet from '../../../components/FilterBottomSheet';
 import EmployeeDetailBottomSheet from '../../../components/EmployeeDetailBottomSheet';
 import { formatRelationalField } from '../../../utils/relationalFieldUtils';

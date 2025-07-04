@@ -1,9 +1,12 @@
 /**
- * Odoo Mobile-Specific Integrations
+ * FieldServiceMobileService - Odoo Mobile-Specific Integrations
+ * Model-specific service for app.field_service
+ *
+ * MIGRATED: From src/services/odooMobile.ts
  * GPS tracking, camera, notifications, offline capabilities
  */
 
-import { authService } from './auth';
+import { authService } from '../../base/services/BaseAuthService';
 import * as Location from 'expo-location';
 import * as ImagePicker from 'expo-image-picker';
 import * as Notifications from 'expo-notifications';

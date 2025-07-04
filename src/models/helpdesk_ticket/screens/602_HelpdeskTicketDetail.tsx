@@ -24,7 +24,7 @@ import {
 import { MaterialIcons } from '@expo/vector-icons';
 import { useRoute, useNavigation } from '@react-navigation/native';
 import RenderHtml from 'react-native-render-html';
-import { authService } from '../../../services/auth';
+import { authService } from '../../base/services/BaseAuthService';
 import { formatRelationalField } from '../../../utils/relationalFieldUtils';
 import ImprovedChatterComponent from '../../../components/ImprovedChatterComponent';
 import HelpdeskWorkflowBottomSheet from '../../../components/HelpdeskWorkflowBottomSheet';

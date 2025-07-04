@@ -75,7 +75,7 @@ import HelpdeskTeamsList from './src/models/helpdesk_team/screens/651_HelpdeskTe
 import HelpdeskTicketDetail from './src/models/helpdesk_ticket/screens/602_HelpdeskTicketDetail';
 import DataManager from './src/models/app_data/screens/952_DataManager';
 import { useAppStore } from './src/store';
-import { autoSyncService } from './src/services/autoSync';
+import { autoSyncService } from './src/models/sync_management/services';
 import AppStoreProvider from './src/store/AppStoreProvider';
 import AppNavigationProvider from './src/components/AppNavigationProvider';
 import LoadingScreen from './src/components/LoadingScreen';

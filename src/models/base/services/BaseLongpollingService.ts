@@ -4,7 +4,7 @@
  * (Replaces longpolling since port 8072 is not accessible)
  */
 
-import { authService } from './auth';
+import { authService } from './BaseAuthService';
 
 interface LongpollingMessage {
   id: number;

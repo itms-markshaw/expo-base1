@@ -21,7 +21,7 @@ import {
   TextInput,
 } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
-import { authService } from '../../../services/auth';
+import { authService } from '../../base/services/BaseAuthService';
 import { useAppNavigation } from '../../../components/AppNavigationProvider';
 import FilterBottomSheet from '../../../components/FilterBottomSheet';
 import ScreenBadge from '../../../components/ScreenBadge';

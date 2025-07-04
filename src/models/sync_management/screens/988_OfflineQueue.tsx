@@ -20,7 +20,7 @@ import {
 } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
-import { offlineQueueService, QueuedOperation } from '../../../services/offlineQueue';
+import { offlineQueueService, QueuedOperation } from '../services/OfflineQueueService';
 import ScreenBadge from '../../../components/ScreenBadge';
 
 export default function OfflineQueueScreen() {

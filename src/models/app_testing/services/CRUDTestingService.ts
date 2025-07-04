@@ -1,11 +1,14 @@
 /**
- * CRUD Testing Service for Users and Contacts
+ * CRUDTestingService - CRUD Testing Service for Users and Contacts
+ * Model-specific service for app.testing
+ *
+ * MIGRATED: From src/services/crudTesting.ts
  * Comprehensive testing of Create, Read, Update, Delete operations
  */
 
-import { authService } from './auth';
-import { databaseService } from './database';
-import { crmActionsService } from './crmActions';
+import { authService } from '../../base/services/BaseAuthService';
+import { databaseService } from '../../base/services/BaseDatabaseService';
+import { crmActionsService } from '../../crm_lead/services/CRMLeadService';
 
 interface TestResult {
   operation: string;

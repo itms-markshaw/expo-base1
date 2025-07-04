@@ -1,9 +1,12 @@
 /**
- * CRM Actions Service - Trigger Odoo Business Logic
+ * CRMLeadService - CRM Actions Service
+ * Model-specific service for crm.lead
+ *
+ * MIGRATED: From src/services/crmActions.ts
  * This shows how to programmatically trigger button actions like "CONFIRM", "CONVERT", etc.
  */
 
-import { authService } from './auth';
+import { authService } from '../../base/services/BaseAuthService';
 
 interface ActionResult {
   success: boolean;

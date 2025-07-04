@@ -1,11 +1,14 @@
 /**
- * Chat Service for Odoo Integration
+ * ChatService - Chat Service for Odoo Integration
+ * Model-specific service for discuss.channel
+ *
+ * MIGRATED: From src/services/chat.ts
  * Handles real-time messaging, typing indicators, and presence
  */
 
-import longpollingService from './odooLongpolling';
-import { authService } from './auth';
-import { syncService } from './sync';
+import longpollingService from '../../base/services/BaseLongpollingService';
+import { authService } from '../../base/services/BaseAuthService';
+import { syncService } from '../../base/services/BaseSyncService';
 
 export interface ChatMessage {
   id: number;

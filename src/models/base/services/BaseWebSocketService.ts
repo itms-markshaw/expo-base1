@@ -1,11 +1,14 @@
 /**
- * Odoo 18 WebSocket Service - Based on ACTUAL Odoo Implementation
- * This implementation follows the exact patterns from Odoo's websocket_worker.js
+ * BaseWebSocketService - Odoo 18 WebSocket Service
+ * Base service for all WebSocket communication
+ *
+ * MIGRATED: From src/services/websocket.ts
+ * Based on ACTUAL Odoo Implementation - follows exact patterns from Odoo's websocket_worker.js
  */
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { AppState } from 'react-native';
-import { authService } from './auth';
+import { authService } from './BaseAuthService';
 
 interface WebSocketMessage {
   event_name: string;

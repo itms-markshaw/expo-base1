@@ -6,10 +6,10 @@
  * Simple sync service that actually works - no fancy bullshit, just sync Odoo data to SQLite
  */
 
-import { authService } from '../../../services/auth';
-import { databaseService } from '../../../services/database';
-import { conflictResolutionService } from '../../../services/conflictResolution';
-import { offlineQueueService } from '../../../services/offlineQueue';
+import { authService } from './BaseAuthService';
+import { databaseService } from './BaseDatabaseService';
+import { conflictResolutionService } from '../../sync_management/services/ConflictResolutionService';
+import { offlineQueueService } from '../../sync_management/services/OfflineQueueService';
 import { OdooModel, SyncStatus, TimePeriod, TimePeriodOption, SyncSettings } from '../../../types';
 import { useAppStore } from '../../../store';
 

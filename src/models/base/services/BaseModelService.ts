@@ -3,9 +3,9 @@
  * Universal CRUD operations for all Odoo models
  */
 
-import { authService } from '../../../services/auth';
-import { databaseService } from '../../../services/database';
-import { offlineQueueService } from '../../../services/offlineQueue';
+import { authService } from './BaseAuthService';
+import { databaseService } from './BaseDatabaseService';
+import { offlineQueueService } from '../../sync_management/services/OfflineQueueService';
 import { BaseModel } from '../types/BaseModel';
 
 export class BaseModelService<T extends BaseModel> {

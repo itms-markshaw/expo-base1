@@ -21,7 +21,7 @@ import {
   Modal,
 } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
-import { databaseService } from '../../../services/database';
+import { databaseService } from '../../base/services/BaseDatabaseService';
 import ImprovedChatterComponent from '../../../components/ImprovedChatterComponent';
 import ScreenBadge from '../../../components/ScreenBadge';
 

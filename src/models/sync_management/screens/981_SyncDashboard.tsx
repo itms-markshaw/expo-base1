@@ -23,10 +23,10 @@ import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import type { StackNavigationProp } from '@react-navigation/stack';
 
 import { useAppStore } from '../../../store';
-import { syncService } from '../../../services/sync';
-import { databaseService } from '../../../services/database';
-import { conflictResolutionService } from '../../../services/conflictResolution';
-import { offlineQueueService } from '../../../services/offlineQueue';
+import { syncService } from '../../base/services/BaseSyncService';
+import { databaseService } from '../../base/services/BaseDatabaseService';
+import { conflictResolutionService } from '../services/ConflictResolutionService';
+import { offlineQueueService } from '../services/OfflineQueueService';
 import { testSync } from '../../../utils/testSync';
 import ScreenBadge from '../../../components/ScreenBadge';
 

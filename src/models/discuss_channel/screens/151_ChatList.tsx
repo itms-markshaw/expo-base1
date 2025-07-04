@@ -27,7 +27,7 @@ import {
 import { MaterialIcons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import * as DocumentPicker from 'expo-document-picker';
-import chatService, { ChatChannel, ChatMessage, TypingUser } from '../../../services/chat';
+import chatService, { ChatChannel, ChatMessage, TypingUser } from '../services/ChatService';
 import { useAppNavigation } from '../../../components/AppNavigationProvider';
 import MessageBubble from '../../../components/MessageBubble';
 import MentionPicker from '../../../components/MentionPicker';

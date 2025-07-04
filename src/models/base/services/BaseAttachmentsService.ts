@@ -1,9 +1,12 @@
 /**
- * Attachments Service - Handle ir.attachment for Odoo chatter
+ * BaseAttachmentsService - Handle ir.attachment for Odoo chatter
+ * Base service for all attachment functionality across models
+ *
+ * MIGRATED: From src/services/attachmentsService.ts
  * Manages file uploads, downloads, and attachment metadata
  */
 
-import { authService } from './auth';
+import { authService } from './BaseAuthService';
 import * as DocumentPicker from 'expo-document-picker';
 import * as FileSystem from 'expo-file-system';
 

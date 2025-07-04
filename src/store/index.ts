@@ -5,9 +5,9 @@
 
 import { create } from 'zustand';
 import { User, SyncStatus, OdooModel, SyncSettings, TimePeriod } from '../types';
-import { authService } from '../services/auth';
-import { syncService } from '../services/sync';
-import { databaseService } from '../services/database';
+import { authService } from '../models/base/services/BaseAuthService';
+import { syncService } from '../models/base/services/BaseSyncService';
+import { databaseService } from '../models/base/services/BaseDatabaseService';
 
 interface AppStore {
   // Auth state

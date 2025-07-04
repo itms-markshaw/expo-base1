@@ -3,10 +3,10 @@
  * Used to test auto-sync, conflict resolution, and offline queue
  */
 
-import { autoSyncService } from '../services/autoSync';
-import { conflictResolutionService } from '../services/conflictResolution';
-import { offlineQueueService } from '../services/offlineQueue';
-import { syncService } from '../services/sync';
+import { autoSyncService } from '../models/sync_management/services/AutoSyncService';
+import { conflictResolutionService } from '../models/sync_management/services/ConflictResolutionService';
+import { offlineQueueService } from '../models/sync_management/services/OfflineQueueService';
+import { syncService } from '../models/base/services/BaseSyncService';
 
 export class SyncTestUtils {
   /**

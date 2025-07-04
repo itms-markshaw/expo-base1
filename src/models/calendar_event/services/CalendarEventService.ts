@@ -1,11 +1,14 @@
 /**
- * Calendar Integration Service
+ * CalendarEventService - Calendar Integration Service
+ * Model-specific service for calendar.event
+ *
+ * MIGRATED: From src/services/calendarService.ts
  * Native calendar access, event creation, and Odoo activity sync
  */
 
 import * as Calendar from 'expo-calendar';
 import { Platform } from 'react-native';
-import { authService } from './auth';
+import { authService } from '../../base/services/BaseAuthService';
 
 export interface CalendarEvent {
   id?: string;
