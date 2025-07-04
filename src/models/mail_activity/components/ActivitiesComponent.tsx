@@ -17,11 +17,11 @@ import {
   ActivityIndicator,
 } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
-import { authService } from '../models/base/services/BaseAuthService';
-import CalendarIntegrationComponent from './CalendarIntegrationComponent';
-import { calendarService } from '../models/calendar_event/services/CalendarEventService';
-import FilterBottomSheet from './FilterBottomSheet';
-import { formatRelationalField } from '../utils/relationalFieldUtils';
+import { authService } from '../../base/services/BaseAuthService';
+import { CalendarIntegrationComponent } from '../../calendar_event/components';
+import { calendarService } from '../../calendar_event/services/CalendarEventService';
+import { BaseFilterSheet } from '../../base/components';
+import { formatRelationalField } from '../../../utils/relationalFieldUtils';
 
 interface Activity {
   id: number;
@@ -596,7 +596,7 @@ export default function ActivitiesComponent() {
       />
 
       {/* Filter Bottom Sheet */}
-      <FilterBottomSheet
+      <BaseFilterSheet
         visible={showFilterSheet}
         onClose={() => setShowFilterSheet(false)}
         title="Filter Activities"

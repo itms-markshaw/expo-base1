@@ -15,7 +15,7 @@ import {
 } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
 import BottomSheet, { BottomSheetView, BottomSheetScrollView } from '@gorhom/bottom-sheet';
-import { odooWorkflowsService, WorkflowAction } from '../models/base/services/BaseWorkflowService';
+import { odooWorkflowsService, WorkflowAction } from '../services/BaseWorkflowService';
 
 interface WorkflowActionsProps {
   visible: boolean;

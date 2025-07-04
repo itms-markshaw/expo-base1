@@ -18,7 +18,7 @@ import {
   Alert,
 } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
-import ActivitiesComponent from '../../../components/ActivitiesComponent';
+import { ActivitiesComponent } from '../components';
 import { useAppNavigation } from '../../../components/AppNavigationProvider';
 import ScreenBadge from '../../../components/ScreenBadge';
 

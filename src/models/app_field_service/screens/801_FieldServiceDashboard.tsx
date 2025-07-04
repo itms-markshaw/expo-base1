@@ -19,9 +19,8 @@ import {
   Dimensions,
 } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
-import EmployeeCheckInComponent from '../../../components/EmployeeCheckInComponent';
-import CameraDocumentationComponent from '../../../components/CameraDocumentationComponent';
-import CompactGPSComponent from '../../../components/CompactGPSComponent';
+import { EmployeeCheckInComponent } from '../../hr_employee/components';
+import { CameraDocumentationComponent, CompactGPSComponent } from '../components';
 import ScreenBadge from '../../../components/ScreenBadge';
 
 const { width: screenWidth } = Dimensions.get('window');

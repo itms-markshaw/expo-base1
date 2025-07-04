@@ -17,10 +17,10 @@ import {
   Dimensions,
 } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
-import { chatterService, ChatterMessage, ChatterActivity } from '../models/base/services/BaseChatterService';
-import { odooActionsService, OdooAction } from '../models/base/services/BaseActionsService';
-import { attachmentsService, OdooAttachment } from '../models/base/services/BaseAttachmentsService';
-import { formatRelationalField } from '../utils/relationalFieldUtils';
+import { chatterService, ChatterMessage, ChatterActivity } from '../services/BaseChatterService';
+import { odooActionsService, OdooAction } from '../services/BaseActionsService';
+import { attachmentsService, OdooAttachment } from '../services/BaseAttachmentsService';
+import { formatRelationalField } from '../../../utils/relationalFieldUtils';
 
 interface SimpleChatterProps {
   model: string;

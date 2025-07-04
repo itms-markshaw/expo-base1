@@ -22,8 +22,8 @@ import {
 } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
 import { authService } from '../../base/services/BaseAuthService';
-import FilterBottomSheet from '../../../components/FilterBottomSheet';
-import EmployeeDetailBottomSheet from '../../../components/EmployeeDetailBottomSheet';
+import { BaseFilterSheet } from '../../base/components';
+import { EmployeeDetailBottomSheet } from '../components';
 import { formatRelationalField } from '../../../utils/relationalFieldUtils';
 import ScreenBadge from '../../../components/ScreenBadge';
 
@@ -246,7 +246,7 @@ export default function EmployeesScreen() {
       </ScrollView>
 
       {/* Filter Bottom Sheet */}
-      <FilterBottomSheet
+      <BaseFilterSheet
         visible={showFilterSheet}
         onClose={() => {
           console.log('FilterBottomSheet closing');

@@ -18,8 +18,7 @@ import {
   Modal,
 } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
-import CalendarDashboardComponent from '../../../components/CalendarDashboardComponent';
-import CalendarIntegrationComponent from '../../../components/CalendarIntegrationComponent';
+import { CalendarDashboardComponent, CalendarIntegrationComponent } from '../components';
 import ScreenBadge from '../../../components/ScreenBadge';
 
 type CalendarView = 'day' | 'week' | 'month';

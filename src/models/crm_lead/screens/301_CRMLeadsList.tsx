@@ -22,7 +22,7 @@ import {
 } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
 import { authService } from '../../base/services/BaseAuthService';
-import FilterBottomSheet from '../../../components/FilterBottomSheet';
+import { BaseFilterSheet } from '../../base/components';
 import { formatRelationalField } from '../../../utils/relationalFieldUtils';
 import ScreenBadge from '../../../components/ScreenBadge';
 
@@ -296,7 +296,7 @@ export default function CRMLeadsScreen() {
       </ScrollView>
 
       {/* Filter Bottom Sheet */}
-      <FilterBottomSheet
+      <BaseFilterSheet
         visible={showFilterSheet}
         onClose={() => setShowFilterSheet(false)}
         title="Filter Leads"

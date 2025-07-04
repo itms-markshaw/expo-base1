@@ -23,7 +23,7 @@ import {
 import { MaterialIcons } from '@expo/vector-icons';
 import { authService } from '../../base/services/BaseAuthService';
 import { useAppNavigation } from '../../../components/AppNavigationProvider';
-import FilterBottomSheet from '../../../components/FilterBottomSheet';
+import { BaseFilterSheet } from '../../base/components';
 import { formatRelationalField } from '../../../utils/relationalFieldUtils';
 import ScreenBadge from '../../../components/ScreenBadge';
 
@@ -288,7 +288,7 @@ export default function ProjectsScreen() {
       </ScrollView>
 
       {/* Filter Bottom Sheet */}
-      <FilterBottomSheet
+      <BaseFilterSheet
         visible={showFilterSheet}
         onClose={() => setShowFilterSheet(false)}
         title="Filter Projects"

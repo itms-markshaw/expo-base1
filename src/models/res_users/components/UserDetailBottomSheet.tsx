@@ -13,7 +13,7 @@ import {
 } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
 import BottomSheet, { BottomSheetView, BottomSheetScrollView } from '@gorhom/bottom-sheet';
-import { formatRelationalField } from '../utils/relationalFieldUtils';
+import { formatRelationalField } from '../../../utils/relationalFieldUtils';
 
 interface User {
   id: number;

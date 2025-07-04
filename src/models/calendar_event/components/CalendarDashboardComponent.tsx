@@ -14,8 +14,8 @@ import {
   ActivityIndicator,
 } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
-import { calendarService } from '../models/calendar_event/services/CalendarEventService';
-import { authService } from '../models/base/services/BaseAuthService';
+import { calendarService } from '../services/CalendarEventService';
+import { authService } from '../../base/services/BaseAuthService';
 import * as Calendar from 'expo-calendar';
 
 interface CalendarItem {

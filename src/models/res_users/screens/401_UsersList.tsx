@@ -22,8 +22,8 @@ import {
 } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
 import { authService } from '../../base/services/BaseAuthService';
-import FilterBottomSheet from '../../../components/FilterBottomSheet';
-import UserDetailBottomSheet from '../../../components/UserDetailBottomSheet';
+import { BaseFilterSheet } from '../../base/components';
+import { UserDetailBottomSheet } from '../components';
 import ScreenBadge from '../../../components/ScreenBadge';
 
 interface User {
@@ -220,7 +220,7 @@ export default function UsersScreen() {
       </ScrollView>
 
       {/* Filter Bottom Sheet */}
-      <FilterBottomSheet
+      <BaseFilterSheet
         visible={showFilterSheet}
         onClose={() => setShowFilterSheet(false)}
         title="Filter Users"

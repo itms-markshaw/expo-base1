@@ -24,7 +24,7 @@ import {
   ActivityType,
   MentionableUser,
   WorkflowAction
-} from '../models/base/services/BaseChatterService';
+} from '../services/BaseChatterService';
 
 interface ChatterComponentProps {
   model: string;

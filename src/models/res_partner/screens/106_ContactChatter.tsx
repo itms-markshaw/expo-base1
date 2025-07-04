@@ -19,7 +19,6 @@ import BaseChatter from '../../base/components/BaseChatter';
 import { contactService } from '../services/ContactService';
 import { Contact } from '../types/Contact';
 import ScreenBadge from '../../../components/ScreenBadge';
-import ScreenBadge from '../../../components/ScreenBadge';
 
 interface ContactChatterProps {
   contactId: number;

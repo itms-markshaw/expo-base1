@@ -17,11 +17,11 @@ import {
   ActivityIndicator,
 } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
-import { authService } from '../models/base/services/BaseAuthService';
-import WorkflowActionsComponent from './WorkflowActionsComponent';
+import { authService } from '../../base/services/BaseAuthService';
+import { BaseWorkflowActions } from '../../base/components';
 import SalesOrderDetailBottomSheet from './SalesOrderDetailBottomSheet';
-import FilterBottomSheet from './FilterBottomSheet';
-import { formatRelationalField } from '../utils/relationalFieldUtils';
+import { BaseFilterSheet } from '../../base/components';
+import { formatRelationalField } from '../../../utils/relationalFieldUtils';
 
 interface SalesOrder {
   id: number;
@@ -304,7 +304,7 @@ export default function SalesOrderComponent() {
       )}
 
       {/* Filter Bottom Sheet */}
-      <FilterBottomSheet
+      <BaseFilterSheet
         visible={showFilterSheet}
         onClose={() => setShowFilterSheet(false)}
         title="Filter Sales Orders"

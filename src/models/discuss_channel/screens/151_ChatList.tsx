@@ -29,9 +29,8 @@ import * as ImagePicker from 'expo-image-picker';
 import * as DocumentPicker from 'expo-document-picker';
 import chatService, { ChatChannel, ChatMessage, TypingUser } from '../services/ChatService';
 import { useAppNavigation } from '../../../components/AppNavigationProvider';
-import MessageBubble from '../../../components/MessageBubble';
-import MentionPicker from '../../../components/MentionPicker';
-import ChannelMembersModal from '../../../components/ChannelMembersModal';
+import { MessageBubble, MentionPicker } from '../../base/components';
+import { ChannelMembersModal } from '../components';
 import ScreenBadge from '../../../components/ScreenBadge';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');

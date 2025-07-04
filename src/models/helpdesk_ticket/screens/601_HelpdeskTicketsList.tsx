@@ -23,8 +23,8 @@ import {
 import { MaterialIcons } from '@expo/vector-icons';
 import { authService } from '../../base/services/BaseAuthService';
 import { useAppNavigation } from '../../../components/AppNavigationProvider';
-import HelpdeskFilterBottomSheet from '../../../components/HelpdeskFilterBottomSheet';
-import SavedFiltersBottomSheet from '../../../components/SavedFiltersBottomSheet';
+import HelpdeskFilterBottomSheet from '../components/HelpdeskFilterBottomSheet';
+import SavedFiltersBottomSheet from '../components/SavedFiltersBottomSheet';
 import { formatRelationalField } from '../../../utils/relationalFieldUtils';
 import ScreenBadge from '../../../components/ScreenBadge';
 import { useNavigation } from '@react-navigation/native';

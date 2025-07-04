@@ -23,7 +23,7 @@ import {
 import { MaterialIcons } from '@expo/vector-icons';
 import { authService } from '../../base/services/BaseAuthService';
 import { useAppNavigation } from '../../../components/AppNavigationProvider';
-import FilterBottomSheet from '../../../components/FilterBottomSheet';
+import { BaseFilterSheet } from '../../base/components';
 import ScreenBadge from '../../../components/ScreenBadge';
 
 import { formatRelationalField } from '../../../utils/relationalFieldUtils';

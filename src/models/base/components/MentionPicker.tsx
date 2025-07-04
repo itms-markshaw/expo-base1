@@ -8,7 +8,7 @@ import {
   ActivityIndicator,
 } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
-import { authService } from '../models/base/services/BaseAuthService';
+import { authService } from '../services/BaseAuthService';
 
 interface User {
   id: number;

@@ -15,7 +15,7 @@ import {
 } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
 import * as Location from 'expo-location';
-import { authService } from '../models/base/services/BaseAuthService';
+import { authService } from '../../base/services/BaseAuthService';
 
 interface AttendanceRecord {
   id: number;

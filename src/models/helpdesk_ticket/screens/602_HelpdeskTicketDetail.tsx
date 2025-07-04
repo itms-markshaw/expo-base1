@@ -26,8 +26,8 @@ import { useRoute, useNavigation } from '@react-navigation/native';
 import RenderHtml from 'react-native-render-html';
 import { authService } from '../../base/services/BaseAuthService';
 import { formatRelationalField } from '../../../utils/relationalFieldUtils';
-import ImprovedChatterComponent from '../../../components/ImprovedChatterComponent';
-import HelpdeskWorkflowBottomSheet from '../../../components/HelpdeskWorkflowBottomSheet';
+import { ImprovedChatterComponent } from '../../base/components';
+import { HelpdeskWorkflowBottomSheet } from '../components';
 import ScreenBadge from '../../../components/ScreenBadge';
 
 interface HelpdeskTicket {

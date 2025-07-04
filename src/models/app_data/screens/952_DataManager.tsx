@@ -22,7 +22,7 @@ import {
 } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
 import { databaseService } from '../../base/services/BaseDatabaseService';
-import ImprovedChatterComponent from '../../../components/ImprovedChatterComponent';
+import { ImprovedChatterComponent } from '../../base/components';
 import ScreenBadge from '../../../components/ScreenBadge';
 
 interface DataRecord {

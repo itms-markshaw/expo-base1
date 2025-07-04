@@ -17,8 +17,8 @@ import {
   Dimensions,
 } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
-import { authService } from '../models/base/services/BaseAuthService';
-import WorkflowActionsComponent from './WorkflowActionsComponent';
+import { authService } from '../services/BaseAuthService';
+import { BaseWorkflowActions } from './';
 
 const { width: screenWidth } = Dimensions.get('window');
 

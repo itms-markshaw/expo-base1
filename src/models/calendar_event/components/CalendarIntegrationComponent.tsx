@@ -18,7 +18,7 @@ import {
 } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
 import DateTimePicker from '@react-native-community/datetimepicker';
-import { calendarService, CalendarEvent } from '../models/calendar_event/services/CalendarEventService';
+import { calendarService, CalendarEvent } from '../services/CalendarEventService';
 import * as Calendar from 'expo-calendar';
 
 interface CalendarIntegrationProps {
