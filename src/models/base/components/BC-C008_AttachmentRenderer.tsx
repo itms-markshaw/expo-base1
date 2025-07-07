@@ -20,7 +20,7 @@ import {
 } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
 import * as MediaLibrary from 'expo-media-library';
-import attachmentService, { AttachmentDownload, DownloadProgress } from '../services/BC-S007_AttachmentService';
+import enhancedAttachmentService, { AttachmentDownload, DownloadProgress } from '../services/BC-S008_EnhancedAttachmentService';
 
 interface AttachmentRendererProps {
   attachment: AttachmentDownload;
@@ -50,8 +50,8 @@ export default function AttachmentRenderer({
   const progressAnimation = useRef(new Animated.Value(0)).current;
   const fadeAnimation = useRef(new Animated.Value(0)).current;
 
-  const mimeCategory = attachmentService.getMimeTypeCategory(attachment.mimetype);
-  const fileSize = attachmentService.formatFileSize(attachment.file_size);
+  const mimeCategory = enhancedAttachmentService.getMimeTypeCategory(attachment.mimetype);
+  const fileSize = enhancedAttachmentService.formatFileSize(attachment.file_size);
 
   useEffect(() => {
     // Animate in when component mounts
@@ -85,7 +85,7 @@ export default function AttachmentRenderer({
     setError(null);
 
     try {
-      const path = await attachmentService.downloadAttachment(
+      const path = await enhancedAttachmentService.downloadAttachment(
         attachment,
         (progress) => {
           setDownloadProgress(progress);
@@ -94,11 +94,19 @@ export default function AttachmentRenderer({
       
       setLocalPath(path);
       setDownloadProgress(null);
-      console.log(`✅ Auto-downloaded image for inline viewing: ${attachment.filename}`);
+      // Image downloaded successfully
       
     } catch (downloadError) {
-      console.error('Auto-download failed:', downloadError);
+      console.error(`❌ Auto-download failed for ${attachment.filename}:`, downloadError);
       setError('Failed to load image');
+
+      // For debugging: log attachment details when download fails
+      console.log('📋 Failed attachment details:', {
+        id: attachment.id,
+        filename: attachment.filename,
+        mimetype: attachment.mimetype,
+        file_size: attachment.file_size
+      });
     } finally {
       setIsLoading(false);
     }
@@ -124,7 +132,7 @@ export default function AttachmentRenderer({
         return;
       }
 
-      const path = await attachmentService.downloadAttachment(
+      const path = await enhancedAttachmentService.downloadAttachment(
         attachment,
         (progress) => {
           setDownloadProgress(progress);
@@ -250,11 +258,6 @@ export default function AttachmentRenderer({
             <MaterialIcons name="broken-image" size={40} color="#FF3B30" />
             <Text style={styles.errorText}>Failed to load</Text>
           </View>
-          <View style={styles.filenameOverlay}>
-            <Text style={styles.filenameText} numberOfLines={1}>
-              {attachment.filename}
-            </Text>
-          </View>
         </View>
       );
     }
@@ -269,11 +272,6 @@ export default function AttachmentRenderer({
               {Math.round((downloadProgress?.progress || 0) * 100)}%
             </Text>
           </View>
-          <View style={styles.filenameOverlay}>
-            <Text style={styles.filenameText} numberOfLines={1}>
-              {attachment.filename}
-            </Text>
-          </View>
         </View>
       );
     }
@@ -282,30 +280,35 @@ export default function AttachmentRenderer({
     if (localPath && mimeCategory === 'image') {
       return (
         <View style={[styles.container, { width: maxWidth, height: maxHeight }]}>
-          <Image 
+          <Image
             source={{ uri: localPath }}
             style={[styles.image, { width: maxWidth, height: maxHeight }]}
             resizeMode="cover"
             onError={() => {
-              console.log(`❌ Failed to display downloaded image: ${attachment.filename}`);
               setError('Failed to display image');
               setImageLoaded(false);
             }}
             onLoad={() => {
-              console.log(`✅ Successfully displayed downloaded image: ${attachment.filename}`);
               setImageLoaded(true);
             }}
           />
-          <View style={styles.filenameOverlay}>
-            <Text style={styles.filenameText} numberOfLines={1}>
-              {attachment.filename}
-            </Text>
+        </View>
+      );
+    }
+
+    // For images that haven't loaded yet, show a placeholder instead of file attachment
+    if (mimeCategory === 'image' && !localPath && !isLoading && !error) {
+      return (
+        <View style={[styles.container, { width: maxWidth, height: maxHeight }]}>
+          <View style={styles.imagePlaceholder}>
+            <MaterialIcons name="image" size={40} color="#C7C7CC" />
+            <Text style={styles.placeholderText}>Loading image...</Text>
           </View>
         </View>
       );
     }
 
-    // Show file attachment button for non-images or non-downloaded files
+    // Show file attachment button for non-images or failed downloads
     return (
       <View style={styles.fileAttachment}>
         {renderFileIcon()}
@@ -384,21 +387,7 @@ const styles = StyleSheet.create({
     color: '#FF3B30',
     textAlign: 'center',
   },
-  filenameOverlay: {
-    position: 'absolute',
-    bottom: 2,
-    left: 2,
-    right: 2,
-    backgroundColor: 'rgba(0,0,0,0.6)',
-    paddingHorizontal: 4,
-    paddingVertical: 1,
-    borderRadius: 3,
-  },
-  filenameText: {
-    color: 'white',
-    fontSize: 9,
-    textAlign: 'center',
-  },
+
   fileAttachment: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -445,6 +434,18 @@ const styles = StyleSheet.create({
     color: '#007AFF',
     minWidth: 40,
     textAlign: 'right',
+  },
+  imagePlaceholder: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: '#F8F9FA',
+    borderRadius: 8,
+  },
+  placeholderText: {
+    fontSize: 12,
+    color: '#C7C7CC',
+    marginTop: 8,
   },
 });
 

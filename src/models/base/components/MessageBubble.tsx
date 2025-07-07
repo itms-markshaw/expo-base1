@@ -99,16 +99,7 @@ export default function MessageBubble({
   // We need to check both the user ID and partner ID
   const isOwnMessage = messageAuthorId === currentUserId || messageAuthorId === parsedCurrentUserPartnerId;
 
-  // Debug logging for message alignment
-  console.log(`💬 Message ${message.id} alignment check:`, {
-    currentUserId,
-    currentUserPartnerId,
-    parsedCurrentUserPartnerId,
-    author_id: message.author_id,
-    messageAuthorId,
-    isOwnMessage,
-    authorType: typeof message.author_id
-  });
+  // Removed excessive logging
 
   // Show avatar for other users (first message in group from same author)
   const showAvatar = !isOwnMessage && (!nextMessage ||
@@ -360,11 +351,7 @@ export default function MessageBubble({
       return null;
     }
 
-    console.log(`🔗 Rendering attachments for message ${message.id}:`, {
-      attachment_ids: message.attachment_ids,
-      parsed_attachment_ids: attachmentIds,
-      attachments: message.attachments
-    });
+    // Removed excessive logging
 
     return (
       <View style={styles.attachmentsContainer}>
@@ -374,24 +361,23 @@ export default function MessageBubble({
 
           // If no attachment details, create a basic one
           if (!attachment) {
-            console.log(`⚠️ No attachment details found for ID ${attachmentId}, creating default`);
             attachment = {
               id: attachmentId,
               name: `attachment_${attachmentId}`,
-              mimetype: 'image/jpeg' // Assume image
+              mimetype: 'image/jpeg' // Assume image for missing details
             };
-          } else {
-            console.log(`✅ Found attachment details for ID ${attachmentId}:`, attachment);
           }
 
-          const isImage = attachment.mimetype?.startsWith('image/');
+          // Determine if it's an image - be more flexible with detection
+          const isImage = attachment.mimetype?.startsWith('image/') ||
+                          attachment.name?.match(/\.(jpg|jpeg|png|gif|webp|bmp)$/i) ||
+                          (!attachment.mimetype && attachment.name?.includes('attachment_')); // Assume uploaded images
 
           if (isImage) {
             // Use the working web/image endpoint that's showing success in logs
             const imageUrl = `${ODOO_CONFIG.baseURL}/web/image/${attachmentId}`;
 
-            console.log(`🖼️ Loading image for attachment ${attachmentId}:`, imageUrl);
-            console.log(`🖼️ Attachment details:`, attachment);
+            // Removed excessive logging
 
             // Convert to AttachmentDownload format
             const attachmentDownload: AttachmentDownload = {
@@ -463,22 +449,22 @@ export default function MessageBubble({
   const content = stripHtml(message.body || '');
   const hasAttachments = checkHasAttachments();
 
-  // Debug logging for message structure
-  console.log(`🔍 Message ${message.id} structure:`, {
-    body: message.body,
-    content,
-    hasAttachments,
-    attachment_ids: message.attachment_ids,
-    attachments: message.attachments,
-    messageText: content
-  });
+  // Removed excessive logging
 
   if (!content && !hasAttachments) {
     return null;
   }
 
-  // Clean message text
-  const messageText = stripHtml(message.body || '');
+  // Clean message text and remove attachment references
+  let messageText = stripHtml(message.body || '');
+
+  // Remove attachment filename references from message text (more comprehensive)
+  messageText = messageText.replace(/📎\s*attachment_\d+/gi, '').trim();
+  messageText = messageText.replace(/attachment_\d+/gi, '').trim();
+  messageText = messageText.replace(/📎\s*/gi, '').trim(); // Remove paperclip emoji
+
+  // Remove any remaining attachment placeholders
+  messageText = messageText.replace(/Attachment \([^)]+\)/gi, '').trim();
 
   // Don't render empty messages UNLESS there are attachments
   if (!messageText.trim() && !hasAttachments) {
@@ -492,8 +478,8 @@ export default function MessageBubble({
         isOwnMessage ? styles.ownMessageBubble : styles.otherMessageBubble
       ]}>
         <View style={styles.messageContentContainer}>
-          {/* Render message text if it exists and is not just attachment placeholder */}
-          {messageText.trim() && !messageText.includes('Attachment (') && (
+          {/* Render message text if it exists */}
+          {messageText.trim() && (
             <View style={styles.messageTextRow}>
               <Text style={[
                 styles.messageText,
@@ -516,24 +502,26 @@ export default function MessageBubble({
           )}
 
           {/* Render attachments */}
-          {renderInlineAttachments()}
+          <View style={styles.attachmentContainer}>
+            {renderInlineAttachments()}
 
-          {/* If no text (or only attachment placeholder) but has attachments, still show timestamp */}
-          {(!messageText.trim() || messageText.includes('Attachment (')) && hasAttachments && (
-            <View style={styles.messageTextRow}>
-              <Text style={[
-                styles.messageTime,
-                isOwnMessage ? styles.ownMessageTime : styles.otherMessageTime
-              ]}>
-                {formatTime(message.date)}
-              </Text>
-              {isOwnMessage && (
-                <View style={styles.messageStatus}>
-                  {getMessageStatus()}
-                </View>
-              )}
-            </View>
-          )}
+            {/* Always show timestamp at bottom right for attachment-only messages */}
+            {!messageText.trim() && hasAttachments && (
+              <View style={styles.attachmentTimestamp}>
+                <Text style={[
+                  styles.messageTime,
+                  isOwnMessage ? styles.ownMessageTime : styles.otherMessageTime
+                ]}>
+                  {formatTime(message.date)}
+                </Text>
+                {isOwnMessage && (
+                  <View style={styles.messageStatus}>
+                    {getMessageStatus()}
+                  </View>
+                )}
+              </View>
+            )}
+          </View>
         </View>
       </View>
     </View>
@@ -688,5 +676,21 @@ const styles = StyleSheet.create({
   // Optimistic message styles
   optimisticBubble: {
     opacity: 0.7,
+  },
+
+  // Attachment container styles
+  attachmentContainer: {
+    position: 'relative',
+  },
+  attachmentTimestamp: {
+    position: 'absolute',
+    bottom: 4,
+    right: 4,
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 8,
   },
 });

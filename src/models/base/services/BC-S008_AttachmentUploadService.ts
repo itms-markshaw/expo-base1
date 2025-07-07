@@ -121,8 +121,9 @@ class AttachmentUploadService {
       // Upload attachment first
       const attachmentId = await this.uploadAttachment(attachment, onProgress);
 
-      // Create message body with attachment reference
-      const messageBody = messageText || `📎 ${attachment.name}`;
+      // Create message body - don't include attachment filename for images
+      const isImage = attachment.type?.startsWith('image/');
+      const messageBody = messageText || (isImage ? '' : `📎 ${attachment.name}`);
 
       // Send message using message_post (proper Odoo method for chat)
       const messageResult = await client.callModel('discuss.channel', 'message_post', [channelId], {
@@ -133,11 +134,8 @@ class AttachmentUploadService {
 
       console.log(`✅ Message sent with attachment. Message ID: ${messageResult}`);
 
-      // Update attachment to link to the message
-      await client.callModel('ir.attachment', 'write', [[attachmentId]], {
-        res_id: channelId,
-        res_model: 'discuss.channel',
-      });
+      // Update attachment to link to the channel (not needed since it's already linked via message_post)
+      // The attachment is automatically linked when using message_post with attachment_ids
 
       return true;
 

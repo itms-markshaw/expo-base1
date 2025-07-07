@@ -80,6 +80,8 @@ export default function ChatScreen() {
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
   const [showAttachmentOptions, setShowAttachmentOptions] = useState(false);
   const [uploadProgress, setUploadProgress] = useState<UploadProgress | null>(null);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [hasMoreMessages, setHasMoreMessages] = useState(true);
 
   // Use refs to access current values in event listeners
   const selectedChannelRef = useRef<ChatChannel | null>(null);
@@ -147,25 +149,16 @@ export default function ChatScreen() {
 
     // Also listen for individual message events
     chatService.on('newMessage', ({ channelId, message }) => {
-      console.log(`📨 ChatScreen received single new message for channel ${channelId}:`, message.id);
-      console.log(`📨 Current selected channel: ${selectedChannelRef.current?.id}`);
-
       if (selectedChannelRef.current?.id === channelId) {
-        console.log(`🔄 Channel matches, updating messages state`);
         setMessages(prev => {
           const exists = prev.some(m => m.id === message.id);
           if (!exists) {
-            console.log(`🔄 Adding new message ${message.id} to UI`);
             const updated = [...prev, message];
             setTimeout(scrollToBottom, 100);
             return updated;
-          } else {
-            console.log(`⚠️ Message ${message.id} already exists in UI`);
           }
           return prev;
         });
-      } else {
-        console.log(`⚠️ Channel ${channelId} doesn't match selected channel ${selectedChannelRef.current?.id}`);
       }
     });
 
@@ -238,38 +231,49 @@ export default function ChatScreen() {
   };
 
   const selectChannel = async (channel: ChatChannel) => {
-    console.log(`📱 Selecting channel: ${channel.name} (ID: ${channel.id})`);
     setSelectedChannel(channel);
     setMessages([]);
     setTypingUsers([]);
+    setHasMoreMessages(true);
 
     // Subscribe to longpolling for real-time updates
-    console.log(`📡 Subscribing to longpolling for channel ${channel.id}`);
     chatService.subscribeToChannel(channel.id);
 
-    // Load messages for this channel
-    console.log(`📨 Loading messages for channel ${channel.id}...`);
-    const loadedMessages = await chatService.loadChannelMessages(channel.id);
-    console.log(`📨 Loaded ${loadedMessages.length} messages for channel ${channel.id}`);
+    // Load initial 25 messages for this channel
+    const loadedMessages = await chatService.loadChannelMessages(channel.id, 25);
 
     // Set messages directly as well as through the event listener
     setMessages(loadedMessages);
 
-    // If no messages loaded, add a test message to verify the UI is working
-    if (loadedMessages.length === 0) {
-      console.log('📨 No messages found, adding test message for UI verification');
-      const testMessage = {
-        id: 999999,
-        body: 'Welcome to the chat! This is a test message to verify the interface is working.',
-        author_id: [1, 'System'],
-        date: new Date().toISOString(),
-        message_type: 'comment',
-        model: 'discuss.channel',
-        res_id: channel.id,
-        attachment_ids: [],
-        partner_ids: []
-      };
-      setMessages([testMessage]);
+    // Check if we have fewer than 25 messages, meaning no more to load
+    if (loadedMessages.length < 25) {
+      setHasMoreMessages(false);
+    }
+  };
+
+  const loadMoreMessages = async () => {
+    if (!selectedChannel || loadingMore || !hasMoreMessages) return;
+
+    setLoadingMore(true);
+    try {
+      const currentOffset = messages.length;
+      const olderMessages = await chatService.loadChannelMessages(selectedChannel.id, 25, currentOffset);
+
+      if (olderMessages.length > 0) {
+        // Prepend older messages to existing ones
+        setMessages(prev => [...olderMessages, ...prev]);
+
+        // Check if we got fewer than 25 messages, meaning no more to load
+        if (olderMessages.length < 25) {
+          setHasMoreMessages(false);
+        }
+      } else {
+        setHasMoreMessages(false);
+      }
+    } catch (error) {
+      console.error('Failed to load more messages:', error);
+    } finally {
+      setLoadingMore(false);
     }
   };
 
@@ -530,7 +534,8 @@ export default function ChatScreen() {
 
         // Refresh messages to show the new attachment message
         if (selectedChannel) {
-          await loadMessages(selectedChannel.id);
+          const refreshedMessages = await chatService.loadChannelMessages(selectedChannel.id, 25);
+          setMessages(refreshedMessages);
         }
 
         scrollToBottom();
@@ -582,8 +587,8 @@ export default function ChatScreen() {
         message={item}
         previousMessage={previousMessage}
         nextMessage={nextMessage}
-        currentUserId={currentUserId}
-        currentUserPartnerId={chatService.getCurrentUserPartnerId()}
+        currentUserId={currentUserId || undefined}
+        currentUserPartnerId={chatService.getCurrentUserPartnerId() || undefined}
         onLongPress={() => {
           // Handle long press for message actions
           Alert.alert(
@@ -779,6 +784,23 @@ export default function ChatScreen() {
         >
 
 
+          {/* Load More Messages Button */}
+          {hasMoreMessages && messages.length > 0 && (
+            <View style={styles.loadMoreContainer}>
+              <TouchableOpacity
+                style={styles.loadMoreButton}
+                onPress={loadMoreMessages}
+                disabled={loadingMore}
+              >
+                {loadingMore ? (
+                  <ActivityIndicator size="small" color="#007AFF" />
+                ) : (
+                  <Text style={styles.loadMoreText}>Load More Messages</Text>
+                )}
+              </TouchableOpacity>
+            </View>
+          )}
+
           {/* Messages - iMessage Style */}
           {messages.length === 0 ? (
             <View style={styles.emptyMessagesContainer}>
@@ -791,7 +813,7 @@ export default function ChatScreen() {
             <FlatList
               ref={flatListRef}
               data={messages}
-              keyExtractor={(item) => `message-${item.id || item.local_id || Math.random()}`}
+              keyExtractor={(item) => `message-${item.id || Math.random()}`}
               renderItem={renderMessage}
               style={styles.messagesList}
               contentContainerStyle={styles.messagesContent}
@@ -931,7 +953,7 @@ export default function ChatScreen() {
               maxLength={1000}
             />
             <TouchableOpacity
-              style={styles.emojiButton}
+              style={styles.emojiInputButton}
               onPress={() => setShowEmojiPicker(!showEmojiPicker)}
               disabled={sending}
             >
@@ -1372,13 +1394,13 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'flex-end',
     paddingHorizontal: 12,
-    paddingVertical: 8,
-    paddingBottom: Platform.OS === 'ios' ? 34 : 8, // Safe area for iOS
+    paddingVertical: 4, // Reduced from 8 to 4
+    paddingBottom: Platform.OS === 'ios' ? 20 : 4, // Reduced iOS padding from 34 to 20, Android from 8 to 4
     backgroundColor: '#FFF',
     borderTopWidth: 0.5,
     borderTopColor: '#E5E5E5',
     gap: 8,
-    minHeight: Platform.OS === 'ios' ? 90 : 56,
+    minHeight: Platform.OS === 'ios' ? 70 : 48, // Reduced minHeight
   },
   attachmentButton: {
     width: 32,
@@ -1387,7 +1409,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#F8F9FA',
     justifyContent: 'center',
     alignItems: 'center',
-    marginBottom: 6,
+    marginBottom: 2, // Reduced from 6 to 2
     borderWidth: 1,
     borderColor: '#E5E5E5',
   },
@@ -1397,11 +1419,22 @@ const styles = StyleSheet.create({
     borderColor: '#E5E5E5',
     borderRadius: 22,
     paddingHorizontal: 16,
-    paddingVertical: 10,
+    paddingVertical: 8, // Reduced from 10 to 8
     fontSize: 16,
     maxHeight: 120,
     backgroundColor: '#F8F9FA',
     textAlignVertical: 'center',
+  },
+  emojiInputButton: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: '#F8F9FA',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 2,
+    borderWidth: 1,
+    borderColor: '#E5E5E5',
   },
   sendButton: {
     width: 36,
@@ -1432,6 +1465,24 @@ const styles = StyleSheet.create({
     color: '#999',
     marginTop: 8,
     textAlign: 'center',
+  },
+  loadMoreContainer: {
+    paddingVertical: 8,
+    paddingHorizontal: 16,
+    alignItems: 'center',
+  },
+  loadMoreButton: {
+    paddingVertical: 8,
+    paddingHorizontal: 16,
+    backgroundColor: '#F8F9FA',
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: '#E5E5E5',
+  },
+  loadMoreText: {
+    fontSize: 14,
+    color: '#007AFF',
+    fontWeight: '500',
   },
 
 });
