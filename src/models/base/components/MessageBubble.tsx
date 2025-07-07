@@ -11,9 +11,16 @@ import {
   TouchableOpacity,
   Image,
   Dimensions,
+  Alert,
+  Linking,
 } from 'react-native';
 import { MaterialIcons, MaterialCommunityIcons } from '@expo/vector-icons';
 import RenderHtml from 'react-native-render-html';
+import { ODOO_CONFIG } from '../../../config/odoo';
+import * as FileSystem from 'expo-file-system';
+import * as MediaLibrary from 'expo-media-library';
+// import * as Sharing from 'expo-sharing'; // Will add this package later
+import { authService } from '../services/BaseAuthService';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 const MAX_BUBBLE_WIDTH = SCREEN_WIDTH * 0.75;
@@ -36,6 +43,7 @@ interface MessageBubbleProps {
   currentUserPartnerId?: number; // Add partner ID for proper message alignment
   onLongPress?: () => void;
   onAttachmentPress?: (attachmentId: number, filename: string, attachment: any) => void;
+  onAttachmentLongPress?: (attachmentId: number, filename: string, attachment: any) => void;
 }
 
 export default function MessageBubble({
@@ -47,6 +55,97 @@ export default function MessageBubble({
   onLongPress,
   onAttachmentPress,
 }: MessageBubbleProps) {
+
+  // Track image loading states
+  const [imageLoadStates, setImageLoadStates] = React.useState<{[key: number]: 'loading' | 'loaded' | 'error'}>({});
+
+  // Download attachment function using authenticated XML-RPC client
+  const downloadAttachment = async (attachmentId: number, filename: string, attachment: any) => {
+    try {
+      console.log(`📥 Starting authenticated download for attachment ${attachmentId}: ${filename}`);
+
+      // Request permissions
+      const { status } = await MediaLibrary.requestPermissionsAsync();
+      if (status !== 'granted') {
+        Alert.alert('Permission Required', 'Please grant media library permissions to download files.');
+        return;
+      }
+
+      // Get the authenticated client
+      const client = authService.getClient();
+      if (!client) {
+        Alert.alert('Authentication Error', 'Please log in again to download files.');
+        return;
+      }
+
+      console.log(`📥 Using authenticated XML-RPC client to download attachment ${attachmentId}`);
+
+      // Use the XML-RPC client to read the attachment data (this uses proper authentication)
+      const attachmentData = await client.callModel('ir.attachment', 'read', [attachmentId], {
+        fields: ['datas', 'name', 'mimetype', 'file_size']
+      });
+
+      if (!attachmentData || attachmentData.length === 0) {
+        throw new Error('Attachment not found');
+      }
+
+      const base64Data = attachmentData[0].datas;
+      if (!base64Data) {
+        throw new Error('No attachment data available');
+      }
+
+      console.log(`✅ Retrieved ${base64Data.length} characters of base64 data via XML-RPC`);
+
+      // Save the file
+      const fileUri = FileSystem.documentDirectory + filename;
+      await FileSystem.writeAsStringAsync(fileUri, base64Data, {
+        encoding: FileSystem.EncodingType.Base64,
+      });
+
+      console.log(`✅ Saved to: ${fileUri}`);
+
+      // Save to media library for images
+      if (attachment.mimetype?.startsWith('image/')) {
+        const asset = await MediaLibrary.createAssetAsync(fileUri);
+        await MediaLibrary.createAlbumAsync('ExpoApp Downloads', asset, false);
+        Alert.alert('Success', `Image saved to Photos: ${filename}`);
+      } else {
+        // For other files, show success message and file location
+        Alert.alert(
+          'Success',
+          `File downloaded: ${filename}\nLocation: ${fileUri}`,
+          [
+            { text: 'OK' },
+            { text: 'Open', onPress: () => Linking.openURL(fileUri) }
+          ]
+        );
+      }
+
+    } catch (error) {
+      console.error(`❌ Authenticated download failed for ${filename}:`, error);
+      Alert.alert('Download Failed', `Could not download ${filename}: ${error.message}`);
+    }
+  };
+
+  // Handle long press with download option
+  const handleAttachmentLongPress = (attachmentId: number, filename: string, attachment: any) => {
+    Alert.alert(
+      'Attachment Options',
+      `What would you like to do with "${filename}"?`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Download',
+          onPress: () => downloadAttachment(attachmentId, filename, attachment)
+        },
+        {
+          text: 'Open',
+          onPress: () => onAttachmentPress?.(attachmentId, filename, attachment)
+        },
+      ]
+    );
+  };
+
   // Determine if this is the current user's message
   let messageAuthorId: number | null = null;
 
@@ -137,6 +236,47 @@ export default function MessageBubble({
     }
 
     return 'Unknown User';
+  };
+
+  // Helper function to check if message has attachments
+  const checkHasAttachments = (): boolean => {
+    // Check enriched attachments first
+    if (message.attachments && Array.isArray(message.attachments) && message.attachments.length > 0) {
+      return true;
+    }
+
+    // Check XML-RPC format
+    if (typeof message.attachment_ids === 'string' && message.attachment_ids.includes('<value><int>')) {
+      return true;
+    }
+
+    // Check regular array format
+    if (Array.isArray(message.attachment_ids) && message.attachment_ids.length > 0) {
+      return true;
+    }
+
+    return false;
+  };
+
+  // Helper function to get attachment count
+  const getAttachmentCount = (): number => {
+    // Check enriched attachments first
+    if (message.attachments && Array.isArray(message.attachments)) {
+      return message.attachments.length;
+    }
+
+    // Check XML-RPC format
+    if (typeof message.attachment_ids === 'string' && message.attachment_ids.includes('<value><int>')) {
+      const matches = message.attachment_ids.match(/<value><int>(\d+)<\/int>/g);
+      return matches ? matches.length : 0;
+    }
+
+    // Check regular array format
+    if (Array.isArray(message.attachment_ids)) {
+      return message.attachment_ids.length;
+    }
+
+    return 0;
   };
 
   // Process message body for rich content (similar to chat examples)
@@ -242,7 +382,9 @@ export default function MessageBubble({
     }
 
     // Show attachment info if no text content
-    if (message.attachment_ids && Array.isArray(message.attachment_ids) && message.attachment_ids.length > 0) {
+    const hasAttachments = checkHasAttachments();
+    if (hasAttachments) {
+      const attachmentCount = getAttachmentCount();
       return (
         <View style={styles.attachmentContainer}>
           <MaterialIcons
@@ -254,7 +396,7 @@ export default function MessageBubble({
             styles.attachmentText,
             { color: isOwnMessage ? '#FFF' : '#007AFF' }
           ]}>
-            {message.attachment_ids.length} attachment{message.attachment_ids.length > 1 ? 's' : ''}
+            {attachmentCount} attachment{attachmentCount > 1 ? 's' : ''}
           </Text>
         </View>
       );
@@ -264,42 +406,111 @@ export default function MessageBubble({
   };
 
   const renderInlineAttachments = () => {
-    // Safely check for attachment_ids
-    if (!message.attachment_ids || !Array.isArray(message.attachment_ids) || message.attachment_ids.length === 0) {
+    // Parse attachment IDs from various formats
+    let attachmentIds: number[] = [];
+
+    // Handle XML-RPC format: "<array><data><value><int>53541</int>"
+    if (typeof message.attachment_ids === 'string' && message.attachment_ids.includes('<value><int>')) {
+      const matches = message.attachment_ids.match(/<value><int>(\d+)<\/int>/g);
+      if (matches) {
+        attachmentIds = matches.map((match: string) => {
+          const idMatch = match.match(/<value><int>(\d+)<\/int>/);
+          return idMatch ? parseInt(idMatch[1]) : null;
+        }).filter(Boolean) as number[];
+      }
+    }
+    // Handle regular array format
+    else if (Array.isArray(message.attachment_ids)) {
+      attachmentIds = message.attachment_ids;
+    }
+
+    // Also check if we have enriched attachments directly
+    if (message.attachments && Array.isArray(message.attachments) && message.attachments.length > 0) {
+      // Use attachment IDs from enriched attachments if we don't have them from attachment_ids
+      if (attachmentIds.length === 0) {
+        attachmentIds = message.attachments.map(att => att.id);
+      }
+    }
+
+    if (attachmentIds.length === 0) {
       return null;
     }
 
+    console.log(`🔗 Rendering attachments for message ${message.id}:`, {
+      attachment_ids: message.attachment_ids,
+      parsed_attachment_ids: attachmentIds,
+      attachments: message.attachments
+    });
+
     return (
       <View style={styles.attachmentsContainer}>
-        {message.attachment_ids.map((attachmentId, index) => {
+        {attachmentIds.map((attachmentId, index) => {
           // Try to find attachment details
           let attachment = message.attachments?.find(att => att.id === attachmentId);
 
           // If no attachment details, create a basic one
           if (!attachment) {
+            console.log(`⚠️ No attachment details found for ID ${attachmentId}, creating default`);
             attachment = {
               id: attachmentId,
               name: `attachment_${attachmentId}`,
               mimetype: 'image/jpeg' // Assume image
             };
+          } else {
+            console.log(`✅ Found attachment details for ID ${attachmentId}:`, attachment);
           }
 
           const isImage = attachment.mimetype?.startsWith('image/');
 
           if (isImage) {
+            // Use the working web/image endpoint that's showing success in logs
+            const imageUrl = `${ODOO_CONFIG.baseURL}/web/image/${attachmentId}`;
+
+            console.log(`🖼️ Loading image for attachment ${attachmentId}:`, imageUrl);
+            console.log(`🖼️ Attachment details:`, attachment);
+
             return (
               <TouchableOpacity
                 key={`attachment-${attachmentId}-${index}`}
                 style={styles.inlineImageContainer}
                 onPress={() => onAttachmentPress?.(attachmentId, attachment.name, attachment)}
+                onLongPress={() => handleAttachmentLongPress(attachmentId, attachment.name, attachment)}
               >
                 <Image
-                  source={{
-                    uri: `https://itmsgroup.com.au/api/v2/image/${attachmentId}/256x256`
-                  }}
-                  style={styles.inlineImage}
+                  source={{ uri: imageUrl }}
+                  style={[styles.inlineImage, { backgroundColor: 'transparent' }]}
                   resizeMode="cover"
+                  onError={(error) => {
+                    console.log(`❌ Failed to load image ${attachmentId}:`, error.nativeEvent.error);
+                    console.log(`❌ Image URL was: ${imageUrl}`);
+                    setImageLoadStates(prev => ({ ...prev, [attachmentId]: 'error' }));
+                  }}
+                  onLoad={() => {
+                    console.log(`✅ Successfully loaded image ${attachmentId} from ${imageUrl}`);
+                    setImageLoadStates(prev => ({ ...prev, [attachmentId]: 'loaded' }));
+                  }}
+                  onLoadStart={() => {
+                    console.log(`🔄 Started loading image ${attachmentId}`);
+                    setImageLoadStates(prev => ({ ...prev, [attachmentId]: 'loading' }));
+                  }}
                 />
+
+                {/* Show placeholder only if image failed to load */}
+                {imageLoadStates[attachmentId] === 'error' && (
+                  <View style={styles.imagePlaceholder}>
+                    <MaterialIcons name="broken-image" size={40} color="#999" />
+                    <Text style={styles.imagePlaceholderText}>
+                      Failed to load
+                    </Text>
+                  </View>
+                )}
+
+                {/* Always show filename overlay at bottom */}
+                <View style={styles.imageFilenameOverlay}>
+                  <Text style={styles.imageFilenameText} numberOfLines={1}>
+                    {attachment.name}
+                  </Text>
+                </View>
               </TouchableOpacity>
             );
           } else {
@@ -308,6 +519,7 @@ export default function MessageBubble({
                 key={`attachment-${attachmentId}-${index}`}
                 style={styles.fileAttachment}
                 onPress={() => onAttachmentPress?.(attachmentId, attachment.name, attachment)}
+                onLongPress={() => handleAttachmentLongPress(attachmentId, attachment.name, attachment)}
               >
                 <MaterialIcons name="insert-drive-file" size={16} color={isOwnMessage ? '#FFF' : '#007AFF'} />
                 <Text style={[
@@ -351,7 +563,17 @@ export default function MessageBubble({
 
   // Don't render empty messages
   const content = stripHtml(message.body || '');
-  const hasAttachments = message.attachment_ids && Array.isArray(message.attachment_ids) && message.attachment_ids.length > 0;
+  const hasAttachments = checkHasAttachments();
+
+  // Debug logging for message structure
+  console.log(`🔍 Message ${message.id} structure:`, {
+    body: message.body,
+    content,
+    hasAttachments,
+    attachment_ids: message.attachment_ids,
+    attachments: message.attachments,
+    messageText: content
+  });
 
   if (!content && !hasAttachments) {
     return null;
@@ -360,8 +582,8 @@ export default function MessageBubble({
   // Clean message text
   const messageText = stripHtml(message.body || '');
 
-  // Don't render empty messages
-  if (!messageText.trim()) {
+  // Don't render empty messages UNLESS there are attachments
+  if (!messageText.trim() && !hasAttachments) {
     return null;
   }
 
@@ -372,25 +594,48 @@ export default function MessageBubble({
         isOwnMessage ? styles.ownMessageBubble : styles.otherMessageBubble
       ]}>
         <View style={styles.messageContentContainer}>
-          <View style={styles.messageTextRow}>
-            <Text style={[
-              styles.messageText,
-              isOwnMessage ? styles.ownMessageText : styles.otherMessageText
-            ]}>
-              {messageText}
-            </Text>
-            <Text style={[
-              styles.messageTime,
-              isOwnMessage ? styles.ownMessageTime : styles.otherMessageTime
-            ]}>
-              {' '}{formatTime(message.date)}
-            </Text>
-            {isOwnMessage && (
-              <View style={styles.messageStatus}>
-                {getMessageStatus()}
-              </View>
-            )}
-          </View>
+          {/* Render message text if it exists and is not just attachment placeholder */}
+          {messageText.trim() && !messageText.includes('Attachment (') && (
+            <View style={styles.messageTextRow}>
+              <Text style={[
+                styles.messageText,
+                isOwnMessage ? styles.ownMessageText : styles.otherMessageText
+              ]}>
+                {messageText}
+              </Text>
+              <Text style={[
+                styles.messageTime,
+                isOwnMessage ? styles.ownMessageTime : styles.otherMessageTime
+              ]}>
+                {' '}{formatTime(message.date)}
+              </Text>
+              {isOwnMessage && (
+                <View style={styles.messageStatus}>
+                  {getMessageStatus()}
+                </View>
+              )}
+            </View>
+          )}
+
+          {/* Render attachments */}
+          {renderInlineAttachments()}
+
+          {/* If no text (or only attachment placeholder) but has attachments, still show timestamp */}
+          {(!messageText.trim() || messageText.includes('Attachment (')) && hasAttachments && (
+            <View style={styles.messageTextRow}>
+              <Text style={[
+                styles.messageTime,
+                isOwnMessage ? styles.ownMessageTime : styles.otherMessageTime
+              ]}>
+                {formatTime(message.date)}
+              </Text>
+              {isOwnMessage && (
+                <View style={styles.messageStatus}>
+                  {getMessageStatus()}
+                </View>
+              )}
+            </View>
+          )}
         </View>
       </View>
     </View>
@@ -522,11 +767,48 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     overflow: 'hidden',
     marginBottom: 4,
+    backgroundColor: 'transparent', // Remove gray background
+    minWidth: 150,
+    minHeight: 150,
+    position: 'relative',
   },
   inlineImage: {
     width: 150,
     height: 150,
     borderRadius: 8,
+    backgroundColor: 'transparent', // Remove gray background so images show
+  },
+  imagePlaceholder: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: '#f0f0f0',
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderRadius: 8,
+  },
+  imagePlaceholderText: {
+    color: '#999',
+    fontSize: 10,
+    marginTop: 4,
+    textAlign: 'center',
+  },
+  imageFilenameOverlay: {
+    position: 'absolute',
+    bottom: 2,
+    left: 2,
+    right: 2,
+    backgroundColor: 'rgba(0,0,0,0.6)',
+    paddingHorizontal: 4,
+    paddingVertical: 1,
+    borderRadius: 3,
+  },
+  imageFilenameText: {
+    color: 'white',
+    fontSize: 9,
+    textAlign: 'center',
   },
   fileAttachment: {
     flexDirection: 'row',

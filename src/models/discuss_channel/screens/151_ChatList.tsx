@@ -76,6 +76,8 @@ export default function ChatScreen() {
   const [showMembersModal, setShowMembersModal] = useState(false);
   const [mentionSearchQuery, setMentionSearchQuery] = useState('');
   const [mentionStartIndex, setMentionStartIndex] = useState(-1);
+  const [showEmojiPicker, setShowEmojiPicker] = useState(false);
+  const [showAttachmentOptions, setShowAttachmentOptions] = useState(false);
 
   // Use refs to access current values in event listeners
   const selectedChannelRef = useRef<ChatChannel | null>(null);
@@ -170,11 +172,21 @@ export default function ChatScreen() {
       console.log(`🔄 Current selected channel: ${selectedChannelRef.current?.id}`);
 
       if (selectedChannelRef.current?.id === channelId) {
-        // Force reload messages from service
+        // Only reload if we don't have messages or there's a significant difference
         const currentMessages = chatService.getChannelMessages(channelId);
-        console.log(`🔄 Force updating UI with ${currentMessages.length} messages from service`);
-        setMessages([...currentMessages]);
-        setTimeout(scrollToBottom, 100);
+        const currentUIMessages = messagesRef.current;
+
+        console.log(`🔄 Service has ${currentMessages.length} messages, UI has ${currentUIMessages.length}`);
+
+        // Only update if there's a significant difference (more than 1 message difference)
+        // This prevents duplication from rapid updates
+        if (Math.abs(currentMessages.length - currentUIMessages.length) > 1) {
+          console.log(`🔄 Significant difference detected, updating UI with ${currentMessages.length} messages`);
+          setMessages([...currentMessages]);
+          setTimeout(scrollToBottom, 100);
+        } else {
+          console.log(`🔄 Minor difference, letting individual message events handle updates`);
+        }
       }
     });
   };
@@ -358,6 +370,19 @@ export default function ChatScreen() {
     }
   };
 
+  const handleEmojiSelect = (emoji: string) => {
+    setMessageText(prev => prev + emoji);
+    setShowEmojiPicker(false);
+    // Focus back to text input
+    setTimeout(() => {
+      textInputRef.current?.focus();
+    }, 100);
+  };
+
+  const handleAttachmentOptions = () => {
+    setShowAttachmentOptions(!showAttachmentOptions);
+  };
+
   // scrollToBottom already defined above
 
   // Mention functionality removed for offline-first simplicity
@@ -491,6 +516,24 @@ export default function ChatScreen() {
     return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
   };
 
+  const handleAttachmentView = (attachmentId: number, filename: string, attachment: any) => {
+    console.log('📎 Attachment pressed:', { attachmentId, filename, attachment });
+
+    // Handle different attachment types
+    if (attachment?.mimetype?.startsWith('image/')) {
+      // Open image in full screen viewer
+      // You could implement a modal image viewer here
+      Alert.alert('Image Attachment', `Opening ${filename}`, [
+        { text: 'OK' }
+      ]);
+    } else {
+      // Handle other file types
+      Alert.alert('Attachment', `Opening ${filename}`, [
+        { text: 'OK' }
+      ]);
+    }
+  };
+
   const renderMessage = ({ item, index }: { item: ChatMessage; index: number }) => {
     const previousMessage = index > 0 ? messages[index - 1] : undefined;
     const nextMessage = index < messages.length - 1 ? messages[index + 1] : undefined;
@@ -506,6 +549,7 @@ export default function ChatScreen() {
           // Handle long press for message actions
           console.log('Long press on message:', item.id);
         }}
+        onAttachmentPress={handleAttachmentView}
       />
     );
   };
@@ -713,14 +757,87 @@ export default function ChatScreen() {
             </View>
           )}
 
+          {/* Attachment Options Overlay */}
+          {showAttachmentOptions && (
+            <TouchableOpacity
+              style={styles.attachmentOptionsOverlay}
+              activeOpacity={1}
+              onPress={() => setShowAttachmentOptions(false)}
+            >
+              <TouchableOpacity
+                style={styles.attachmentOptionsContainer}
+                activeOpacity={1}
+                onPress={(e) => e.stopPropagation()}
+              >
+                <TouchableOpacity
+                  style={styles.attachmentOption}
+                  onPress={() => {
+                    setShowAttachmentOptions(false);
+                    takePhoto();
+                  }}
+                >
+                  <MaterialIcons name="camera-alt" size={24} color="#007AFF" />
+                  <Text style={styles.attachmentOptionText}>Camera</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={styles.attachmentOption}
+                  onPress={() => {
+                    setShowAttachmentOptions(false);
+                    pickImage();
+                  }}
+                >
+                  <MaterialIcons name="photo-library" size={24} color="#007AFF" />
+                  <Text style={styles.attachmentOptionText}>Gallery</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={styles.attachmentOption}
+                  onPress={() => {
+                    setShowAttachmentOptions(false);
+                    pickDocument();
+                  }}
+                >
+                  <MaterialIcons name="insert-drive-file" size={24} color="#007AFF" />
+                  <Text style={styles.attachmentOptionText}>Document</Text>
+                </TouchableOpacity>
+              </TouchableOpacity>
+            </TouchableOpacity>
+          )}
+
+          {/* Emoji Picker */}
+          {showEmojiPicker && (
+            <TouchableOpacity
+              style={styles.emojiPickerOverlay}
+              activeOpacity={1}
+              onPress={() => setShowEmojiPicker(false)}
+            >
+              <TouchableOpacity
+                style={styles.emojiPickerContainer}
+                activeOpacity={1}
+                onPress={(e) => e.stopPropagation()}
+              >
+                <View style={styles.emojiGrid}>
+                  {['😀', '😂', '😍', '🥰', '😊', '😎', '🤔', '😢', '😡', '👍', '👎', '❤️', '🔥', '💯', '🎉', '👏', '🙏', '💪', '✨', '⭐'].map((emoji, index) => (
+                    <TouchableOpacity
+                      key={index}
+                      style={styles.emojiButton}
+                      onPress={() => handleEmojiSelect(emoji)}
+                    >
+                      <Text style={styles.emojiText}>{emoji}</Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              </TouchableOpacity>
+            </TouchableOpacity>
+          )}
+
           {/* Message Input */}
           <View style={styles.inputContainer}>
             <TouchableOpacity
               style={styles.attachmentButton}
-              onPress={handleAttachmentPress}
+              onPress={handleAttachmentOptions}
               disabled={sending}
             >
-              <MaterialIcons name="attach-file" size={20} color="#007AFF" />
+              <MaterialIcons name="add" size={20} color="#007AFF" />
             </TouchableOpacity>
             <TextInput
               ref={textInputRef}
@@ -732,6 +849,13 @@ export default function ChatScreen() {
               multiline
               maxLength={1000}
             />
+            <TouchableOpacity
+              style={styles.emojiButton}
+              onPress={() => setShowEmojiPicker(!showEmojiPicker)}
+              disabled={sending}
+            >
+              <MaterialIcons name="emoji-emotions" size={20} color="#007AFF" />
+            </TouchableOpacity>
             <TouchableOpacity
               style={[styles.sendButton, (!messageText.trim() || sending) && styles.sendButtonDisabled]}
               onPress={sendMessage}
@@ -1059,6 +1183,84 @@ const styles = StyleSheet.create({
   mentionPickerStyle: {
     // Additional styles for the mention picker overlay
   },
+  // Attachment Options Overlay
+  attachmentOptionsOverlay: {
+    position: 'absolute',
+    bottom: 70,
+    left: 0,
+    right: 0,
+    top: 0,
+    zIndex: 1000,
+    justifyContent: 'flex-end',
+    paddingHorizontal: 16,
+    paddingBottom: 70,
+  },
+  attachmentOptionsContainer: {
+    flexDirection: 'row',
+    backgroundColor: '#FFFFFF',
+    borderRadius: 12,
+    padding: 16,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 8,
+    elevation: 5,
+    justifyContent: 'space-around',
+  },
+  attachmentOption: {
+    alignItems: 'center',
+    padding: 12,
+    borderRadius: 8,
+    backgroundColor: '#F8F9FA',
+    minWidth: 80,
+  },
+  attachmentOptionText: {
+    fontSize: 12,
+    color: '#007AFF',
+    marginTop: 4,
+    fontWeight: '500',
+  },
+
+  // Emoji Picker
+  emojiPickerOverlay: {
+    position: 'absolute',
+    bottom: 70,
+    left: 0,
+    right: 0,
+    top: 0,
+    zIndex: 1000,
+    justifyContent: 'flex-end',
+    paddingHorizontal: 16,
+    paddingBottom: 70,
+  },
+  emojiPickerContainer: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 12,
+    padding: 16,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 8,
+    elevation: 5,
+    maxHeight: 200,
+  },
+  emojiGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'space-between',
+  },
+  emojiButton: {
+    width: 40,
+    height: 40,
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderRadius: 8,
+    margin: 2,
+  },
+  emojiText: {
+    fontSize: 24,
+  },
+
   inputContainer: {
     flexDirection: 'row',
     alignItems: 'flex-end',

@@ -279,17 +279,25 @@ class ChatService {
           source
         });
 
+        // Enrich message with attachment details if it has attachments
+        let enrichedMessage = processedMessage;
+        if (processedMessage.attachment_ids && processedMessage.attachment_ids.length > 0) {
+          console.log(`🔗 Message ${processedMessage.id} has attachments, enriching...`);
+          const enrichedMessages = await this.enrichMessagesWithAttachments([processedMessage]);
+          enrichedMessage = enrichedMessages[0] || processedMessage;
+        }
+
         // Get existing messages for this channel
         const existingMessages = this.channelMessages.get(channelId) || [];
 
         // CRITICAL FIX: Better deduplication logic
-        const messageExists = existingMessages.some(m => m.id === processedMessage.id);
-        const wasRecentlyProcessed = this.recentlyProcessedMessages.has(processedMessage.id);
+        const messageExists = existingMessages.some(m => m.id === enrichedMessage.id);
+        const wasRecentlyProcessed = this.recentlyProcessedMessages.has(enrichedMessage.id);
 
         if (!messageExists && !wasRecentlyProcessed) {
           // Add to recently processed to prevent duplicate processing
-          this.recentlyProcessedMessages.add(processedMessage.id);
-          
+          this.recentlyProcessedMessages.add(enrichedMessage.id);
+
           // Clean up old recently processed messages (keep only last 50)
           if (this.recentlyProcessedMessages.size > 50) {
             const entries = Array.from(this.recentlyProcessedMessages);
@@ -297,23 +305,23 @@ class ChatService {
           }
 
           // Remove any optimistic messages with the same content
-          const filteredMessages = existingMessages.filter(msg => 
-            !(msg as any).isOptimistic || msg.body !== processedMessage.body
+          const filteredMessages = existingMessages.filter(msg =>
+            !(msg as any).isOptimistic || msg.body !== enrichedMessage.body
           );
 
           // Add to channel messages
-          const updatedMessages = [...filteredMessages, processedMessage];
-          
+          const updatedMessages = [...filteredMessages, enrichedMessage];
+
           // Sort by date to maintain order
           updatedMessages.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
-          
+
           this.channelMessages.set(channelId, updatedMessages);
 
-          console.log(`✅ Added new message ${processedMessage.id} to channel ${channelId} from ${source}`);
+          console.log(`✅ Added new message ${enrichedMessage.id} to channel ${channelId} from ${source}`);
 
           // CRITICAL: Force UI update with immediate emission
-          this.emit('newMessage', { channelId, message: processedMessage });
-          this.emit('newMessages', { channelId, messages: [processedMessage] });
+          this.emit('newMessage', { channelId, message: enrichedMessage });
+          this.emit('newMessages', { channelId, messages: [enrichedMessage] });
           this.emit('messagesUpdated', { channelId });
 
           console.log(`📡 Emitted real-time message events for channel ${channelId}`);
@@ -332,7 +340,7 @@ class ChatService {
           }
 
         } else {
-          console.log(`📨 Message ${processedMessage.id} already exists or was recently processed in channel ${channelId}, skipping (source: ${source})`);
+          console.log(`📨 Message ${enrichedMessage.id} already exists or was recently processed in channel ${channelId}, skipping (source: ${source})`);
         }
 
       } finally {
@@ -654,9 +662,12 @@ class ChatService {
           { order: 'date desc', limit, offset }
         );
 
+        // Fetch attachment details for messages that have attachments
+        const messagesWithAttachments = await this.enrichMessagesWithAttachments(freshMessages);
+
         // Only update if we got fresh data
-        if (freshMessages.length > 0) {
-          messages = freshMessages;
+        if (messagesWithAttachments.length > 0) {
+          messages = messagesWithAttachments;
         }
       } catch (serverError) {
         console.warn('⚠️ Failed to load fresh messages, using cached data:', serverError);
@@ -884,9 +895,12 @@ class ChatService {
 
       if (newMessages.length > 0) {
         console.log(`🔄 Polling found ${newMessages.length} new messages for channel ${channelId}`);
-        
+
+        // Enrich messages with attachment details
+        const enrichedMessages = await this.enrichMessagesWithAttachments(newMessages);
+
         // Process each new message through the same handler
-        for (const message of newMessages) {
+        for (const message of enrichedMessages) {
           await this.handleIncomingMessage({
             ...message,
             channel_id: channelId,
@@ -897,6 +911,85 @@ class ChatService {
       }
     } catch (error) {
       // Silent fail to avoid log spam
+    }
+  }
+
+  /**
+   * Enrich messages with attachment details
+   */
+  private async enrichMessagesWithAttachments(messages: any[]): Promise<any[]> {
+    try {
+      const client = authService.getClient();
+      if (!client) return messages;
+
+      // Find all unique attachment IDs
+      const attachmentIds = new Set<number>();
+      messages.forEach(msg => {
+        let attachmentIdArray = msg.attachment_ids;
+
+        // Handle XML-RPC format: "<array><data><value><int>53541</int>"
+        if (typeof attachmentIdArray === 'string' && attachmentIdArray.includes('<value><int>')) {
+          const matches = attachmentIdArray.match(/<value><int>(\d+)<\/int>/g);
+          if (matches) {
+            attachmentIdArray = matches.map((match: string) => {
+              const idMatch = match.match(/<value><int>(\d+)<\/int>/);
+              return idMatch ? parseInt(idMatch[1]) : null;
+            }).filter(Boolean);
+          }
+        }
+
+        if (attachmentIdArray && Array.isArray(attachmentIdArray)) {
+          attachmentIdArray.forEach((id: number) => attachmentIds.add(id));
+        }
+      });
+
+      if (attachmentIds.size === 0) {
+        return messages;
+      }
+
+      console.log(`🔗 Fetching details for ${attachmentIds.size} attachments...`);
+
+      // Fetch attachment details (using safe fields that exist in most Odoo versions)
+      const attachments = await client.searchRead('ir.attachment',
+        [['id', 'in', Array.from(attachmentIds)]],
+        ['id', 'name', 'mimetype', 'file_size', 'url'],
+        {}
+      );
+
+      console.log(`🔗 Found ${attachments.length} attachment details`);
+
+      // Create attachment lookup map
+      const attachmentMap = new Map();
+      attachments.forEach(att => attachmentMap.set(att.id, att));
+
+      // Enrich messages with attachment details
+      return messages.map(msg => {
+        let attachmentIdArray = msg.attachment_ids;
+
+        // Handle XML-RPC format: "<array><data><value><int>53541</int>"
+        if (typeof attachmentIdArray === 'string' && attachmentIdArray.includes('<value><int>')) {
+          const matches = attachmentIdArray.match(/<value><int>(\d+)<\/int>/g);
+          if (matches) {
+            attachmentIdArray = matches.map((match: string) => {
+              const idMatch = match.match(/<value><int>(\d+)<\/int>/);
+              return idMatch ? parseInt(idMatch[1]) : null;
+            }).filter(Boolean);
+          }
+        }
+
+        const attachments = Array.isArray(attachmentIdArray)
+          ? attachmentIdArray.map((id: number) => attachmentMap.get(id)).filter(Boolean)
+          : [];
+
+        return {
+          ...msg,
+          attachments
+        };
+      });
+
+    } catch (error) {
+      console.error('❌ Failed to enrich messages with attachments:', error);
+      return messages;
     }
   }
 

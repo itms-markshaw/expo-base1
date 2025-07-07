@@ -1,615 +1,389 @@
-# Enhanced Chat Architecture: Building on Your Existing BC-CXXX System
+# Enhanced Chat Architecture with Audio/Video Calls & Notifications
 
-## Current Architecture Analysis ✅
+## 🎯 **Current State Analysis**
 
-Your existing system is already sophisticated with:
+From your screenshot and logs, I can see:
+- ✅ Real-time messaging is working 
+- ✅ Attachment downloads are functional (XML-RPC based)
+- ✅ File rendering (images, documents) is implemented
+- ✅ Emoji support is working
+- ⚠️ Attachment handling could be smoother
+- ❌ No audio/video call support
+- ❌ No push notifications system
 
-- **BC-C001_BaseChatter**: AI-powered chatter with real-time features
-- **BC-C002_BaseChatInput**: AI-powered input with voice and document scanning  
-- **BC-C003_BaseMessageBubble**: Individual messages with reactions and AI analysis
-- **BaseWebSocketService**: Odoo 18 WebSocket integration following exact patterns
-- **Modular Design**: BC-CXXX component reference system
+## 🏗️ **Architecture Plan: Calls + Notifications**
 
-## Strategic Enhancements for Offline-First Chat
+### **1. Notification Infrastructure**
+Before implementing calls, we need a robust notification system:
 
-### 1. New Components to Add to Your BC-CXXX System
-
-```typescript
-// BC-C009_OfflineChatManager.tsx - Offline message queue and sync
-// BC-C010_MediaMessageBubble.tsx - Enhanced media support  
-// BC-C011_VoiceMessagePlayer.tsx - Audio playback with waveforms
-// BC-C012_ChatThreadView.tsx - Message threading and replies
-// BC-C013_ReactionPicker.tsx - Enhanced emoji reactions
-// BC-C014_ChatGalleryViewer.tsx - Media gallery with zoom/pinch
-// BC-C015_TypingIndicator.tsx - Real-time typing awareness
-// BC-C016_ConnectionStatus.tsx - Network status indicator
+```
+┌─────────────────┐    ┌──────────────────┐    ┌─────────────────┐
+│   Expo Push     │────│  Notification    │────│   Call System   │
+│   Notifications │    │     Service      │    │   (WebRTC)      │
+└─────────────────┘    └──────────────────┘    └─────────────────┘
+         │                        │                        │
+         │                        │                        │
+         v                        v                        v
+┌─────────────────┐    ┌──────────────────┐    ┌─────────────────┐
+│ Background      │    │ Chat Message     │    │ Call UI         │
+│ Call Handling   │    │ Notifications    │    │ Components      │
+└─────────────────┘    └──────────────────┘    └─────────────────┘
 ```
 
-### 2. Enhanced BaseWebSocketService Integration
+### **2. Component Structure**
 
-Your WebSocket service is excellent but needs offline enhancement:
+```
+src/models/discuss_channel/
+├── services/
+│   ├── ChatService.ts              # ✅ Working
+│   ├── CallService.ts              # 🆕 WebRTC calls
+│   ├── NotificationService.ts      # 🆕 Push notifications
+│   └── AttachmentService.ts        # 🔧 Improved
+├── components/
+│   ├── ChatMessage.tsx             # ✅ Working
+│   ├── AttachmentRenderer.tsx      # 🔧 Smooth rendering
+│   ├── CallInterface.tsx           # 🆕 Video/audio calls
+│   ├── IncomingCallModal.tsx       # 🆕 Call notifications
+│   └── NotificationBanner.tsx      # 🆕 In-app notifications
+└── screens/
+    ├── 151_ChatList.tsx            # ✅ Working
+    ├── 152_CallScreen.tsx          # 🆕 Active call UI
+    └── 153_CallHistory.tsx         # 🆕 Call logs
+```
+
+## 🔧 **Implementation Plan**
+
+### **Phase 1: Improve Attachment Handling**
+
+#### Issues to Fix:
+1. **Smooth loading states** - Add skeleton loaders
+2. **Progressive downloads** - Show progress indicators  
+3. **Better caching** - Avoid re-downloading
+4. **Image optimization** - Compress large images
+5. **Video/audio previews** - Native media players
+
+### **Phase 2: Notification Infrastructure**
+
+#### Setup Expo Notifications:
+```bash
+npx expo install expo-notifications expo-device expo-constants
+```
+
+#### Key Features:
+- **Push notifications** for new messages when app is closed
+- **In-app notifications** for calls, mentions, etc.
+- **Background message handling**
+- **Sound & vibration** for different notification types
+
+### **Phase 3: WebRTC Call System**
+
+#### Setup WebRTC:
+```bash
+npx expo install react-native-webrtc
+```
+
+#### Call Flow:
+1. **Initiate Call** → Send call invitation via Odoo bus
+2. **Receive Invitation** → Show incoming call notification
+3. **Accept/Decline** → Establish WebRTC connection
+4. **Active Call** → Video/audio streaming UI
+5. **End Call** → Cleanup and call history
+
+### **Phase 4: Integration with Odoo**
+
+#### Odoo Side Requirements:
+- **Call records** in `discuss.channel.call` model
+- **Bus notifications** for call events
+- **STUN/TURN servers** for WebRTC signaling
+
+## 📋 **Detailed Implementation Steps**
+
+### **Step 1: Enhanced Attachment Service**
 
 ```typescript
-// src/models/base/services/BaseOfflineWebSocketService.ts
-import { BaseWebSocketService } from './BaseWebSocketService';
-import { offlineMessageService } from '../../mail_message/services/OfflineMessageService';
-
-export class BaseOfflineWebSocketService extends BaseWebSocketService {
-  private offlineQueue: OfflineMessage[] = [];
-  private isProcessingQueue = false;
-
-  async initialize(): Promise<boolean> {
-    // Initialize parent WebSocket service
-    const wsInitialized = await super.initialize();
-    
-    // Initialize offline message service
-    await offlineMessageService.initialize();
-    
-    // Setup offline queue processing
-    this.setupOfflineQueueProcessing();
-    
-    // Setup connection recovery
-    this.setupConnectionRecovery();
-    
-    return wsInitialized;
-  }
-
-  // Enhanced message sending with offline fallback
-  async sendChatMessage(channelId: number, message: string): Promise<string> {
-    const messageData = {
-      channel_id: channelId,
-      body: message,
-      timestamp: Date.now(),
-      author_id: this.currentUID,
-      sync_status: 'pending' as const
-    };
-
-    // Save to SQLite immediately (offline-first)
-    const localId = await offlineMessageService.saveMessage(messageData);
-    
-    // Emit to UI immediately for instant feedback
-    this.emit('newMessage', {
-      ...messageData,
-      id: localId,
-      local_id: localId
-    });
-
-    // Queue for WebSocket sync
-    this.queueMessageForSync(localId, messageData);
-
-    // Try immediate send if connected
-    if (this.isWebsocketConnected()) {
-      this.processOfflineQueue();
+// AttachmentService.ts
+class AttachmentService {
+  private downloadCache = new Map<number, string>();
+  private downloadPromises = new Map<number, Promise<string>>();
+  
+  async downloadAttachment(
+    attachmentId: number, 
+    filename: string,
+    onProgress?: (progress: number) => void
+  ): Promise<string> {
+    // Check cache first
+    if (this.downloadCache.has(attachmentId)) {
+      return this.downloadCache.get(attachmentId)!;
     }
-
-    return localId;
-  }
-
-  private queueMessageForSync(localId: string, messageData: any): void {
-    this.offlineQueue.push({
-      localId,
-      messageData,
-      attempts: 0,
-      timestamp: Date.now()
-    });
-  }
-
-  private async processOfflineQueue(): Promise<void> {
-    if (this.isProcessingQueue || this.offlineQueue.length === 0) return;
     
-    this.isProcessingQueue = true;
+    // Check if already downloading
+    if (this.downloadPromises.has(attachmentId)) {
+      return this.downloadPromises.get(attachmentId)!;
+    }
+    
+    // Start download with progress tracking
+    const downloadPromise = this.performDownload(attachmentId, filename, onProgress);
+    this.downloadPromises.set(attachmentId, downloadPromise);
     
     try {
-      for (const queueItem of [...this.offlineQueue]) {
-        try {
-          // Send via WebSocket
-          await this.sendToServer({
-            event_name: 'chat_message',
-            data: {
-              channel_id: queueItem.messageData.channel_id,
-              message: queueItem.messageData.body
-            }
-          });
-
-          // Update local database
-          await offlineMessageService.updateSyncStatus(queueItem.localId, 'synced');
-          
-          // Remove from queue
-          this.offlineQueue = this.offlineQueue.filter(item => item.localId !== queueItem.localId);
-          
-          // Emit sync success
-          this.emit('messageSynced', { localId: queueItem.localId });
-          
-        } catch (error) {
-          queueItem.attempts++;
-          if (queueItem.attempts >= 3) {
-            await offlineMessageService.updateSyncStatus(queueItem.localId, 'failed');
-            this.emit('messageFailed', { localId: queueItem.localId });
-          }
-        }
-      }
+      const localPath = await downloadPromise;
+      this.downloadCache.set(attachmentId, localPath);
+      return localPath;
     } finally {
-      this.isProcessingQueue = false;
+      this.downloadPromises.delete(attachmentId);
     }
   }
-
-  private setupOfflineQueueProcessing(): void {
-    // Process queue when WebSocket connects
-    this.on('connect', () => {
-      console.log('🔄 WebSocket connected - processing offline queue');
-      this.processOfflineQueue();
-    });
-
-    // Periodic queue processing
-    setInterval(() => {
-      if (this.isWebsocketConnected()) {
-        this.processOfflineQueue();
-      }
-    }, 30000);
-  }
-
-  private setupConnectionRecovery(): void {
-    // Enhanced connection recovery with message synchronization
-    this.on('reconnect', async () => {
-      console.log('🔄 Reconnected - syncing missed messages');
-      await this.syncMissedMessages();
-    });
-  }
-
-  private async syncMissedMessages(): Promise<void> {
-    // Get channels that need sync
-    const subscribedChannels = Array.from(this.channelsByClient.get('main') || []);
-    
-    for (const channelId of subscribedChannels) {
-      try {
-        // Get last message timestamp from local storage
-        const lastMessage = await offlineMessageService.getLastMessage(parseInt(channelId));
-        const lastTimestamp = lastMessage?.timestamp || 0;
-        
-        // Request missed messages from server
-        this.sendToServer({
-          event_name: 'sync_messages',
-          data: {
-            channel_id: channelId,
-            since_timestamp: lastTimestamp
-          }
-        });
-      } catch (error) {
-        console.warn(`Failed to sync channel ${channelId}:`, error);
-      }
-    }
+  
+  private async performDownload(
+    attachmentId: number, 
+    filename: string,
+    onProgress?: (progress: number) => void
+  ): Promise<string> {
+    // Implementation with progress callbacks
+    // Use FileSystem.downloadAsync for better progress tracking
   }
 }
-
-interface OfflineMessage {
-  localId: string;
-  messageData: any;
-  attempts: number;
-  timestamp: number;
-}
-
-export const offlineWebSocketService = new BaseOfflineWebSocketService();
 ```
 
-### 3. Enhanced BC-C001_BaseChatter with Offline Support
+### **Step 2: Notification Service**
 
 ```typescript
-// Update your existing BC-C001_BaseChatter.tsx
-import { offlineWebSocketService } from '../services/BaseOfflineWebSocketService';
-import { offlineMessageService } from '../../mail_message/services/OfflineMessageService';
+// NotificationService.ts
+import * as Notifications from 'expo-notifications';
 
-// Add to your existing BaseChatter component:
-export default function BaseChatter({
-  // ... existing props
-}: BaseChatterProps) {
-  // ... existing state
-
-  // Add offline-specific state
-  const [connectionStatus, setConnectionStatus] = useState<'online' | 'offline' | 'syncing'>('online');
-  const [pendingSyncCount, setPendingSyncCount] = useState(0);
-
-  useEffect(() => {
-    // Initialize offline WebSocket service
-    initializeOfflineServices();
+class NotificationService {
+  private expoPushToken: string | null = null;
+  
+  async initialize(): Promise<void> {
+    // Configure notification behavior
+    Notifications.setNotificationHandler({
+      handleNotification: async () => ({
+        shouldShowAlert: true,
+        shouldPlaySound: true,
+        shouldSetBadge: true,
+      }),
+    });
     
-    // Setup real-time listeners
-    setupRealtimeListeners();
+    // Get push token
+    this.expoPushToken = await this.registerForPushNotifications();
     
-    return () => {
-      cleanupListeners();
-    };
-  }, [modelName, recordId]);
+    // Send token to Odoo backend
+    await this.sendTokenToOdoo(this.expoPushToken);
+  }
+  
+  async showIncomingCallNotification(call: CallInvitation): Promise<void> {
+    await Notifications.scheduleNotificationAsync({
+      content: {
+        title: `📞 Incoming call from ${call.callerName}`,
+        body: 'Tap to answer',
+        sound: 'call_ringtone.wav',
+        priority: Notifications.AndroidNotificationPriority.MAX,
+        sticky: true,
+        data: { 
+          type: 'incoming_call',
+          callId: call.id,
+          channelId: call.channelId 
+        },
+      },
+      trigger: null, // Show immediately
+    });
+  }
+  
+  async showMessageNotification(message: ChatMessage): Promise<void> {
+    await Notifications.scheduleNotificationAsync({
+      content: {
+        title: message.authorName,
+        body: this.extractTextFromHTML(message.body),
+        sound: 'message_sound.wav',
+        data: { 
+          type: 'chat_message',
+          channelId: message.res_id 
+        },
+      },
+      trigger: null,
+    });
+  }
+}
+```
 
-  const initializeOfflineServices = async () => {
+### **Step 3: Call Service**
+
+```typescript
+// CallService.ts
+import { RTCPeerConnection, RTCSessionDescription, mediaDevices } from 'react-native-webrtc';
+
+class CallService {
+  private peerConnection: RTCPeerConnection | null = null;
+  private localStream: MediaStream | null = null;
+  private remoteStream: MediaStream | null = null;
+  private eventListeners = new Map<string, Function[]>();
+  
+  async initializeCall(channelId: number, isVideo: boolean = false): Promise<void> {
     try {
-      // Initialize offline WebSocket service
-      await offlineWebSocketService.initialize();
-      
-      // Subscribe to channel for this record
-      const channelName = `${modelName}_${recordId}`;
-      offlineWebSocketService.subscribeToChannel(channelName);
-      
-      // Load cached messages first
-      await loadCachedMessages();
-      
-    } catch (error) {
-      console.error('Failed to initialize offline services:', error);
-    }
-  };
-
-  const loadCachedMessages = async () => {
-    try {
-      // Load messages from SQLite cache
-      const cachedMessages = await offlineMessageService.getChannelMessages(recordId);
-      setMessages(cachedMessages);
-      
-      // Load fresh messages in background
-      if (offlineWebSocketService.isWebsocketConnected()) {
-        backgroundRefreshMessages();
-      }
-    } catch (error) {
-      console.error('Failed to load cached messages:', error);
-    }
-  };
-
-  const setupRealtimeListeners = () => {
-    // Connection status
-    offlineWebSocketService.on('connect', () => setConnectionStatus('online'));
-    offlineWebSocketService.on('disconnect', () => setConnectionStatus('offline'));
-    
-    // New messages
-    offlineWebSocketService.on('newMessage', handleNewMessage);
-    
-    // Sync status
-    offlineWebSocketService.on('messageSynced', handleMessageSynced);
-    offlineWebSocketService.on('messageFailed', handleMessageFailed);
-    
-    // Update pending sync count
-    updatePendingSyncCount();
-  };
-
-  const handleSendMessage = useCallback(async (message: string, type: MessageType = 'comment') => {
-    try {
-      // Send via offline WebSocket service (saves to SQLite + queues for sync)
-      const localId = await offlineWebSocketService.sendChatMessage(recordId, message);
-      
-      // Update pending sync count
-      updatePendingSyncCount();
-      
-      onMessageSent?.({
-        id: localId,
-        body: message,
-        create_date: new Date().toISOString(),
-        message_type: type
+      // Get user media
+      this.localStream = await mediaDevices.getUserMedia({
+        video: isVideo,
+        audio: true,
       });
       
+      // Create peer connection
+      this.peerConnection = new RTCPeerConnection({
+        iceServers: [
+          { urls: 'stun:stun.l.google.com:19302' },
+          // Add TURN servers from Odoo config
+        ],
+      });
+      
+      // Add local stream
+      this.localStream.getTracks().forEach(track => {
+        this.peerConnection!.addTrack(track, this.localStream!);
+      });
+      
+      // Handle remote stream
+      this.peerConnection.ontrack = (event) => {
+        this.remoteStream = event.streams[0];
+        this.emit('remoteStreamReceived', this.remoteStream);
+      };
+      
+      // Send call invitation via Odoo bus
+      await this.sendCallInvitation(channelId, isVideo);
+      
     } catch (error) {
-      console.error('Failed to send message:', error);
-      Alert.alert('Error', 'Failed to send message. It will be retried when connection is restored.');
+      console.error('Failed to initialize call:', error);
+      throw error;
     }
-  }, [recordId, onMessageSent]);
-
-  const updatePendingSyncCount = async () => {
-    try {
-      const pendingMessages = await offlineMessageService.getPendingSyncMessages();
-      setPendingSyncCount(pendingMessages.length);
-    } catch (error) {
-      console.error('Failed to get pending sync count:', error);
+  }
+  
+  async acceptCall(callInvitation: CallInvitation): Promise<void> {
+    // Accept incoming call and establish connection
+  }
+  
+  async declineCall(callInvitation: CallInvitation): Promise<void> {
+    // Decline call and notify caller
+  }
+  
+  async endCall(): Promise<void> {
+    // Cleanup streams and connection
+    if (this.localStream) {
+      this.localStream.getTracks().forEach(track => track.stop());
     }
-  };
-
-  // Add connection status indicator to your existing render
-  const renderConnectionStatus = () => (
-    <View style={styles.connectionStatus}>
-      <View style={[
-        styles.statusDot,
-        { backgroundColor: connectionStatus === 'online' ? '#34C759' : '#FF3B30' }
-      ]} />
-      <Text style={styles.statusText}>
-        {connectionStatus === 'online' ? 'Connected' : 'Offline'}
-        {pendingSyncCount > 0 && ` (${pendingSyncCount} pending)`}
-      </Text>
-    </View>
-  );
-
-  // ... rest of your existing component
+    if (this.peerConnection) {
+      this.peerConnection.close();
+    }
+    this.emit('callEnded');
+  }
 }
 ```
 
-### 4. BC-C010_MediaMessageBubble for Rich Media
+### **Step 4: Call UI Components**
 
 ```typescript
-// src/models/base/components/BC-C010_MediaMessageBubble.tsx
-import React, { useState, useCallback } from 'react';
-import { TouchableOpacity, View, Text } from 'react-native';
-import { Image } from 'expo-image';
-import { Video } from 'expo-av';
-import { MaterialIcons } from '@expo/vector-icons';
-
-export interface MediaMessageBubbleProps {
-  message: ChatMessage;
-  isOwnMessage: boolean;
-  onImagePress: (uri: string) => void;
-  onVideoPress: (uri: string) => void;
-  theme?: MessageBubbleTheme;
+// IncomingCallModal.tsx
+export function IncomingCallModal({ 
+  visible, 
+  call, 
+  onAccept, 
+  onDecline 
+}: IncomingCallModalProps) {
+  return (
+    <Modal visible={visible} transparent>
+      <View style={styles.overlay}>
+        <View style={styles.callCard}>
+          <Avatar source={{ uri: call.callerAvatar }} size={120} />
+          <Text style={styles.callerName}>{call.callerName}</Text>
+          <Text style={styles.callType}>
+            {call.isVideo ? '📹 Video call' : '📞 Voice call'}
+          </Text>
+          
+          <View style={styles.actions}>
+            <TouchableOpacity 
+              style={[styles.button, styles.declineButton]}
+              onPress={onDecline}
+            >
+              <MaterialIcons name="call-end" size={32} color="white" />
+            </TouchableOpacity>
+            
+            <TouchableOpacity 
+              style={[styles.button, styles.acceptButton]}
+              onPress={onAccept}
+            >
+              <MaterialIcons name="call" size={32} color="white" />
+            </TouchableOpacity>
+          </View>
+        </View>
+      </View>
+    </Modal>
+  );
 }
 
-export default function MediaMessageBubble({
-  message,
-  isOwnMessage,
-  onImagePress,
-  onVideoPress,
-  theme = DEFAULT_THEME
-}: MediaMessageBubbleProps) {
-  
-  const renderMediaContent = () => {
-    if (!message.media) return null;
-
-    switch (message.media.type) {
-      case 'image':
-        return (
-          <TouchableOpacity onPress={() => onImagePress(message.media!.uri)}>
-            <Image
-              source={{ uri: message.media.uri }}
-              style={styles.mediaImage}
-              contentFit="cover"
-              placeholder={{ blurhash: 'L6PZfSi_.AyE_3t7t7R**0o#DgR4' }}
-              transition={200}
-            />
-            {message.media.size && (
-              <View style={styles.mediaInfo}>
-                <Text style={styles.mediaSize}>
-                  {formatFileSize(message.media.size)}
-                </Text>
-              </View>
-            )}
-          </TouchableOpacity>
-        );
-
-      case 'video':
-        return (
-          <TouchableOpacity onPress={() => onVideoPress(message.media!.uri)}>
-            <View style={styles.videoContainer}>
-              <Image
-                source={{ uri: message.media.thumbnailUri || message.media.uri }}
-                style={styles.videoThumbnail}
-                contentFit="cover"
-              />
-              <View style={styles.videoPlayButton}>
-                <MaterialIcons name="play-arrow" size={32} color="#FFF" />
-              </View>
-              {message.media.duration && (
-                <View style={styles.videoDuration}>
-                  <Text style={styles.durationText}>
-                    {formatDuration(message.media.duration)}
-                  </Text>
-                </View>
-              )}
-            </View>
-          </TouchableOpacity>
-        );
-
-      case 'audio':
-        return <VoiceMessagePlayer audioUri={message.media.uri} duration={message.media.duration} />;
-
-      default:
-        return null;
-    }
-  };
-
+// CallInterface.tsx
+export function CallInterface({ 
+  localStream, 
+  remoteStream, 
+  isVideo,
+  onEndCall 
+}: CallInterfaceProps) {
   return (
-    <View style={[
-      styles.container,
-      isOwnMessage ? styles.ownMessage : styles.otherMessage
-    ]}>
-      {renderMediaContent()}
-      
-      {message.body && (
-        <Text style={[styles.messageText, isOwnMessage && styles.ownMessageText]}>
-          {message.body}
-        </Text>
+    <View style={styles.container}>
+      {isVideo && (
+        <>
+          <RTCView 
+            streamURL={remoteStream?.toURL()} 
+            style={styles.remoteVideo}
+          />
+          <RTCView 
+            streamURL={localStream?.toURL()} 
+            style={styles.localVideo}
+          />
+        </>
       )}
       
-      <Text style={styles.timestamp}>
-        {formatTime(message.create_date)}
-      </Text>
-    </View>
-  );
-}
-```
-
-### 5. BC-C011_VoiceMessagePlayer with Waveforms
-
-```typescript
-// src/models/base/components/BC-C011_VoiceMessagePlayer.tsx
-import React, { useState, useEffect } from 'react';
-import { View, TouchableOpacity, Text } from 'react-native';
-import { Audio } from 'expo-av';
-import { MaterialIcons } from '@expo/vector-icons';
-
-export interface VoiceMessagePlayerProps {
-  audioUri: string;
-  duration?: number;
-  waveform?: number[];
-  isOwnMessage?: boolean;
-}
-
-export default function VoiceMessagePlayer({
-  audioUri,
-  duration = 0,
-  waveform = [],
-  isOwnMessage = false
-}: VoiceMessagePlayerProps) {
-  const [sound, setSound] = useState<Audio.Sound | null>(null);
-  const [isPlaying, setIsPlaying] = useState(false);
-  const [position, setPosition] = useState(0);
-
-  const togglePlayback = async () => {
-    try {
-      if (sound) {
-        if (isPlaying) {
-          await sound.pauseAsync();
-          setIsPlaying(false);
-        } else {
-          await sound.playAsync();
-          setIsPlaying(true);
-        }
-        return;
-      }
-
-      // Create and play sound
-      const { sound: newSound } = await Audio.Sound.createAsync(
-        { uri: audioUri },
-        { shouldPlay: true }
-      );
-
-      setSound(newSound);
-      setIsPlaying(true);
-
-      // Setup playback status listener
-      newSound.setOnPlaybackStatusUpdate((status) => {
-        if (status.isLoaded) {
-          setPosition(status.positionMillis || 0);
-          if (status.didJustFinish) {
-            setIsPlaying(false);
-            setPosition(0);
-          }
-        }
-      });
-
-    } catch (error) {
-      console.error('Error playing audio:', error);
-    }
-  };
-
-  useEffect(() => {
-    return () => {
-      if (sound) {
-        sound.unloadAsync();
-      }
-    };
-  }, [sound]);
-
-  return (
-    <View style={[styles.container, isOwnMessage && styles.ownMessage]}>
-      <TouchableOpacity style={styles.playButton} onPress={togglePlayback}>
-        <MaterialIcons
-          name={isPlaying ? 'pause' : 'play-arrow'}
-          size={24}
-          color={isOwnMessage ? '#FFF' : '#007AFF'}
-        />
-      </TouchableOpacity>
-
-      <View style={styles.waveformContainer}>
-        {waveform.length > 0 ? (
-          waveform.map((height, index) => (
-            <View
-              key={index}
-              style={[
-                styles.waveformBar,
-                {
-                  height: Math.max(2, height * 0.5),
-                  backgroundColor: isOwnMessage ? '#FFF' : '#007AFF',
-                  opacity: index < (position / duration) * waveform.length ? 1 : 0.3
-                }
-              ]}
-            />
-          ))
-        ) : (
-          // Fallback waveform
-          Array(20).fill(0).map((_, index) => (
-            <View
-              key={index}
-              style={[
-                styles.waveformBar,
-                {
-                  height: Math.random() * 20 + 4,
-                  backgroundColor: isOwnMessage ? '#FFF' : '#007AFF',
-                  opacity: 0.6
-                }
-              ]}
-            />
-          ))
-        )}
+      <View style={styles.controls}>
+        <TouchableOpacity 
+          style={styles.endCallButton}
+          onPress={onEndCall}
+        >
+          <MaterialIcons name="call-end" size={32} color="white" />
+        </TouchableOpacity>
       </View>
-
-      <Text style={[styles.duration, isOwnMessage && styles.ownMessageText]}>
-        {formatDuration(position || duration)}
-      </Text>
     </View>
   );
 }
-
-const styles = StyleSheet.create({
-  container: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    padding: 12,
-    borderRadius: 18,
-    backgroundColor: '#E5E5EA',
-    maxWidth: 250,
-  },
-  ownMessage: {
-    backgroundColor: '#007AFF',
-  },
-  playButton: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    backgroundColor: 'rgba(255,255,255,0.2)',
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginRight: 8,
-  },
-  waveformContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    flex: 1,
-    height: 30,
-    gap: 1,
-  },
-  waveformBar: {
-    width: 3,
-    borderRadius: 1.5,
-  },
-  duration: {
-    fontSize: 12,
-    color: '#666',
-    marginLeft: 8,
-    minWidth: 30,
-  },
-  ownMessageText: {
-    color: '#FFF',
-  },
-});
 ```
 
-## Integration Strategy
+## 🚀 **Quick Implementation Priority**
 
-### Phase 1: Offline Foundation (Week 1)
-1. **Extend BaseWebSocketService** with offline queue management
-2. **Integrate OfflineMessageService** with your existing BC-C001 chatter
-3. **Add connection status** indicators to your UI
-4. **Test offline messaging** with your existing flows
+### **Immediate (Week 1)**
+1. ✅ Fix attachment smooth loading with progress indicators
+2. ✅ Implement notification service setup
+3. ✅ Add basic call invitation UI
 
-### Phase 2: Media Enhancement (Week 2)  
-1. **Implement BC-C010_MediaMessageBubble** for rich media
-2. **Add BC-C011_VoiceMessagePlayer** with waveform visualization
-3. **Enhance BC-C002_BaseChatInput** with better media handling
-4. **Integrate with your existing AI features**
+### **Short Term (Week 2-3)**  
+1. ✅ WebRTC integration and basic audio calls
+2. ✅ Push notification handling for incoming calls
+3. ✅ Call history and management
 
-### Phase 3: Advanced Features (Week 3)
-1. **Add message threading** and reply functionality
-2. **Enhanced emoji reactions** with your AI analysis
-3. **Media gallery viewer** with zoom/pinch gestures
-4. **Background sync** with Expo TaskManager
+### **Medium Term (Week 4-6)**
+1. ✅ Video calling with camera controls
+2. ✅ Advanced call features (mute, speaker, camera toggle)
+3. ✅ Group calling support
 
-## Key Benefits of This Approach
+## 🔔 **Notification Strategy**
 
-✅ **Builds on Your Existing Architecture** - Extends BC-CXXX system
-✅ **Leverages Your WebSocket Service** - Enhances existing real-time features  
-✅ **Maintains AI Integration** - Keeps your Groq AI and smart features
-✅ **Adds Offline-First** - Messages work without internet
-✅ **Professional UX** - iMessage-style interface with modern features
+### **Message Notifications**
+- **In-app**: Banner notifications when app is active
+- **Push**: When app is background/closed
+- **Smart filtering**: Only notify for @mentions in groups
 
-This approach respects your existing sophisticated architecture while adding the offline-first capabilities and media support that make a chat system truly professional.
+### **Call Notifications**
+- **High priority**: Always show even in Do Not Disturb
+- **Persistent**: Stay until answered/declined
+- **Custom ringtone**: Different sounds for different call types
+- **Fallback**: If WebRTC fails, fall back to regular phone call
+
+### **Integration Points**
+- **Odoo Bus Events**: Subscribe to call invitation events
+- **Background App Refresh**: Handle calls when app is backgrounded  
+- **Lock Screen**: Show call interface even when phone is locked
+
+This architecture provides a solid foundation for enterprise-grade chat with calling capabilities while maintaining smooth performance and user experience.
