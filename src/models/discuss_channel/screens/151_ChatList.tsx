@@ -77,6 +77,19 @@ export default function ChatScreen() {
   const [mentionSearchQuery, setMentionSearchQuery] = useState('');
   const [mentionStartIndex, setMentionStartIndex] = useState(-1);
 
+  // Use refs to access current values in event listeners
+  const selectedChannelRef = useRef<ChatChannel | null>(null);
+  const messagesRef = useRef<ChatMessage[]>([]);
+
+  // Update refs when state changes
+  useEffect(() => {
+    selectedChannelRef.current = selectedChannel;
+  }, [selectedChannel]);
+
+  useEffect(() => {
+    messagesRef.current = messages;
+  }, [messages]);
+
   const flatListRef = useRef<FlatList>(null);
   const textInputRef = useRef<TextInput>(null);
 
@@ -131,7 +144,10 @@ export default function ChatScreen() {
     // Also listen for individual message events
     chatService.on('newMessage', ({ channelId, message }) => {
       console.log(`📨 ChatScreen received single new message for channel ${channelId}:`, message.id);
-      if (selectedChannel?.id === channelId) {
+      console.log(`📨 Current selected channel: ${selectedChannelRef.current?.id}`);
+
+      if (selectedChannelRef.current?.id === channelId) {
+        console.log(`🔄 Channel matches, updating messages state`);
         setMessages(prev => {
           const exists = prev.some(m => m.id === message.id);
           if (!exists) {
@@ -139,15 +155,21 @@ export default function ChatScreen() {
             const updated = [...prev, message];
             setTimeout(scrollToBottom, 100);
             return updated;
+          } else {
+            console.log(`⚠️ Message ${message.id} already exists in UI`);
           }
           return prev;
         });
+      } else {
+        console.log(`⚠️ Channel ${channelId} doesn't match selected channel ${selectedChannelRef.current?.id}`);
       }
     });
 
     chatService.on('messagesUpdated', ({ channelId }) => {
       console.log(`🔄 Messages updated event for channel ${channelId}`);
-      if (selectedChannel?.id === channelId) {
+      console.log(`🔄 Current selected channel: ${selectedChannelRef.current?.id}`);
+
+      if (selectedChannelRef.current?.id === channelId) {
         // Force reload messages from service
         const currentMessages = chatService.getChannelMessages(channelId);
         console.log(`🔄 Force updating UI with ${currentMessages.length} messages from service`);
@@ -163,14 +185,17 @@ export default function ChatScreen() {
   };
 
   const handleMessagesLoaded = ({ channelId, messages: loadedMessages }: { channelId: number; messages: ChatMessage[] }) => {
-    if (selectedChannel?.id === channelId) {
+    console.log(`📨 handleMessagesLoaded for channel ${channelId}, selected: ${selectedChannelRef.current?.id}`);
+    if (selectedChannelRef.current?.id === channelId) {
+      console.log(`📨 Setting ${loadedMessages.length} loaded messages`);
       setMessages(loadedMessages);
       scrollToBottom();
     }
   };
 
   const handleNewMessages = ({ channelId, messages: newMessages }: { channelId: number; messages: ChatMessage[] }) => {
-    if (selectedChannel?.id === channelId) {
+    console.log(`📨 handleNewMessages for channel ${channelId}, selected: ${selectedChannelRef.current?.id}`);
+    if (selectedChannelRef.current?.id === channelId) {
       console.log(`🔄 ChatScreen received ${newMessages.length} new messages for channel ${channelId}`);
       setMessages(prev => {
         // Check for duplicate messages by ID
@@ -193,7 +218,7 @@ export default function ChatScreen() {
   };
 
   const handleTypingChanged = ({ channelId, typingUsers: users }: { channelId: number; typingUsers: TypingUser[] }) => {
-    if (selectedChannel?.id === channelId) {
+    if (selectedChannelRef.current?.id === channelId) {
       setTypingUsers(users);
     }
   };

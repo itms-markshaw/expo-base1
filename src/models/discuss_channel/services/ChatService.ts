@@ -1,9 +1,8 @@
 /**
- * ChatService - Chat Service for Odoo Integration
+ * ChatService - Chat Service for Odoo Integration (FIXED for Real-time)
  * Model-specific service for discuss.channel
  *
- * MIGRATED: From src/services/chat.ts
- * Handles real-time messaging, typing indicators, and presence
+ * CRITICAL FIX: Handles race conditions between polling and longpolling
  */
 
 import longpollingService from '../../base/services/BaseLongpollingService';
@@ -73,8 +72,12 @@ class ChatService {
   // Polling for new messages
   private pollingInterval: NodeJS.Timeout | null = null;
   private lastMessageIds: { [channelId: number]: number } = {};
-  private POLLING_INTERVAL = 3000; // 3 seconds - reduced frequency
+  private POLLING_INTERVAL = 5000; // Increased to 5 seconds to reduce race conditions
   private currentPollingChannelId: number | null = null;
+
+  // CRITICAL FIX: Track message sources to handle race conditions
+  private messageProcessingLock = new Map<number, boolean>(); // channelId -> isProcessing
+  private recentlyProcessedMessages = new Set<number>(); // Track recent message IDs
 
   constructor() {
     this.setupLongpollingListeners();
@@ -164,16 +167,19 @@ class ChatService {
   }
 
   /**
-   * Setup HTTP Longpolling event listeners
+   * Setup HTTP Longpolling event listeners - FIXED FOR REAL-TIME RECEIVING
    */
   private setupLongpollingListeners(): void {
     console.log('🔗 Setting up HTTP longpolling listeners for real-time updates');
     
+    // CRITICAL FIX: Properly handle incoming chat messages
     longpollingService.on('chatMessage', (message: any) => {
-      this.handleNewMessage(message);
+      console.log('📨 INCOMING MESSAGE VIA LONGPOLLING:', message);
+      this.handleIncomingMessage(message, 'longpolling');
     });
 
     longpollingService.on('notification', (notification: any) => {
+      console.log('🔔 INCOMING NOTIFICATION:', notification);
       this.handleBusNotification(notification);
     });
 
@@ -181,7 +187,7 @@ class ChatService {
       this.emit('presenceUpdate', presence);
     });
 
-    // Monitor longpolling status (reduced frequency)
+    // Monitor longpolling status
     setInterval(() => {
       const status = longpollingService.getStatus();
       this.emit('connectionChanged', status.isActive ? 'connected' : 'disconnected');
@@ -190,7 +196,155 @@ class ChatService {
       if (Math.random() < 0.1) { // Only 10% of the time
         console.log(`📡 Longpolling status: ${status.isActive ? 'Active' : 'Inactive'}, Channels: ${status.channelCount}`);
       }
-    }, 10000); // Reduced to every 10 seconds
+    }, 10000); // Every 10 seconds
+  }
+
+  /**
+   * CRITICAL FIX: Handle incoming messages with proper deduplication
+   */
+  private async handleIncomingMessage(messageData: any, source: 'longpolling' | 'polling' = 'longpolling'): Promise<void> {
+    console.log(`📨 Processing incoming message from ${source}:`, messageData);
+
+    try {
+      // Determine the channel ID
+      let channelId: number;
+      if (messageData.res_id && messageData.model === 'discuss.channel') {
+        channelId = messageData.res_id;
+      } else if (messageData.channel_id) {
+        channelId = messageData.channel_id;
+      } else {
+        console.warn('⚠️ Could not determine channel ID from message:', messageData);
+        return;
+      }
+
+      // CRITICAL FIX: Use processing lock to prevent race conditions
+      if (this.messageProcessingLock.get(channelId)) {
+        console.log(`🔒 Channel ${channelId} is already processing messages, queuing...`);
+        // Wait a bit and try again
+        setTimeout(() => this.handleIncomingMessage(messageData, source), 100);
+        return;
+      }
+
+      this.messageProcessingLock.set(channelId, true);
+
+      try {
+        // Parse author_id properly for XML-RPC format
+        let authorId = messageData.author_id;
+        let authorName = 'Unknown User';
+
+        if (typeof authorId === 'string' && authorId.includes('<value><int>')) {
+          // Parse XML-RPC format: "<array><data><value><int>844</int>"
+          const idMatch = authorId.match(/<value><int>(\d+)<\/int>/);
+          const nameMatch = authorId.match(/<value><string>([^<]+)<\/string>/);
+          
+          if (idMatch) {
+            const parsedId = parseInt(idMatch[1]);
+            const parsedName = nameMatch ? nameMatch[1] : 'Unknown User';
+            authorId = [parsedId, parsedName];
+            authorName = parsedName;
+          }
+        } else if (Array.isArray(authorId) && authorId.length > 1) {
+          authorName = authorId[1];
+        }
+
+        // Clean up company name from author (e.g., "ITMS Group Pty Ltd, Mark Shaw" -> "Mark Shaw")
+        if (authorName && authorName.includes(',')) {
+          const parts = authorName.split(',').map(part => part.trim());
+          if (parts.length > 1) {
+            authorName = parts[parts.length - 1];
+          }
+        }
+
+        // Process the message to match our ChatMessage interface
+        const processedMessage: ChatMessage = {
+          id: messageData.id,
+          body: messageData.body || '',
+          author_id: Array.isArray(authorId) ? authorId : [0, authorName],
+          date: messageData.date || new Date().toISOString(),
+          message_type: messageData.message_type || 'comment',
+          model: messageData.model || 'discuss.channel',
+          res_id: channelId,
+          attachment_ids: messageData.attachment_ids || [],
+          partner_ids: messageData.partner_ids || []
+        };
+
+        // Add processed fields
+        (processedMessage as any).authorName = authorName;
+        (processedMessage as any).cleanAuthorName = authorName;
+
+        console.log(`📨 Processed message for channel ${channelId}:`, {
+          id: processedMessage.id,
+          body: processedMessage.body,
+          authorName,
+          source
+        });
+
+        // Get existing messages for this channel
+        const existingMessages = this.channelMessages.get(channelId) || [];
+
+        // CRITICAL FIX: Better deduplication logic
+        const messageExists = existingMessages.some(m => m.id === processedMessage.id);
+        const wasRecentlyProcessed = this.recentlyProcessedMessages.has(processedMessage.id);
+
+        if (!messageExists && !wasRecentlyProcessed) {
+          // Add to recently processed to prevent duplicate processing
+          this.recentlyProcessedMessages.add(processedMessage.id);
+          
+          // Clean up old recently processed messages (keep only last 50)
+          if (this.recentlyProcessedMessages.size > 50) {
+            const entries = Array.from(this.recentlyProcessedMessages);
+            entries.slice(0, 25).forEach(id => this.recentlyProcessedMessages.delete(id));
+          }
+
+          // Remove any optimistic messages with the same content
+          const filteredMessages = existingMessages.filter(msg => 
+            !(msg as any).isOptimistic || msg.body !== processedMessage.body
+          );
+
+          // Add to channel messages
+          const updatedMessages = [...filteredMessages, processedMessage];
+          
+          // Sort by date to maintain order
+          updatedMessages.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+          
+          this.channelMessages.set(channelId, updatedMessages);
+
+          console.log(`✅ Added new message ${processedMessage.id} to channel ${channelId} from ${source}`);
+
+          // CRITICAL: Force UI update with immediate emission
+          this.emit('newMessage', { channelId, message: processedMessage });
+          this.emit('newMessages', { channelId, messages: [processedMessage] });
+          this.emit('messagesUpdated', { channelId });
+
+          console.log(`📡 Emitted real-time message events for channel ${channelId}`);
+
+          // If this is from longpolling, disable polling temporarily to avoid race conditions
+          if (source === 'longpolling' && this.currentPollingChannelId === channelId) {
+            console.log(`🔄 Temporarily pausing polling for channel ${channelId} due to longpolling update`);
+            this.stopPolling();
+            // Restart polling after a delay
+            setTimeout(() => {
+              if (this.currentPollingChannelId === channelId) {
+                console.log(`🔄 Restarting polling for channel ${channelId}`);
+                this.startPolling(channelId);
+              }
+            }, 3000);
+          }
+
+        } else {
+          console.log(`📨 Message ${processedMessage.id} already exists or was recently processed in channel ${channelId}, skipping (source: ${source})`);
+        }
+
+      } finally {
+        // Always release the lock
+        this.messageProcessingLock.delete(channelId);
+      }
+
+    } catch (error) {
+      console.error('❌ Error processing incoming message:', error);
+      // Release lock on error
+      this.messageProcessingLock.delete(channelId);
+    }
   }
 
   /**
@@ -240,79 +394,79 @@ class ChatService {
         console.log('📱 Loading channels from server...');
 
         try {
-        // First, try to get the current user's partner ID
-        const currentUser = await client.searchRead('res.users',
-          [['id', '=', client.uid]],
-          ['partner_id']
-        );
-
-        if (currentUser.length > 0) {
-          const currentPartnerId = currentUser[0].partner_id[0];
-          console.log(`👤 Current user partner ID: ${currentPartnerId}`);
-
-          // Try to load channels where the current user is a member
-          channels = await client.searchRead('discuss.channel',
-            [
-              ['channel_member_ids.partner_id', '=', currentPartnerId],
-              '|',
-              ['channel_type', '=', 'chat'],      // Direct messages
-              ['channel_type', '=', 'channel']    // Group channels
-            ],
-            [
-              'id', 'name', 'description', 'channel_type', 'channel_member_ids',
-              'uuid', 'is_member', 'member_count', 'avatar_128'
-            ],
-            { order: 'id desc' }
+          // First, try to get the current user's partner ID
+          const currentUser = await client.searchRead('res.users',
+            [['id', '=', client.uid]],
+            ['partner_id']
           );
 
-          console.log(`📱 Found ${channels.length} channels with partner filter`);
+          if (currentUser.length > 0) {
+            const currentPartnerId = currentUser[0].partner_id[0];
+            console.log(`👤 Current user partner ID: ${currentPartnerId}`);
+
+            // Try to load channels where the current user is a member
+            channels = await client.searchRead('discuss.channel',
+              [
+                ['channel_member_ids.partner_id', '=', currentPartnerId],
+                '|',
+                ['channel_type', '=', 'chat'],      // Direct messages
+                ['channel_type', '=', 'channel']    // Group channels
+              ],
+              [
+                'id', 'name', 'description', 'channel_type', 'channel_member_ids',
+                'uuid', 'is_member', 'member_count', 'avatar_128'
+              ],
+              { order: 'id desc' }
+            );
+
+            console.log(`📱 Found ${channels.length} channels with partner filter`);
+          }
+        } catch (error) {
+          console.warn('❌ Partner-based filtering failed:', error);
         }
-      } catch (error) {
-        console.warn('❌ Partner-based filtering failed:', error);
-      }
 
-      // Fallback: If no channels found with partner filter, try simpler approach
-      if (channels.length === 0) {
-        console.log('📱 Trying fallback approach - loading channels with is_member filter...');
+        // Fallback: If no channels found with partner filter, try simpler approach
+        if (channels.length === 0) {
+          console.log('📱 Trying fallback approach - loading channels with is_member filter...');
 
-        try {
-          channels = await client.searchRead('discuss.channel',
-            [
-              ['is_member', '=', true],
-              '|',
-              ['channel_type', '=', 'chat'],      // Direct messages
-              ['channel_type', '=', 'channel']    // Group channels
-            ],
-            [
-              'id', 'name', 'description', 'channel_type', 'channel_member_ids',
-              'uuid', 'is_member', 'member_count', 'avatar_128'
-            ],
-            { order: 'id desc' }
-          );
+          try {
+            channels = await client.searchRead('discuss.channel',
+              [
+                ['is_member', '=', true],
+                '|',
+                ['channel_type', '=', 'chat'],      // Direct messages
+                ['channel_type', '=', 'channel']    // Group channels
+              ],
+              [
+                'id', 'name', 'description', 'channel_type', 'channel_member_ids',
+                'uuid', 'is_member', 'member_count', 'avatar_128'
+              ],
+              { order: 'id desc' }
+            );
 
-          console.log(`📱 Found ${channels.length} channels with is_member filter`);
-        } catch (fallbackError) {
-          console.warn('❌ is_member filtering also failed:', fallbackError);
+            console.log(`📱 Found ${channels.length} channels with is_member filter`);
+          } catch (fallbackError) {
+            console.warn('❌ is_member filtering also failed:', fallbackError);
 
-          // Last resort: Load all channels and filter client-side
-          console.log('📱 Last resort - loading all channels...');
-          channels = await client.searchRead('discuss.channel',
-            [
-              '|',
-              ['channel_type', '=', 'chat'],      // Direct messages
-              ['channel_type', '=', 'channel']    // Group channels
-            ],
-            [
-              'id', 'name', 'description', 'channel_type', 'channel_member_ids',
-              'uuid', 'is_member', 'member_count', 'avatar_128'
-            ],
-            { order: 'id desc', limit: 50 } // Limit to prevent too many results
-          );
+            // Last resort: Load all channels and filter client-side
+            console.log('📱 Last resort - loading all channels...');
+            channels = await client.searchRead('discuss.channel',
+              [
+                '|',
+                ['channel_type', '=', 'chat'],      // Direct messages
+                ['channel_type', '=', 'channel']    // Group channels
+              ],
+              [
+                'id', 'name', 'description', 'channel_type', 'channel_member_ids',
+                'uuid', 'is_member', 'member_count', 'avatar_128'
+              ],
+              { order: 'id desc', limit: 50 } // Limit to prevent too many results
+            );
 
-          console.log(`📱 Found ${channels.length} total channels (unfiltered)`);
+            console.log(`📱 Found ${channels.length} total channels (unfiltered)`);
+          }
         }
       }
-      } // Close the if (channels.length === 0) block
 
       console.log(`📱 Loaded ${channels.length} chat channels`);
 
@@ -515,11 +669,6 @@ class ChatService {
 
       console.log(`📨 Found ${messages.length} messages for channel ${channelId}`);
 
-      // Debug: Log first few messages to see the data structure (reduced logging)
-      // if (messages.length > 0) {
-      //   console.log('📨 Sample message data:', JSON.stringify(messages[0], null, 2));
-      // }
-
       // Process messages to ensure proper author names
       const processedMessages = messages.map(msg => {
         let authorName = 'Unknown User';
@@ -692,7 +841,7 @@ class ChatService {
   }
 
   /**
-   * Start aggressive polling for better real-time feel
+   * Start polling for new messages (REDUCED FREQUENCY to minimize race conditions)
    */
   startPolling(channelId: number): void {
     // Stop existing polling
@@ -701,14 +850,16 @@ class ChatService {
     // Set current polling channel
     this.currentPollingChannelId = channelId;
 
-    // Backup polling - every 3 seconds (reduced frequency)
+    console.log(`🔄 Starting backup polling for channel ${channelId} (reduced frequency)`);
+
+    // Backup polling - every 5 seconds (reduced to minimize race conditions with longpolling)
     this.pollingInterval = setInterval(async () => {
       await this.checkForNewMessages(channelId);
-    }, 3000);
+    }, this.POLLING_INTERVAL);
   }
 
   /**
-   * Check for new messages efficiently (only get newer messages)
+   * Check for new messages efficiently (only get newer messages) - IMPROVED WITH SOURCE TRACKING
    */
   private async checkForNewMessages(channelId: number): Promise<void> {
     try {
@@ -732,40 +883,17 @@ class ChatService {
       );
 
       if (newMessages.length > 0) {
-        // Process new messages
-        const processedMessages = newMessages.map(msg => {
-          let authorName = 'Unknown User';
-          if (msg.author_id && Array.isArray(msg.author_id) && msg.author_id.length > 1) {
-            authorName = msg.author_id[1];
-            // Clean up company name
-            if (authorName.includes(',')) {
-              const parts = authorName.split(',').map(part => part.trim());
-              if (parts.length > 1) {
-                authorName = parts[parts.length - 1];
-              }
-            }
-          }
-          return {
-            ...msg,
-            authorName: authorName,
-            cleanAuthorName: authorName
-          };
-        });
-
-        // Remove optimistic messages and add real messages
-        const filteredExisting = existingMessages.filter(msg => !msg.isOptimistic);
-        const updatedMessages = [...filteredExisting, ...processedMessages];
-
-        // Sort by date to maintain order
-        updatedMessages.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
-
-        this.channelMessages.set(channelId, updatedMessages);
-
-        // Emit event for UI update
-        this.emit('newMessages', { channelId, messages: processedMessages });
-        this.emit('messagesUpdated', { channelId });
-
-        console.log(`📨 Added ${processedMessages.length} new messages, removed optimistic messages`);
+        console.log(`🔄 Polling found ${newMessages.length} new messages for channel ${channelId}`);
+        
+        // Process each new message through the same handler
+        for (const message of newMessages) {
+          await this.handleIncomingMessage({
+            ...message,
+            channel_id: channelId,
+            res_id: channelId,
+            model: 'discuss.channel'
+          }, 'polling');
+        }
       }
     } catch (error) {
       // Silent fail to avoid log spam
@@ -780,10 +908,9 @@ class ChatService {
       clearInterval(this.pollingInterval);
       this.pollingInterval = null;
       this.currentPollingChannelId = null;
+      console.log(`🛑 Stopped polling`);
     }
   }
-
-
 
   /**
    * Start typing indicator
@@ -835,8 +962,8 @@ class ChatService {
     longpollingService.subscribeToChannel(channelName);
     console.log(`📱 Longpolling subscription completed for: ${channelName}`);
     
-    // Also start regular polling as backup
-    console.log(`🔄 Starting backup polling for channel ${channelId}`);
+    // Start backup polling with reduced frequency to minimize race conditions
+    console.log(`🔄 Starting backup polling for channel ${channelId} (reduced frequency)`);
     this.startPolling(channelId);
     
     console.log(`✅ Full subscription setup completed for channel ${channelId}`);
@@ -854,58 +981,6 @@ class ChatService {
     if (this.currentPollingChannelId === channelId) {
       this.stopPolling();
     }
-  }
-
-  /**
-   * Handle new message from longpolling
-   */
-  private handleNewMessage(message: any): void {
-    console.log('📨 New message received via longpolling:', message);
-    
-    // Process the message based on the payload structure
-    let channelId: number;
-    let processedMessage: ChatMessage;
-    
-    if (message.model === 'discuss.channel' && message.res_id) {
-      channelId = message.res_id;
-      processedMessage = message as ChatMessage;
-    } else if (message.channel_id) {
-      channelId = message.channel_id;
-      processedMessage = message as ChatMessage;
-    } else {
-      console.warn('⚠️ Could not determine channel ID from message:', message);
-      return;
-    }
-    
-    // Add to channel messages
-    if (!this.channelMessages.has(channelId)) {
-      this.channelMessages.set(channelId, []);
-    }
-    
-    const messages = this.channelMessages.get(channelId)!;
-    
-    // Check if message already exists
-    const exists = messages.some(m => m.id === processedMessage.id);
-    if (!exists) {
-      messages.push(processedMessage);
-      this.channelMessages.set(channelId, messages);
-      
-      this.emit('newMessage', { channelId, message: processedMessage });
-      this.emit('messagesUpdated', { channelId });
-      
-      // Also emit the format expected by UI components
-      this.emit('newMessages', { channelId, messages: [processedMessage] });
-    }
-  }
-
-  /**
-   * Handle channel update from WebSocket
-   */
-  private handleChannelUpdate(channel: ChatChannel): void {
-    console.log('📱 Channel updated:', channel);
-    
-    this.currentChannels.set(channel.id, channel);
-    this.emit('channelUpdated', channel);
   }
 
   /**
