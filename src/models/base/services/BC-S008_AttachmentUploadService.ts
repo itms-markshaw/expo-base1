@@ -75,7 +75,7 @@ class AttachmentUploadService {
 
       const attachmentId = await client.callModel('ir.attachment', 'create', [attachmentData]);
 
-      console.log(`✅ Created attachment with ID: ${attachmentId}`);
+      // Attachment created successfully
 
       // Stage 3: Complete
       onProgress?.({
@@ -116,7 +116,7 @@ class AttachmentUploadService {
     }
 
     try {
-      console.log(`📤 Sending message with attachment to channel ${channelId}`);
+      // Sending message with attachment
 
       // Upload attachment first
       const attachmentId = await this.uploadAttachment(attachment, onProgress);
@@ -132,7 +132,7 @@ class AttachmentUploadService {
         attachment_ids: [attachmentId], // Link the attachment
       });
 
-      console.log(`✅ Message sent with attachment. Message ID: ${messageResult}`);
+      // Message sent successfully
 
       // Update attachment to link to the channel (not needed since it's already linked via message_post)
       // The attachment is automatically linked when using message_post with attachment_ids

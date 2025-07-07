@@ -82,6 +82,7 @@ export default function ChatScreen() {
   const [uploadProgress, setUploadProgress] = useState<UploadProgress | null>(null);
   const [loadingMore, setLoadingMore] = useState(false);
   const [hasMoreMessages, setHasMoreMessages] = useState(true);
+  const [showLoadMore, setShowLoadMore] = useState(false);
 
   // Use refs to access current values in event listeners
   const selectedChannelRef = useRef<ChatChannel | null>(null);
@@ -235,6 +236,7 @@ export default function ChatScreen() {
     setMessages([]);
     setTypingUsers([]);
     setHasMoreMessages(true);
+    setShowLoadMore(false);
 
     // Subscribe to longpolling for real-time updates
     chatService.subscribeToChannel(channel.id);
@@ -274,6 +276,22 @@ export default function ChatScreen() {
       console.error('Failed to load more messages:', error);
     } finally {
       setLoadingMore(false);
+      setShowLoadMore(false); // Hide button after loading
+    }
+  };
+
+  // Handle scroll events to show/hide load more button
+  const handleScroll = (event: any) => {
+    const { contentOffset } = event.nativeEvent;
+    const scrollY = contentOffset.y;
+
+    // Show load more button when user scrolls near the top (within 100px)
+    const nearTop = scrollY < 100;
+
+    if (nearTop && hasMoreMessages && !loadingMore && messages.length >= 25) {
+      setShowLoadMore(true);
+    } else {
+      setShowLoadMore(false);
     }
   };
 
@@ -784,8 +802,8 @@ export default function ChatScreen() {
         >
 
 
-          {/* Load More Messages Button */}
-          {hasMoreMessages && messages.length > 0 && (
+          {/* Load More Messages Button - Only show when scrolled to top */}
+          {showLoadMore && (
             <View style={styles.loadMoreContainer}>
               <TouchableOpacity
                 style={styles.loadMoreButton}
@@ -818,6 +836,8 @@ export default function ChatScreen() {
               style={styles.messagesList}
               contentContainerStyle={styles.messagesContent}
               onContentSizeChange={scrollToBottom}
+              onScroll={handleScroll}
+              scrollEventThrottle={16}
               showsVerticalScrollIndicator={false}
               inverted={false} // Keep normal order for chat
             />
