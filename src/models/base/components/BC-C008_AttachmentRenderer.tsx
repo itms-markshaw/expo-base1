@@ -185,12 +185,12 @@ export default function AttachmentRenderer({
         `What would you like to do with "${attachment.filename}"?`,
         [
           { text: 'Cancel', style: 'cancel' },
-          { 
-            text: 'Download', 
+          {
+            text: 'Download to Device',
             onPress: () => handleManualDownload()
           },
-          { 
-            text: 'Open', 
+          {
+            text: 'View',
             onPress: () => handlePress()
           },
         ]

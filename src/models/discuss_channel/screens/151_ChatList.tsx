@@ -33,6 +33,7 @@ import { useAppNavigation } from '../../../components/AppNavigationProvider';
 import { MessageBubble, MentionPicker } from '../../base/components';
 import { ChannelMembersModal } from '../components';
 import ScreenBadge from '../../../components/ScreenBadge';
+import attachmentUploadService, { AttachmentUpload, UploadProgress } from '../../base/services/BC-S008_AttachmentUploadService';
 
 // Offline-first interfaces
 interface OfflineChannel {
@@ -78,6 +79,7 @@ export default function ChatScreen() {
   const [mentionStartIndex, setMentionStartIndex] = useState(-1);
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
   const [showAttachmentOptions, setShowAttachmentOptions] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState<UploadProgress | null>(null);
 
   // Use refs to access current values in event listeners
   const selectedChannelRef = useRef<ChatChannel | null>(null);
@@ -489,23 +491,60 @@ export default function ChatScreen() {
 
     try {
       setSending(true);
+      setUploadProgress({ progress: 0, bytesUploaded: 0, totalBytes: 0, status: 'uploading' });
 
-      // Create a message with attachment info
-      const attachmentMessage = `📎 ${asset.name || 'Attachment'} (${asset.type || 'file'})`;
+      // Get file info
+      const fileInfo = await attachmentUploadService.getFileInfo(asset.uri);
 
-      // For now, just send a text message indicating the attachment
-      // In a full implementation, you would upload the file to Odoo first
-      const success = await chatService.sendMessage(selectedChannel.id, attachmentMessage);
+      // Create attachment upload object
+      const attachment: AttachmentUpload = {
+        uri: asset.uri,
+        name: asset.name || `attachment_${Date.now()}`,
+        type: asset.mimeType || asset.type || attachmentUploadService.getMimeTypeFromExtension(asset.name || ''),
+        size: fileInfo.size
+      };
+
+      // Validate file
+      const validation = attachmentUploadService.validateFile(attachment);
+      if (!validation.valid) {
+        Alert.alert('Upload Error', validation.error || 'Invalid file');
+        return;
+      }
+
+      console.log(`📤 Uploading attachment: ${attachment.name} (${attachmentUploadService.formatFileSize(attachment.size || 0)})`);
+
+      // Upload attachment with progress
+      const success = await attachmentUploadService.sendMessageWithAttachment(
+        selectedChannel.id,
+        '', // Empty message text, let the service create the attachment message
+        attachment,
+        (progress) => {
+          setUploadProgress(progress);
+          console.log(`📤 Upload progress: ${Math.round(progress.progress * 100)}%`);
+        }
+      );
 
       if (success) {
-        console.log('✅ Attachment message sent successfully');
+        console.log('✅ Attachment uploaded and message sent successfully');
+        setUploadProgress({ progress: 1, bytesUploaded: attachment.size || 0, totalBytes: attachment.size || 0, status: 'completed' });
+
+        // Refresh messages to show the new attachment message
+        if (selectedChannel) {
+          await loadMessages(selectedChannel.id);
+        }
+
         scrollToBottom();
+
+        // Clear progress after a short delay
+        setTimeout(() => setUploadProgress(null), 2000);
       } else {
-        Alert.alert('Error', 'Failed to send attachment');
+        Alert.alert('Error', 'Failed to upload attachment');
+        setUploadProgress(null);
       }
     } catch (error) {
-      console.error('Error sending attachment:', error);
-      Alert.alert('Error', 'Failed to send attachment');
+      console.error('❌ Error uploading attachment:', error);
+      Alert.alert('Upload Error', 'Failed to upload attachment. Please try again.');
+      setUploadProgress(null);
     } finally {
       setSending(false);
     }
@@ -547,7 +586,27 @@ export default function ChatScreen() {
         currentUserPartnerId={chatService.getCurrentUserPartnerId()}
         onLongPress={() => {
           // Handle long press for message actions
-          console.log('Long press on message:', item.id);
+          Alert.alert(
+            'Message Options',
+            'What would you like to do with this message?',
+            [
+              { text: 'Cancel', style: 'cancel' },
+              {
+                text: 'Copy Text',
+                onPress: () => {
+                  // Copy message text to clipboard
+                  console.log('Copy message text:', item.body);
+                }
+              },
+              {
+                text: 'Reply',
+                onPress: () => {
+                  // Set reply context
+                  console.log('Reply to message:', item.id);
+                }
+              },
+            ]
+          );
         }}
         onAttachmentPress={handleAttachmentView}
       />
@@ -828,6 +887,28 @@ export default function ChatScreen() {
                 </View>
               </TouchableOpacity>
             </TouchableOpacity>
+          )}
+
+          {/* Upload Progress */}
+          {uploadProgress && (
+            <View style={styles.uploadProgressContainer}>
+              <View style={styles.uploadProgressBar}>
+                <View
+                  style={[
+                    styles.uploadProgressFill,
+                    { width: `${uploadProgress.progress * 100}%` }
+                  ]}
+                />
+              </View>
+              <Text style={styles.uploadProgressText}>
+                {uploadProgress.status === 'uploading'
+                  ? `Uploading... ${Math.round(uploadProgress.progress * 100)}%`
+                  : uploadProgress.status === 'completed'
+                  ? 'Upload complete!'
+                  : 'Upload failed'
+                }
+              </Text>
+            </View>
           )}
 
           {/* Message Input */}
@@ -1219,6 +1300,32 @@ const styles = StyleSheet.create({
     color: '#007AFF',
     marginTop: 4,
     fontWeight: '500',
+  },
+
+  // Upload Progress
+  uploadProgressContainer: {
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    backgroundColor: '#F8F9FA',
+    borderTopWidth: 0.5,
+    borderTopColor: '#E5E5E5',
+  },
+  uploadProgressBar: {
+    height: 4,
+    backgroundColor: '#E5E5E5',
+    borderRadius: 2,
+    overflow: 'hidden',
+    marginBottom: 4,
+  },
+  uploadProgressFill: {
+    height: '100%',
+    backgroundColor: '#007AFF',
+    borderRadius: 2,
+  },
+  uploadProgressText: {
+    fontSize: 12,
+    color: '#666',
+    textAlign: 'center',
   },
 
   // Emoji Picker
