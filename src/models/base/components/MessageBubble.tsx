@@ -9,7 +9,6 @@ import {
   Text,
   StyleSheet,
   TouchableOpacity,
-  Image,
   Dimensions,
   Alert,
   Linking,
@@ -17,10 +16,8 @@ import {
 import { MaterialIcons, MaterialCommunityIcons } from '@expo/vector-icons';
 import RenderHtml from 'react-native-render-html';
 import { ODOO_CONFIG } from '../../../config/odoo';
-import * as FileSystem from 'expo-file-system';
-import * as MediaLibrary from 'expo-media-library';
-// import * as Sharing from 'expo-sharing'; // Will add this package later
-import { authService } from '../services/BaseAuthService';
+import AttachmentRenderer from './BC-C008_AttachmentRenderer';
+import { AttachmentDownload } from '../services/BC-S007_AttachmentService';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 const MAX_BUBBLE_WIDTH = SCREEN_WIDTH * 0.75;
@@ -56,88 +53,15 @@ export default function MessageBubble({
   onAttachmentPress,
 }: MessageBubbleProps) {
 
-  // Track image loading states
-  const [imageLoadStates, setImageLoadStates] = React.useState<{[key: number]: 'loading' | 'loaded' | 'error'}>({});
 
-  // Download attachment function using authenticated XML-RPC client
-  const downloadAttachment = async (attachmentId: number, filename: string, attachment: any) => {
-    try {
-      console.log(`📥 Starting authenticated download for attachment ${attachmentId}: ${filename}`);
 
-      // Request permissions
-      const { status } = await MediaLibrary.requestPermissionsAsync();
-      if (status !== 'granted') {
-        Alert.alert('Permission Required', 'Please grant media library permissions to download files.');
-        return;
-      }
-
-      // Get the authenticated client
-      const client = authService.getClient();
-      if (!client) {
-        Alert.alert('Authentication Error', 'Please log in again to download files.');
-        return;
-      }
-
-      console.log(`📥 Using authenticated XML-RPC client to download attachment ${attachmentId}`);
-
-      // Use the XML-RPC client to read the attachment data (this uses proper authentication)
-      const attachmentData = await client.callModel('ir.attachment', 'read', [attachmentId], {
-        fields: ['datas', 'name', 'mimetype', 'file_size']
-      });
-
-      if (!attachmentData || attachmentData.length === 0) {
-        throw new Error('Attachment not found');
-      }
-
-      const base64Data = attachmentData[0].datas;
-      if (!base64Data) {
-        throw new Error('No attachment data available');
-      }
-
-      console.log(`✅ Retrieved ${base64Data.length} characters of base64 data via XML-RPC`);
-
-      // Save the file
-      const fileUri = FileSystem.documentDirectory + filename;
-      await FileSystem.writeAsStringAsync(fileUri, base64Data, {
-        encoding: FileSystem.EncodingType.Base64,
-      });
-
-      console.log(`✅ Saved to: ${fileUri}`);
-
-      // Save to media library for images
-      if (attachment.mimetype?.startsWith('image/')) {
-        const asset = await MediaLibrary.createAssetAsync(fileUri);
-        await MediaLibrary.createAlbumAsync('ExpoApp Downloads', asset, false);
-        Alert.alert('Success', `Image saved to Photos: ${filename}`);
-      } else {
-        // For other files, show success message and file location
-        Alert.alert(
-          'Success',
-          `File downloaded: ${filename}\nLocation: ${fileUri}`,
-          [
-            { text: 'OK' },
-            { text: 'Open', onPress: () => Linking.openURL(fileUri) }
-          ]
-        );
-      }
-
-    } catch (error) {
-      console.error(`❌ Authenticated download failed for ${filename}:`, error);
-      Alert.alert('Download Failed', `Could not download ${filename}: ${error.message}`);
-    }
-  };
-
-  // Handle long press with download option
+  // Handle long press with attachment options
   const handleAttachmentLongPress = (attachmentId: number, filename: string, attachment: any) => {
     Alert.alert(
       'Attachment Options',
       `What would you like to do with "${filename}"?`,
       [
         { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Download',
-          onPress: () => downloadAttachment(attachmentId, filename, attachment)
-        },
         {
           text: 'Open',
           onPress: () => onAttachmentPress?.(attachmentId, filename, attachment)
@@ -469,49 +393,23 @@ export default function MessageBubble({
             console.log(`🖼️ Loading image for attachment ${attachmentId}:`, imageUrl);
             console.log(`🖼️ Attachment details:`, attachment);
 
+            // Convert to AttachmentDownload format
+            const attachmentDownload: AttachmentDownload = {
+              id: attachmentId,
+              filename: attachment.name,
+              mimetype: attachment.mimetype || 'image/jpeg',
+              file_size: attachment.file_size || 0,
+            };
+
             return (
-              <TouchableOpacity
+              <AttachmentRenderer
                 key={`attachment-${attachmentId}-${index}`}
-                style={styles.inlineImageContainer}
+                attachment={attachmentDownload}
+                maxWidth={150}
+                maxHeight={150}
                 onPress={() => onAttachmentPress?.(attachmentId, attachment.name, attachment)}
                 onLongPress={() => handleAttachmentLongPress(attachmentId, attachment.name, attachment)}
-              >
-                <Image
-                  source={{ uri: imageUrl }}
-                  style={[styles.inlineImage, { backgroundColor: 'transparent' }]}
-                  resizeMode="cover"
-                  onError={(error) => {
-                    console.log(`❌ Failed to load image ${attachmentId}:`, error.nativeEvent.error);
-                    console.log(`❌ Image URL was: ${imageUrl}`);
-                    setImageLoadStates(prev => ({ ...prev, [attachmentId]: 'error' }));
-                  }}
-                  onLoad={() => {
-                    console.log(`✅ Successfully loaded image ${attachmentId} from ${imageUrl}`);
-                    setImageLoadStates(prev => ({ ...prev, [attachmentId]: 'loaded' }));
-                  }}
-                  onLoadStart={() => {
-                    console.log(`🔄 Started loading image ${attachmentId}`);
-                    setImageLoadStates(prev => ({ ...prev, [attachmentId]: 'loading' }));
-                  }}
-                />
-
-                {/* Show placeholder only if image failed to load */}
-                {imageLoadStates[attachmentId] === 'error' && (
-                  <View style={styles.imagePlaceholder}>
-                    <MaterialIcons name="broken-image" size={40} color="#999" />
-                    <Text style={styles.imagePlaceholderText}>
-                      Failed to load
-                    </Text>
-                  </View>
-                )}
-
-                {/* Always show filename overlay at bottom */}
-                <View style={styles.imageFilenameOverlay}>
-                  <Text style={styles.imageFilenameText} numberOfLines={1}>
-                    {attachment.name}
-                  </Text>
-                </View>
-              </TouchableOpacity>
+              />
             );
           } else {
             return (
@@ -763,53 +661,7 @@ const styles = StyleSheet.create({
     flexWrap: 'wrap',
     gap: 8,
   },
-  inlineImageContainer: {
-    borderRadius: 8,
-    overflow: 'hidden',
-    marginBottom: 4,
-    backgroundColor: 'transparent', // Remove gray background
-    minWidth: 150,
-    minHeight: 150,
-    position: 'relative',
-  },
-  inlineImage: {
-    width: 150,
-    height: 150,
-    borderRadius: 8,
-    backgroundColor: 'transparent', // Remove gray background so images show
-  },
-  imagePlaceholder: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    backgroundColor: '#f0f0f0',
-    justifyContent: 'center',
-    alignItems: 'center',
-    borderRadius: 8,
-  },
-  imagePlaceholderText: {
-    color: '#999',
-    fontSize: 10,
-    marginTop: 4,
-    textAlign: 'center',
-  },
-  imageFilenameOverlay: {
-    position: 'absolute',
-    bottom: 2,
-    left: 2,
-    right: 2,
-    backgroundColor: 'rgba(0,0,0,0.6)',
-    paddingHorizontal: 4,
-    paddingVertical: 1,
-    borderRadius: 3,
-  },
-  imageFilenameText: {
-    color: 'white',
-    fontSize: 9,
-    textAlign: 'center',
-  },
+
   fileAttachment: {
     flexDirection: 'row',
     alignItems: 'center',

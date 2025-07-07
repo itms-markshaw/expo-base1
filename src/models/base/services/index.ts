@@ -15,6 +15,7 @@ export { default as BaseAttachmentsService } from './BaseAttachmentsService';
 export { default as BaseWorkflowService } from './BaseWorkflowService';
 export { default as BaseActionsService } from './BaseActionsService';
 export { default as BaseReportingService } from './BaseReportingService';
+export { default as AttachmentService } from './BC-S007_AttachmentService';
 
 // Communication Services
 export { default as BaseWebSocketService } from './BaseWebSocketService';
