@@ -299,6 +299,47 @@ class ChatService {
           enrichedMessage = enrichedMessages[0] || processedMessage;
         }
 
+        // Enhanced call message detection for chat-based calling (no RTC required)
+        if (enrichedMessage.body && (
+          enrichedMessage.body.includes('started a live conference') ||
+          enrichedMessage.body.includes('📞 Audio call started') ||
+          enrichedMessage.body.includes('📹 Video call started') ||
+          enrichedMessage.body.includes('call started')
+        )) {
+          console.log('📞 Call invitation message detected:', enrichedMessage.body);
+
+          // Only create call invitations for actual call starts, not status messages
+          const isCallStatusMessage = enrichedMessage.body.includes('answered') ||
+                                     enrichedMessage.body.includes('ended') ||
+                                     enrichedMessage.body.includes('declined') ||
+                                     enrichedMessage.body.includes('missed');
+
+          if (!isCallStatusMessage) {
+            // Determine if it's a video call
+            const isVideo = enrichedMessage.body.includes('Video') ||
+                           enrichedMessage.body.includes('📹') ||
+                           enrichedMessage.body.includes('conference');
+
+            // Create call invitation for chat-based calling
+            const callInvitation = {
+              call_id: `call-${enrichedMessage.id}`,
+              caller_id: enrichedMessage.author_id[0],
+              caller_name: enrichedMessage.author_id[1] || 'Unknown User',
+              channel_id: channelId,
+              channel_name: `Channel ${channelId}`,
+              call_type: isVideo ? 'video' : 'audio',
+              isVideo: isVideo,
+              timestamp: Date.now(),
+              source: 'chat_message' // Mark as chat-based call
+            };
+
+            console.log('📞 Emitting chat-based call invitation:', callInvitation);
+            this.emit('callInvitation', callInvitation);
+          } else {
+            console.log('📞 Call status message (not creating invitation):', enrichedMessage.body);
+          }
+        }
+
         // Get existing messages for this channel
         const existingMessages = this.channelMessages.get(channelId) || [];
 
@@ -330,34 +371,6 @@ class ChatService {
           this.channelMessages.set(channelId, updatedMessages);
 
           console.log(`✅ Added new message ${enrichedMessage.id} to channel ${channelId} from ${source}`);
-
-          // NEW: Check for call/conference messages
-          if (enrichedMessage.body && (
-            enrichedMessage.body.includes('started a live conference') ||
-            enrichedMessage.body.includes('📞 Audio call started') ||
-            enrichedMessage.body.includes('📹 Video call started') ||
-            enrichedMessage.body.includes('call started')
-          )) {
-            console.log('📞 Call message detected:', enrichedMessage);
-
-            // Determine if it's a video call
-            const isVideo = enrichedMessage.body.includes('Video') || enrichedMessage.body.includes('📹') || enrichedMessage.body.includes('conference');
-
-            // Emit as call invitation
-            const callInvitation = {
-              call_id: `call-${enrichedMessage.id}`,
-              caller_id: enrichedMessage.author_id[0],
-              caller_name: enrichedMessage.author_id[1] || 'Unknown User',
-              channel_id: channelId,
-              channel_name: `Channel ${channelId}`,
-              call_type: isVideo ? 'video' : 'audio',
-              isVideo: isVideo,
-              timestamp: Date.now()
-            };
-
-            console.log('📞 Emitting call invitation:', callInvitation);
-            this.emit('callInvitation', callInvitation);
-          }
 
           // CRITICAL: Force UI update with immediate emission
           this.emit('newMessage', { channelId, message: enrichedMessage });

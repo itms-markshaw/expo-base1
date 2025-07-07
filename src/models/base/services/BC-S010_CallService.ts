@@ -8,6 +8,7 @@ import * as MediaLibrary from 'expo-media-library';
 import { authService } from './BaseAuthService';
 import { notificationService } from './BC-S009_NotificationService';
 import { longpollingService } from './BaseLongpollingService';
+import webRTCService from '../../discuss_channel/services/WebRTCService';
 
 export interface CallParticipant {
   id: number;
@@ -138,7 +139,7 @@ class CallService {
   }
 
   /**
-   * Start a new call (simplified for Expo compatibility)
+   * Start a new call with WebRTC support
    */
   async startCall(channelId: number, channelName: string, isVideo: boolean = false): Promise<boolean> {
     try {
@@ -146,6 +147,27 @@ class CallService {
         throw new Error('Another call is already in progress');
       }
 
+      // For video calls, use WebRTC if available
+      if (isVideo && webRTCService.isAvailable()) {
+        console.log('📞 Starting WebRTC video call');
+        const callId = await webRTCService.initiateCall(channelId, 'video');
+
+        // Create call session for compatibility
+        this.currentCall = {
+          id: callId,
+          channelId,
+          channelName,
+          participants: [],
+          isVideo: true,
+          status: 'connecting',
+          startTime: new Date(),
+        };
+
+        this.emit('callStarted', this.currentCall);
+        return true;
+      }
+
+      // For audio calls or when WebRTC is not available, use chat-based calling
       if (!this.audioPermissions) {
         await this.requestPermissions();
       }
@@ -163,7 +185,7 @@ class CallService {
         startTime: new Date(),
       };
 
-      // Send call invitation via Odoo (simplified signaling)
+      // Send call invitation via Odoo (chat-based signaling)
       await this.sendCallInvitation(callId, channelId, isVideo);
 
       this.emit('callStarted', this.currentCall);
@@ -173,6 +195,38 @@ class CallService {
       console.error('Failed to start call:', error);
       await this.endCall();
       return false;
+    }
+  }
+
+  /**
+   * Start WebRTC call specifically
+   */
+  async startWebRTCCall(channelId: number, channelName: string, callType: 'audio' | 'video' = 'video'): Promise<string> {
+    try {
+      if (!webRTCService.isAvailable()) {
+        throw new Error('WebRTC not available - please use development build');
+      }
+
+      console.log(`📞 Starting WebRTC ${callType} call in channel ${channelId}`);
+      const callId = await webRTCService.initiateCall(channelId, callType);
+
+      // Create call session for compatibility
+      this.currentCall = {
+        id: callId,
+        channelId,
+        channelName,
+        participants: [],
+        isVideo: callType === 'video',
+        status: 'connecting',
+        startTime: new Date(),
+      };
+
+      this.emit('callStarted', this.currentCall);
+      return callId;
+
+    } catch (error) {
+      console.error('Failed to start WebRTC call:', error);
+      throw error;
     }
   }
 
@@ -268,18 +322,95 @@ class CallService {
       const client = authService.getClient();
       if (!client) return;
 
-      // Send via Odoo message system (simplified)
-      await client.callModel('discuss.channel', 'message_post', [channelId], {
-        body: `📞 ${isVideo ? 'Video' : 'Audio'} call started`,
-        message_type: 'notification',
-        subtype_xmlid: 'mail.mt_comment',
-      });
+      console.log(`📞 Starting ${isVideo ? 'video' : 'audio'} call using chat-based system`);
+
+      // Chat-based call system (no RTC required)
+      try {
+        // Send call invitation message to channel
+        await client.callModel('discuss.channel', 'message_post', [channelId], {
+          body: `📞 ${isVideo ? 'Video' : 'Audio'} call started by ${client.username || 'Mobile User'}`,
+          message_type: 'notification',
+          subtype_xmlid: 'mail.mt_comment',
+        });
+
+        console.log('✅ Call invitation sent via chat message');
+
+        // Optional: Try RTC if available (but don't fail if it doesn't work)
+        try {
+          const sessionData = await client.callModel('mail.rtc.session', 'create', [{
+            channel_id: channelId,
+            session_type: isVideo ? 'video' : 'audio',
+            is_camera_on: isVideo,
+            is_muted: false,
+            is_screen_sharing_on: false,
+          }]);
+
+          const sessionId = Array.isArray(sessionData) ? sessionData[0] : sessionData;
+          console.log(`✅ Bonus: RTC session created: ${sessionId}`);
+
+          // Try to join the session
+          try {
+            await client.callModel('mail.rtc.session', 'action_join', [sessionId]);
+            console.log(`✅ Bonus: Joined RTC session: ${sessionId}`);
+          } catch (joinError) {
+            console.log('ℹ️ RTC join not available (expected for basic Odoo)');
+          }
+
+        } catch (rtcError) {
+          console.log('ℹ️ RTC not available (using chat-based calling only)');
+          // This is expected and fine - chat-based calling works without RTC
+        }
+
+      } catch (messageError) {
+        console.error('❌ Failed to send call invitation message:', messageError);
+        throw messageError;
+      }
 
       // Simulate call connection
       this.simulateCallConnection();
 
     } catch (error) {
       console.error('Failed to send call invitation:', error);
+    }
+  }
+
+  /**
+   * Notify channel members about RTC session
+   */
+  private async notifyChannelMembers(channelId: number, sessionId: number, callType: string): Promise<void> {
+    try {
+      const client = authService.getClient();
+      if (!client) return;
+
+      // Get channel members
+      const channelData = await client.searchRead('discuss.channel', [['id', '=', channelId]],
+        ['channel_member_ids']);
+
+      if (channelData.length === 0) return;
+
+      const memberIds = channelData[0].channel_member_ids;
+
+      // Send bus notifications to each member
+      const notifications = memberIds.map((memberId: number) => [
+        `mail.rtc.session_${sessionId}`,
+        {
+          type: 'mail.rtc.session/inserted',
+          payload: {
+            id: sessionId,
+            channel_id: channelId,
+            session_type: callType,
+            caller_name: client.username || 'Mobile User',
+            is_camera_on: callType === 'video',
+            is_muted: false,
+          }
+        }
+      ]);
+
+      await client.callModel('bus.bus', 'sendmany', [notifications]);
+      console.log(`📡 Sent RTC notifications to ${notifications.length} members`);
+
+    } catch (error) {
+      console.log('⚠️ Could not send bus notifications:', error.message);
     }
   }
 
@@ -291,8 +422,39 @@ class CallService {
       const client = authService.getClient();
       if (!client) return;
 
-      // For now, just simulate the answer
-      console.log(`📞 Call ${callId} answered`);
+      console.log(`📞 Call ${callId} answered - notifying Odoo via chat`);
+
+      // Extract channel ID from call ID
+      const channelId = this.currentCall?.channelId;
+      if (!channelId) {
+        console.error('No channel ID available for call answer');
+        return;
+      }
+
+      // Send a message to the channel indicating the call was answered
+      await client.callModel('discuss.channel', 'message_post', [channelId], {
+        body: `📞 Call answered by ${client.username || 'Mobile User'}`,
+        message_type: 'notification',
+        subtype_xmlid: 'mail.mt_comment',
+      });
+
+      console.log('✅ Call answer notification sent via chat');
+
+      // Optional: Try to update RTC session if available (but don't fail)
+      try {
+        await client.callModel('mail.rtc.session', 'update_and_broadcast', [], {
+          session_id: callId,
+          values: {
+            is_screen_sharing_on: false,
+            is_camera_on: this.currentCall?.isVideo || false,
+            is_muted: false,
+          }
+        });
+        console.log('✅ Bonus: Updated RTC session in Odoo');
+      } catch (rtcError) {
+        console.log('ℹ️ RTC session update not available (expected for basic Odoo)');
+        // This is expected and fine - chat-based calling works without RTC
+      }
 
       // Simulate call connection
       this.simulateCallConnection();
@@ -310,10 +472,28 @@ class CallService {
       const client = authService.getClient();
       if (!client) return;
 
-      await client.callModel('discuss.channel', 'end_call', [], {
-        call_id: callId,
-        end_time: Date.now(),
-      });
+      console.log(`📞 Call ${callId} ended - notifying Odoo`);
+
+      // Get channel ID from current call
+      const channelId = this.currentCall?.channelId;
+      if (channelId) {
+        // Send call end message to channel
+        await client.callModel('discuss.channel', 'message_post', [channelId], {
+          body: `📞 Call ended by ${client.username || 'Mobile User'}`,
+          message_type: 'notification',
+          subtype_xmlid: 'mail.mt_comment',
+        });
+
+        // Try to end RTC session if it exists
+        try {
+          await client.callModel('mail.rtc.session', 'unlink', [], {
+            session_id: callId,
+          });
+          console.log('✅ Ended RTC session in Odoo');
+        } catch (rtcError) {
+          console.log('ℹ️ RTC session cleanup not available (normal for basic Odoo)');
+        }
+      }
 
     } catch (error) {
       console.error('Failed to send call end:', error);
@@ -329,10 +509,16 @@ class CallService {
   }
 
   /**
-   * Handle call invitation from longpolling
+   * Handle call invitation from longpolling (chat-based calling)
    */
   handleCallInvitation(invitation: any): void {
     console.log('📞 Processing call invitation:', invitation);
+
+    // Validate invitation data
+    if (!invitation || !invitation.call_id || !invitation.caller_id) {
+      console.log('📞 Invalid call invitation data, ignoring');
+      return;
+    }
 
     // Get current user to prevent self-call notifications
     const currentUserId = this.getCurrentUserId();
@@ -343,8 +529,11 @@ class CallService {
       return;
     }
 
+    // For chat-based calls, we accept all valid invitations
+    console.log('📞 Valid chat-based call invitation received');
+
     // Create CallOffer format that matches IncomingCallModal expectations
-    const callData = {
+    const callOffer = {
       callId: invitation.call_id || invitation.id,
       channelId: invitation.channel_id,
       fromUserId: invitation.caller_id,
@@ -354,13 +543,24 @@ class CallService {
       timestamp: invitation.timestamp || Date.now()
     };
 
-    console.log('📞 Emitting incoming call event:', callData);
+    // Create CallInvitation format for notification service
+    const callInvitation = {
+      id: callOffer.callId,
+      callerId: callOffer.fromUserId,
+      callerName: callOffer.fromUserName,
+      channelId: callOffer.channelId,
+      channelName: `Channel ${callOffer.channelId}`,
+      isVideo: callOffer.isVideo,
+      timestamp: callOffer.timestamp
+    };
+
+    console.log('📞 Emitting incoming call event for chat-based call:', callOffer);
 
     // Show notification if app is backgrounded
-    notificationService.showIncomingCallNotification(callData);
+    notificationService.showIncomingCallNotification(callInvitation);
 
-    // Emit event for UI if app is active
-    this.emit('incomingCall', callData);
+    // Emit event for UI if app is active (use CallOffer format)
+    this.emit('incomingCall', callOffer);
   }
 
   /**
@@ -438,27 +638,7 @@ class CallService {
     });
   }
 
-  /**
-   * Test call notification flow (for debugging)
-   */
-  async testCallNotification(): Promise<void> {
-    console.log('🧪 Testing call notification flow...');
 
-    // Simulate incoming call data from a different user
-    const testCall = {
-      call_id: 'test-' + Date.now(),
-      caller_id: 999, // Different user ID to avoid self-call filtering
-      caller_name: 'Test Caller',
-      caller_avatar: null,
-      channel_id: 22, // Use current channel ID
-      channel_name: 'Test Channel',
-      call_type: 'audio',
-      timestamp: Date.now()
-    };
-
-    console.log('🧪 Simulating call invitation:', testCall);
-    this.handleCallInvitation(testCall);
-  }
 
   /**
    * Get current user ID from auth service

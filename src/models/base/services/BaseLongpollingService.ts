@@ -194,7 +194,7 @@ class OdooPollingService {
     // Emit generic message event
     this.emit('message', message);
 
-    // Check for call-related messages
+    // Check for call-related messages (but only log, don't auto-handle)
     if (message.payload && (
       message.payload.body?.includes('conference') ||
       message.payload.body?.includes('call started') ||
@@ -202,7 +202,16 @@ class OdooPollingService {
       message.payload.body?.includes('📹') ||
       message.type === 'call_invitation'
     )) {
-      console.log('📞 CALL-RELATED MESSAGE DETECTED:', message);
+      const isCallStatusMessage = message.payload.body?.includes('answered') ||
+                                 message.payload.body?.includes('ended') ||
+                                 message.payload.body?.includes('declined') ||
+                                 message.payload.body?.includes('missed');
+
+      if (isCallStatusMessage) {
+        console.log('📞 CALL STATUS MESSAGE DETECTED:', message);
+      } else {
+        console.log('📞 CALL-RELATED MESSAGE DETECTED:', message);
+      }
     }
 
     // Handle specific message types

@@ -56,6 +56,7 @@ import ActivitiesList from './src/models/mail_activity/screens/501_ActivitiesLis
 import CalendarView from './src/models/calendar_event/screens/701_CalendarView';
 import ChatList from './src/models/discuss_channel/screens/151_ChatList';
 import CallScreen from './src/models/discuss_channel/screens/152_CallScreen';
+import VideoCallScreen from './src/models/discuss_channel/screens/152_VideoCallScreen';
 import ModelSelectionScreen from './src/models/sync_management/screens/982_ModelSelection';
 import CustomModelSelectionScreen from './src/models/sync_management/screens/983_CustomModelSelection';
 import TemplateModelSelectionScreen from './src/models/sync_management/screens/984_TemplateModelSelection';
@@ -297,6 +298,16 @@ function AllScreensStack() {
           title: 'Call',
           headerShown: false,
           presentation: 'fullScreenModal'
+        }}
+      />
+      <Stack.Screen
+        name="VideoCallScreen"
+        component={VideoCallScreen}
+        options={{
+          title: 'Video Call',
+          headerShown: false,
+          presentation: 'fullScreenModal',
+          gestureEnabled: false
         }}
       />
     </Stack.Navigator>

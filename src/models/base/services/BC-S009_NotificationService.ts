@@ -184,15 +184,24 @@ class NotificationService {
         return;
       }
 
-      // Store the push token in user preferences or a custom model
-      await client.callModel('res.users', 'write', [client.uid], {
-        expo_push_token: token,
-        mobile_device_info: {
-          platform: Platform.OS,
-          device_name: Device.deviceName,
-          app_version: Constants.expoConfig?.version,
-        }
-      });
+      // Try to store the push token - this will fail gracefully if field doesn't exist
+      try {
+        await client.callModel('res.users', 'write', [client.uid], {
+          expo_push_token: token,
+          mobile_device_info: {
+            platform: Platform.OS,
+            device_name: Device.deviceName,
+            app_version: Constants.expoConfig?.version,
+          }
+        });
+        console.log('✅ Push token sent to Odoo successfully');
+      } catch (fieldError) {
+        // Field doesn't exist in Odoo - this is expected for basic Odoo installations
+        console.log('ℹ️ Push token field not available in Odoo (this is normal for basic installations)');
+
+        // Store token locally for future use
+        this.expoPushToken = token;
+      }
 
     } catch (error) {
       console.error('Failed to send push token to Odoo:', error);
@@ -268,18 +277,9 @@ class NotificationService {
    * Handle incoming call (when app is active)
    */
   private handleIncomingCall(data: any): void {
-    const call: CallInvitation = {
-      id: data.callId,
-      callerId: data.callerId,
-      callerName: data.callerName,
-      channelId: data.channelId,
-      channelName: data.channelName || '',
-      isVideo: data.isVideo || false,
-      timestamp: Date.now(),
-    };
-
-    // Emit event for UI to show incoming call modal
-    this.emit('incomingCall', call);
+    // Don't emit another call event here since CallService already handles it
+    // This prevents duplicate call events with different data structures
+    console.log('📞 Notification service received call notification (handled by CallService)');
   }
 
   /**

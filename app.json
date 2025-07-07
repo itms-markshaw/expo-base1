@@ -10,13 +10,25 @@
     ],
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.itmsadmin.odoosyncapp"
+      "bundleIdentifier": "com.itmsadmin.odoosyncapp",
+      "infoPlist": {
+        "NSCameraUsageDescription": "This app needs access to camera for video calls",
+        "NSMicrophoneUsageDescription": "This app needs access to microphone for calls",
+        "UIBackgroundModes": ["audio", "voip"]
+      }
     },
     "android": {
       "adaptiveIcon": {
         "backgroundColor": "#ffffff"
       },
-      "package": "com.itmsadmin.odoosyncapp"
+      "package": "com.itmsadmin.odoosyncapp",
+      "permissions": [
+        "CAMERA",
+        "RECORD_AUDIO",
+        "MODIFY_AUDIO_SETTINGS",
+        "INTERNET",
+        "ACCESS_NETWORK_STATE"
+      ]
     },
     "plugins": [
       [
@@ -26,7 +38,8 @@
         }
       ],
       "expo-router",
-      "expo-notifications"
+      "expo-notifications",
+      "expo-dev-client"
     ],
     "extra": {
       "router": {},

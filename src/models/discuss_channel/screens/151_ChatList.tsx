@@ -38,6 +38,8 @@ import attachmentUploadService, { AttachmentUpload, UploadProgress } from '../..
 import { callService } from '../../base/services/BC-S010_CallService';
 import IncomingCallModal from '../../base/components/BC-C009_IncomingCallModal';
 import { longpollingService } from '../../base/services/BaseLongpollingService';
+import webRTCService, { WebRTCCall } from '../services/WebRTCService';
+import { IncomingWebRTCCallModal } from '../components/IncomingWebRTCCallModal';
 
 // Offline-first interfaces
 interface OfflineChannel {
@@ -66,7 +68,7 @@ interface OfflineMessage {
 // Removed unused SCREEN_WIDTH
 
 export default function ChatScreen() {
-  const { showNavigationDrawer, showUniversalSearch } = useAppNavigation();
+  const { showNavigationDrawer } = useAppNavigation();
   const navigation = useNavigation();
   const [channels, setChannels] = useState<ChatChannel[]>([]);
   const [selectedChannel, setSelectedChannel] = useState<ChatChannel | null>(null);
@@ -90,6 +92,8 @@ export default function ChatScreen() {
   const [showLoadMore, setShowLoadMore] = useState(false);
   const [showIncomingCall, setShowIncomingCall] = useState(false);
   const [incomingCallOffer, setIncomingCallOffer] = useState(null);
+  const [showWebRTCCallModal, setShowWebRTCCallModal] = useState(false);
+  const [incomingWebRTCCall, setIncomingWebRTCCall] = useState<WebRTCCall | null>(null);
   const [debugInfo, setDebugInfo] = useState('');
 
   // Use refs to access current values in event listeners
@@ -176,14 +180,27 @@ export default function ChatScreen() {
 
     longpollingService.on('message', handleLongpollingMessage);
 
-    // Listen for call invitations from chat messages
+    // Handle call invitations from chat messages (chat-based calling)
     const handleChatCallInvitation = (invitation: any) => {
       console.log('📞 CALL INVITATION from chat message:', invitation);
-      // Forward to call service
-      callService.handleCallInvitation(invitation);
+
+      // Only handle chat-based call invitations, not RTC-based ones
+      if (invitation.source === 'chat_message') {
+        console.log('📞 Processing chat-based call invitation');
+        callService.handleCallInvitation(invitation);
+      } else {
+        console.log('📞 Ignoring non-chat call invitation');
+      }
     };
 
     chatService.on('callInvitation', handleChatCallInvitation);
+
+    // Setup WebRTC listeners
+    webRTCService.on('incomingCall', (call: WebRTCCall) => {
+      console.log('📞 Incoming WebRTC call:', call);
+      setIncomingWebRTCCall(call);
+      setShowWebRTCCallModal(true);
+    });
 
     // Debug info updater
     const debugInterval = setInterval(() => {
@@ -682,6 +699,42 @@ export default function ChatScreen() {
     setIncomingCallOffer(null);
   };
 
+  // WebRTC call handlers
+  const handleAcceptWebRTCCall = async () => {
+    if (!incomingWebRTCCall) return;
+
+    try {
+      setShowWebRTCCallModal(false);
+
+      // Navigate to video call screen
+      navigation.navigate('VideoCallScreen', {
+        callId: incomingWebRTCCall.callId,
+        isIncoming: true
+      });
+
+      // Answer the call
+      await webRTCService.answerCall(incomingWebRTCCall.callId);
+
+    } catch (error) {
+      console.error('Failed to accept WebRTC call:', error);
+      Alert.alert('Call Failed', 'Unable to answer the call.');
+    }
+  };
+
+  const handleDeclineWebRTCCall = async () => {
+    if (!incomingWebRTCCall) return;
+
+    try {
+      await webRTCService.endCall();
+      setShowWebRTCCallModal(false);
+      setIncomingWebRTCCall(null);
+    } catch (error) {
+      console.error('Failed to decline WebRTC call:', error);
+      setShowWebRTCCallModal(false);
+      setIncomingWebRTCCall(null);
+    }
+  };
+
   const handleStartAudioCall = async () => {
     if (!selectedChannel) return;
 
@@ -699,11 +752,25 @@ export default function ChatScreen() {
     if (!selectedChannel) return;
 
     try {
-      const success = await callService.startCall(selectedChannel.id, selectedChannel.name, true);
-      if (!success) {
-        Alert.alert('Call Failed', 'Unable to start video call. Please try again.');
+      // Try WebRTC first if available
+      if (webRTCService.isAvailable()) {
+        console.log('📞 Starting WebRTC video call');
+        const callId = await callService.startWebRTCCall(selectedChannel.id, selectedChannel.name, 'video');
+
+        // Navigate to video call screen
+        navigation.navigate('VideoCallScreen', {
+          callId,
+          isIncoming: false
+        });
+      } else {
+        // Fallback to chat-based calling
+        const success = await callService.startCall(selectedChannel.id, selectedChannel.name, true);
+        if (!success) {
+          Alert.alert('Call Failed', 'Unable to start video call. Please try again.');
+        }
       }
     } catch (error) {
+      console.error('Video call failed:', error);
       Alert.alert('Call Failed', 'Unable to start video call. Please check your connection.');
     }
   };
@@ -781,99 +848,57 @@ export default function ChatScreen() {
       <ScreenBadge screenNumber={151} />
       {/* Header */}
       <View style={styles.header}>
-        <View style={styles.headerLeft}>
-          {selectedChannel && (
-            <TouchableOpacity
-              style={styles.backToListButton}
-              onPress={() => {
-                // Unsubscribe from longpolling when going back to list
-                if (selectedChannel) {
-                  console.log(`📡 Unsubscribing from channel ${selectedChannel.id}`);
-                  chatService.unsubscribeFromChannel(selectedChannel.id);
-                }
-                setSelectedChannel(null);
-              }}
-            >
-              <MaterialIcons name="arrow-back" size={24} color="#007AFF" />
-            </TouchableOpacity>
-          )}
-          <Text style={[styles.headerTitle, selectedChannel && styles.headerTitleWithBack]}>
+        <TouchableOpacity
+          style={styles.backButton}
+          onPress={() => {
+            if (selectedChannel) {
+              // Unsubscribe from longpolling when going back to list
+              console.log(`📡 Unsubscribing from channel ${selectedChannel.id}`);
+              chatService.unsubscribeFromChannel(selectedChannel.id);
+              setSelectedChannel(null);
+            } else {
+              navigation.goBack();
+            }
+          }}
+        >
+          <MaterialIcons name="arrow-back" size={24} color="#007AFF" />
+        </TouchableOpacity>
+
+        <View style={styles.headerCenter}>
+          <Text style={styles.headerTitle}>
             {selectedChannel ? selectedChannel.name : 'Chat'}
           </Text>
-          <View style={styles.headerActions}>
-            {/* Call buttons - only show when a channel is selected */}
-            {selectedChannel && (
-              <View style={styles.callButtons}>
-                <TouchableOpacity
-                  style={styles.callButton}
-                  onPress={handleStartAudioCall}
-                >
-                  <MaterialIcons name="call" size={20} color="#007AFF" />
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={styles.callButton}
-                  onPress={handleStartVideoCall}
-                >
-                  <MaterialIcons name="videocam" size={20} color="#007AFF" />
-                </TouchableOpacity>
-                {/* Debug: Test call button */}
-                <TouchableOpacity
-                  style={[styles.callButton, { backgroundColor: '#FF0000' }]}
-                  onPress={() => {
-                    console.log('🧪 Testing call notification');
-                    callService.testCallNotification();
-                  }}
-                >
-                  <MaterialIcons name="bug-report" size={16} color="#FFF" />
-                </TouchableOpacity>
-              </View>
-            )}
+          {selectedChannel && selectedChannel.channel_type === 'channel' && (
+            <Text style={styles.headerSubtitle}>
+              {selectedChannel.member_count || 0} members
+            </Text>
+          )}
+        </View>
 
-            <View style={styles.statusContainer}>
-              <View style={[
-                styles.statusDot,
-                { backgroundColor: connectionStatus === 'connected' ? '#34C759' : '#FF3B30' }
-              ]} />
-              <Text style={styles.statusText}>
-                {connectionStatus === 'connected' ? 'Connected' : 'Disconnected'}
-              </Text>
-              {connectionStatus === 'disconnected' && (
-                <TouchableOpacity
-                  style={styles.reconnectButton}
-                  onPress={handleReconnect}
-                  disabled={isReconnecting}
-                >
-                  {isReconnecting ? (
-                    <ActivityIndicator size="small" color="#007AFF" />
-                  ) : (
-                    <MaterialIcons name="refresh" size={16} color="#007AFF" />
-                  )}
-                </TouchableOpacity>
-              )}
-            </View>
-          </View>
-
-        {/* Debug Info */}
-        {debugInfo && (
-          <View style={styles.debugContainer}>
-            <Text style={styles.debugText}>{debugInfo}</Text>
+        {/* Call buttons - only show when a channel is selected */}
+        {selectedChannel && (
+          <View style={styles.callButtons}>
+            <TouchableOpacity
+              style={styles.callButton}
+              onPress={handleStartAudioCall}
+            >
+              <MaterialIcons name="call" size={24} color="#007AFF" />
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.callButton}
+              onPress={handleStartVideoCall}
+            >
+              <MaterialIcons name="videocam" size={24} color="#007AFF" />
+            </TouchableOpacity>
           </View>
         )}
 
-      {/* Chat List - Show all conversations when no channel is selected */}
-          <TouchableOpacity 
-            style={styles.searchButton}
-            onPress={showUniversalSearch}
-          >
-            <MaterialIcons name="search" size={24} color="#666" />
-          </TouchableOpacity>
-          <TouchableOpacity 
-            style={styles.profileButton}
-            onPress={showNavigationDrawer}
-          >
-            <MaterialIcons name="account-circle" size={32} color="#007AFF" />
-          </TouchableOpacity>
-        </View>
+        <TouchableOpacity
+          style={styles.profileButton}
+          onPress={showNavigationDrawer}
+        >
+          <MaterialIcons name="account-circle" size={32} color="#007AFF" />
+        </TouchableOpacity>
       </View>
 
       {/* Chat List - Show all conversations when no channel is selected */}
@@ -1169,6 +1194,14 @@ export default function ChatScreen() {
         onDecline={handleDeclineCall}
         onClose={() => setShowIncomingCall(false)}
       />
+
+      {/* Incoming WebRTC Call Modal */}
+      <IncomingWebRTCCallModal
+        visible={showWebRTCCallModal}
+        call={incomingWebRTCCall}
+        onAccept={handleAcceptWebRTCCall}
+        onDecline={handleDeclineWebRTCCall}
+      />
     </SafeAreaView>
   );
 }
@@ -1191,55 +1224,34 @@ const styles = StyleSheet.create({
   header: {
     flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'space-between',
     paddingHorizontal: 16,
     paddingVertical: 12,
     backgroundColor: '#FFF',
     borderBottomWidth: 1,
     borderBottomColor: '#E5E5E5',
   },
-  headerLeft: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  backToListButton: {
+  backButton: {
     padding: 4,
-    marginRight: 12,
+  },
+  headerCenter: {
+    flex: 1,
+    alignItems: 'center',
+    marginHorizontal: 16,
   },
   headerTitle: {
     fontSize: 18,
     fontWeight: '600',
     color: '#1A1A1A',
+    textAlign: 'center',
   },
-  headerTitleWithBack: {
-    flex: 1,
-  },
-  statusContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginTop: 4,
-  },
-  statusDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    marginRight: 6,
-  },
-  statusText: {
+  headerSubtitle: {
     fontSize: 12,
     color: '#666',
+    marginTop: 2,
+    textAlign: 'center',
   },
-  reconnectButton: {
-    marginLeft: 8,
-    padding: 4,
-    borderRadius: 4,
-    backgroundColor: '#F0F0F0',
-  },
-  headerActions: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
+
   searchButton: {
     padding: 8,
     borderRadius: 8,
