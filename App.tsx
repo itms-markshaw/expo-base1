@@ -55,6 +55,7 @@ import SyncDashboard from './src/models/sync_management/screens/981_SyncDashboar
 import ActivitiesList from './src/models/mail_activity/screens/501_ActivitiesList';
 import CalendarView from './src/models/calendar_event/screens/701_CalendarView';
 import ChatList from './src/models/discuss_channel/screens/151_ChatList';
+import CallScreen from './src/models/discuss_channel/screens/152_CallScreen';
 import ModelSelectionScreen from './src/models/sync_management/screens/982_ModelSelection';
 import CustomModelSelectionScreen from './src/models/sync_management/screens/983_CustomModelSelection';
 import TemplateModelSelectionScreen from './src/models/sync_management/screens/984_TemplateModelSelection';
@@ -78,6 +79,7 @@ import { useAppStore } from './src/store';
 import { autoSyncService } from './src/models/sync_management/services';
 import AppStoreProvider from './src/store/AppStoreProvider';
 import AppNavigationProvider from './src/components/AppNavigationProvider';
+import { notificationService } from './src/models/base/services/BC-S009_NotificationService';
 import LoadingScreen from './src/components/LoadingScreen';
 import ScreenWrapper from './src/components/ScreenWrapper';
 
@@ -288,6 +290,15 @@ function AllScreensStack() {
         component={withBottomNav(ChatList, 'Chat')}
         options={{ title: 'Chat' }}
       />
+      <Stack.Screen
+        name="CallScreen"
+        component={CallScreen}
+        options={{
+          title: 'Call',
+          headerShown: false,
+          presentation: 'fullScreenModal'
+        }}
+      />
     </Stack.Navigator>
   );
 }
@@ -351,11 +362,17 @@ function AppContent() {
     checkAuth();
   }, []);
 
-  // Initialize auto-sync service when authenticated
+  // Initialize services when authenticated
   useEffect(() => {
     if (isAuthenticated) {
+      // Initialize auto-sync service
       autoSyncService.initialize().catch(error => {
         console.warn('Failed to initialize auto-sync service:', error);
+      });
+
+      // Initialize notification service for push notifications and calls
+      notificationService.initialize().catch(error => {
+        console.warn('Failed to initialize notification service:', error);
       });
     }
 

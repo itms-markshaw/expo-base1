@@ -175,12 +175,24 @@ class ChatService {
     // CRITICAL FIX: Properly handle incoming chat messages
     longpollingService.on('chatMessage', (message: any) => {
       console.log('📨 INCOMING MESSAGE VIA LONGPOLLING:', message);
+
+      // CHECK: Look for call-related messages
+      if (message.body && message.body.includes('conference')) {
+        console.log('📞 POTENTIAL CALL MESSAGE:', message);
+      }
+
       this.handleIncomingMessage(message, 'longpolling');
     });
 
     longpollingService.on('notification', (notification: any) => {
       console.log('🔔 INCOMING NOTIFICATION:', notification);
       this.handleBusNotification(notification);
+    });
+
+    // NEW: Listen for call invitations
+    longpollingService.on('callInvitation', (invitation: any) => {
+      console.log('📞 CALL INVITATION received in ChatService:', invitation);
+      this.emit('callInvitation', invitation);
     });
 
     longpollingService.on('presenceUpdate', (presence: any) => {
@@ -318,6 +330,34 @@ class ChatService {
           this.channelMessages.set(channelId, updatedMessages);
 
           console.log(`✅ Added new message ${enrichedMessage.id} to channel ${channelId} from ${source}`);
+
+          // NEW: Check for call/conference messages
+          if (enrichedMessage.body && (
+            enrichedMessage.body.includes('started a live conference') ||
+            enrichedMessage.body.includes('📞 Audio call started') ||
+            enrichedMessage.body.includes('📹 Video call started') ||
+            enrichedMessage.body.includes('call started')
+          )) {
+            console.log('📞 Call message detected:', enrichedMessage);
+
+            // Determine if it's a video call
+            const isVideo = enrichedMessage.body.includes('Video') || enrichedMessage.body.includes('📹') || enrichedMessage.body.includes('conference');
+
+            // Emit as call invitation
+            const callInvitation = {
+              call_id: `call-${enrichedMessage.id}`,
+              caller_id: enrichedMessage.author_id[0],
+              caller_name: enrichedMessage.author_id[1] || 'Unknown User',
+              channel_id: channelId,
+              channel_name: `Channel ${channelId}`,
+              call_type: isVideo ? 'video' : 'audio',
+              isVideo: isVideo,
+              timestamp: Date.now()
+            };
+
+            console.log('📞 Emitting call invitation:', callInvitation);
+            this.emit('callInvitation', callInvitation);
+          }
 
           // CRITICAL: Force UI update with immediate emission
           this.emit('newMessage', { channelId, message: enrichedMessage });

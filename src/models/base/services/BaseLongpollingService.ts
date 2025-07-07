@@ -189,13 +189,31 @@ class OdooPollingService {
    * Process incoming message notification
    */
   private processMessage(message: LongpollingMessage): void {
+    console.log('🚌 RAW bus message received:', JSON.stringify(message, null, 2));
+
     // Emit generic message event
     this.emit('message', message);
 
+    // Check for call-related messages
+    if (message.payload && (
+      message.payload.body?.includes('conference') ||
+      message.payload.body?.includes('call started') ||
+      message.payload.body?.includes('📞') ||
+      message.payload.body?.includes('📹') ||
+      message.type === 'call_invitation'
+    )) {
+      console.log('📞 CALL-RELATED MESSAGE DETECTED:', message);
+    }
+
     // Handle specific message types
     switch (message.type) {
+      case 'call_invitation':
+        console.log('📞 CALL INVITATION detected:', message.payload);
+        this.emit('callInvitation', message.payload);
+        break;
       case 'mail.message':
       case 'discuss.channel':
+        console.log('💬 Chat message detected:', message.payload);
         this.emit('chatMessage', message.payload);
         break;
       case 'bus.presence':
@@ -205,6 +223,7 @@ class OdooPollingService {
         this.emit('activityUpdate', message.payload);
         break;
       default:
+        console.log('🔔 Generic notification:', message);
         this.emit('notification', message);
     }
   }

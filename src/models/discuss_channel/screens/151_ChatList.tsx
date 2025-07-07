@@ -30,10 +30,14 @@ import { databaseService } from '../../base/services/BaseDatabaseService';
 import { syncService } from '../../base/services/BaseSyncService';
 import chatService, { ChatChannel, ChatMessage, TypingUser } from '../services/ChatService';
 import { useAppNavigation } from '../../../components/AppNavigationProvider';
+import { useNavigation } from '@react-navigation/native';
 import { MessageBubble, MentionPicker } from '../../base/components';
 import { ChannelMembersModal } from '../components';
 import ScreenBadge from '../../../components/ScreenBadge';
 import attachmentUploadService, { AttachmentUpload, UploadProgress } from '../../base/services/BC-S008_AttachmentUploadService';
+import { callService } from '../../base/services/BC-S010_CallService';
+import IncomingCallModal from '../../base/components/BC-C009_IncomingCallModal';
+import { longpollingService } from '../../base/services/BaseLongpollingService';
 
 // Offline-first interfaces
 interface OfflineChannel {
@@ -63,6 +67,7 @@ interface OfflineMessage {
 
 export default function ChatScreen() {
   const { showNavigationDrawer, showUniversalSearch } = useAppNavigation();
+  const navigation = useNavigation();
   const [channels, setChannels] = useState<ChatChannel[]>([]);
   const [selectedChannel, setSelectedChannel] = useState<ChatChannel | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -83,6 +88,9 @@ export default function ChatScreen() {
   const [loadingMore, setLoadingMore] = useState(false);
   const [hasMoreMessages, setHasMoreMessages] = useState(true);
   const [showLoadMore, setShowLoadMore] = useState(false);
+  const [showIncomingCall, setShowIncomingCall] = useState(false);
+  const [incomingCallOffer, setIncomingCallOffer] = useState(null);
+  const [debugInfo, setDebugInfo] = useState('');
 
   // Use refs to access current values in event listeners
   const selectedChannelRef = useRef<ChatChannel | null>(null);
@@ -118,6 +126,9 @@ export default function ChatScreen() {
       setLoading(true);
       const success = await chatService.initialize();
       if (success) {
+        // Initialize call service
+        await callService.initialize();
+
         const loadedChannels = chatService.getChannels();
         setChannels(loadedChannels);
 
@@ -147,6 +158,46 @@ export default function ChatScreen() {
     chatService.on('newMessages', handleNewMessages);
     chatService.on('connectionChanged', handleConnectionChanged);
     chatService.on('typingChanged', handleTypingChanged);
+
+    // Setup call listeners with debugging
+    const handleIncomingCallDebug = (callData: any) => {
+      console.log('📞 INCOMING CALL received in UI:', callData);
+      handleIncomingCall(callData);
+    };
+
+    callService.on('incomingCall', handleIncomingCallDebug);
+    callService.on('showIncomingCallModal', handleShowIncomingCallModal);
+    callService.on('callStarted', handleCallStarted);
+
+    // Debug: Log all longpolling events
+    const handleLongpollingMessage = (message: any) => {
+      console.log('🚌 Longpolling message in Chat UI:', message);
+    };
+
+    longpollingService.on('message', handleLongpollingMessage);
+
+    // Listen for call invitations from chat messages
+    const handleChatCallInvitation = (invitation: any) => {
+      console.log('📞 CALL INVITATION from chat message:', invitation);
+      // Forward to call service
+      callService.handleCallInvitation(invitation);
+    };
+
+    chatService.on('callInvitation', handleChatCallInvitation);
+
+    // Debug info updater
+    const debugInterval = setInterval(() => {
+      const chatStatus = chatService.getStatus();
+      const longpollingStatus = longpollingService.getStatus();
+      const callStatus = callService.getStatus();
+
+      setDebugInfo(`
+📡 Longpolling: ${longpollingStatus.isActive ? 'Active' : 'Inactive'}
+📱 Channels: ${longpollingStatus.channelCount}
+💬 Chat: ${chatStatus.isInitialized ? 'Ready' : 'Not Ready'}
+📞 Calls: ${callStatus.isInitialized ? 'Ready' : 'Not Ready'}
+      `.trim());
+    }, 2000);
 
     // Also listen for individual message events
     chatService.on('newMessage', ({ channelId, message }) => {
@@ -596,6 +647,67 @@ export default function ChatScreen() {
     }
   };
 
+  // Call handlers
+  const handleIncomingCall = (callOffer: any) => {
+    console.log('📞 INCOMING CALL received in UI - showing modal:', callOffer);
+    setIncomingCallOffer(callOffer);
+    setShowIncomingCall(true);
+  };
+
+  const handleShowIncomingCallModal = (callOffer: any) => {
+    setIncomingCallOffer(callOffer);
+    setShowIncomingCall(true);
+  };
+
+  const handleCallStarted = (callSession: any) => {
+    // Navigate to call screen - serialize dates to avoid navigation warnings
+    const serializedCallSession = {
+      ...callSession,
+      startTime: callSession.startTime?.getTime() || Date.now(),
+      endTime: callSession.endTime?.getTime() || null,
+    };
+
+    navigation.navigate('CallScreen', { callSession: serializedCallSession });
+  };
+
+  const handleAnswerCall = () => {
+    setShowIncomingCall(false);
+    if (incomingCallOffer) {
+      // Call service will handle the answer and trigger handleCallStarted
+    }
+  };
+
+  const handleDeclineCall = () => {
+    setShowIncomingCall(false);
+    setIncomingCallOffer(null);
+  };
+
+  const handleStartAudioCall = async () => {
+    if (!selectedChannel) return;
+
+    try {
+      const success = await callService.startCall(selectedChannel.id, selectedChannel.name, false);
+      if (!success) {
+        Alert.alert('Call Failed', 'Unable to start audio call. Please try again.');
+      }
+    } catch (error) {
+      Alert.alert('Call Failed', 'Unable to start audio call. Please check your connection.');
+    }
+  };
+
+  const handleStartVideoCall = async () => {
+    if (!selectedChannel) return;
+
+    try {
+      const success = await callService.startCall(selectedChannel.id, selectedChannel.name, true);
+      if (!success) {
+        Alert.alert('Call Failed', 'Unable to start video call. Please try again.');
+      }
+    } catch (error) {
+      Alert.alert('Call Failed', 'Unable to start video call. Please check your connection.');
+    }
+  };
+
   const renderMessage = ({ item, index }: { item: ChatMessage; index: number }) => {
     const previousMessage = index > 0 ? messages[index - 1] : undefined;
     const nextMessage = index < messages.length - 1 ? messages[index + 1] : undefined;
@@ -688,30 +800,67 @@ export default function ChatScreen() {
           <Text style={[styles.headerTitle, selectedChannel && styles.headerTitleWithBack]}>
             {selectedChannel ? selectedChannel.name : 'Chat'}
           </Text>
-          <View style={styles.statusContainer}>
-            <View style={[
-              styles.statusDot,
-              { backgroundColor: connectionStatus === 'connected' ? '#34C759' : '#FF3B30' }
-            ]} />
-            <Text style={styles.statusText}>
-              {connectionStatus === 'connected' ? 'Connected' : 'Disconnected'}
-            </Text>
-            {connectionStatus === 'disconnected' && (
-              <TouchableOpacity
-                style={styles.reconnectButton}
-                onPress={handleReconnect}
-                disabled={isReconnecting}
-              >
-                {isReconnecting ? (
-                  <ActivityIndicator size="small" color="#007AFF" />
-                ) : (
-                  <MaterialIcons name="refresh" size={16} color="#007AFF" />
-                )}
-              </TouchableOpacity>
+          <View style={styles.headerActions}>
+            {/* Call buttons - only show when a channel is selected */}
+            {selectedChannel && (
+              <View style={styles.callButtons}>
+                <TouchableOpacity
+                  style={styles.callButton}
+                  onPress={handleStartAudioCall}
+                >
+                  <MaterialIcons name="call" size={20} color="#007AFF" />
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={styles.callButton}
+                  onPress={handleStartVideoCall}
+                >
+                  <MaterialIcons name="videocam" size={20} color="#007AFF" />
+                </TouchableOpacity>
+                {/* Debug: Test call button */}
+                <TouchableOpacity
+                  style={[styles.callButton, { backgroundColor: '#FF0000' }]}
+                  onPress={() => {
+                    console.log('🧪 Testing call notification');
+                    callService.testCallNotification();
+                  }}
+                >
+                  <MaterialIcons name="bug-report" size={16} color="#FFF" />
+                </TouchableOpacity>
+              </View>
             )}
+
+            <View style={styles.statusContainer}>
+              <View style={[
+                styles.statusDot,
+                { backgroundColor: connectionStatus === 'connected' ? '#34C759' : '#FF3B30' }
+              ]} />
+              <Text style={styles.statusText}>
+                {connectionStatus === 'connected' ? 'Connected' : 'Disconnected'}
+              </Text>
+              {connectionStatus === 'disconnected' && (
+                <TouchableOpacity
+                  style={styles.reconnectButton}
+                  onPress={handleReconnect}
+                  disabled={isReconnecting}
+                >
+                  {isReconnecting ? (
+                    <ActivityIndicator size="small" color="#007AFF" />
+                  ) : (
+                    <MaterialIcons name="refresh" size={16} color="#007AFF" />
+                  )}
+                </TouchableOpacity>
+              )}
+            </View>
           </View>
-        </View>
-        <View style={styles.headerActions}>
+
+        {/* Debug Info */}
+        {debugInfo && (
+          <View style={styles.debugContainer}>
+            <Text style={styles.debugText}>{debugInfo}</Text>
+          </View>
+        )}
+
+      {/* Chat List - Show all conversations when no channel is selected */}
           <TouchableOpacity 
             style={styles.searchButton}
             onPress={showUniversalSearch}
@@ -1011,6 +1160,15 @@ export default function ChatScreen() {
           channelName={selectedChannel.name}
         />
       )}
+
+      {/* Incoming Call Modal */}
+      <IncomingCallModal
+        visible={showIncomingCall}
+        callOffer={incomingCallOffer}
+        onAnswer={handleAnswerCall}
+        onDecline={handleDeclineCall}
+        onClose={() => setShowIncomingCall(false)}
+      />
     </SafeAreaView>
   );
 }
@@ -1503,6 +1661,36 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#007AFF',
     fontWeight: '500',
+  },
+
+  // Call button styles
+  callButtons: {
+    flexDirection: 'row',
+    marginRight: 12,
+  },
+  callButton: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: '#F8F9FA',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginLeft: 8,
+    borderWidth: 1,
+    borderColor: '#E5E5E5',
+  },
+
+  // Debug styles
+  debugContainer: {
+    backgroundColor: 'rgba(0, 0, 0, 0.8)',
+    padding: 8,
+    margin: 8,
+    borderRadius: 4,
+  },
+  debugText: {
+    color: '#FFF',
+    fontSize: 10,
+    fontFamily: 'monospace',
   },
 
 });

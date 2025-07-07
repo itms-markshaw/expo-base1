@@ -25,7 +25,8 @@
           "enableFTS": true
         }
       ],
-      "expo-router"
+      "expo-router",
+      "expo-notifications"
     ],
     "extra": {
       "router": {},
