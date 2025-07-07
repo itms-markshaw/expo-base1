@@ -8,7 +8,7 @@
  * Real-time messaging interface with Odoo integration
  */
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import {
   View,
   Text,
@@ -20,20 +20,45 @@ import {
   KeyboardAvoidingView,
   Platform,
   ActivityIndicator,
-  Dimensions,
   Alert,
   ActionSheetIOS,
 } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import * as DocumentPicker from 'expo-document-picker';
+import { databaseService } from '../../base/services/BaseDatabaseService';
+import { syncService } from '../../base/services/BaseSyncService';
 import chatService, { ChatChannel, ChatMessage, TypingUser } from '../services/ChatService';
 import { useAppNavigation } from '../../../components/AppNavigationProvider';
 import { MessageBubble, MentionPicker } from '../../base/components';
 import { ChannelMembersModal } from '../components';
 import ScreenBadge from '../../../components/ScreenBadge';
 
-const { width: SCREEN_WIDTH } = Dimensions.get('window');
+// Offline-first interfaces
+interface OfflineChannel {
+  id: number;
+  name: string;
+  channel_type: 'chat' | 'channel';
+  description?: string;
+  member_count?: number;
+  last_message_date?: string;
+  unread_count?: number;
+}
+
+interface OfflineMessage {
+  id: number;
+  server_id?: number;
+  channel_id: number;
+  author_id: number;
+  author_name: string;
+  body: string;
+  message_type: 'text' | 'image' | 'file';
+  timestamp: number;
+  create_date: string;
+  sync_status: 'pending' | 'synced' | 'failed';
+}
+
+// Removed unused SCREEN_WIDTH
 
 export default function ChatScreen() {
   const { showNavigationDrawer, showUniversalSearch } = useAppNavigation();
@@ -53,22 +78,18 @@ export default function ChatScreen() {
   const [mentionStartIndex, setMentionStartIndex] = useState(-1);
 
   const flatListRef = useRef<FlatList>(null);
-  const typingTimeoutRef = useRef<NodeJS.Timeout>();
   const textInputRef = useRef<TextInput>(null);
 
   useEffect(() => {
     initializeChat();
     setupChatListeners();
-    
+
     return () => {
       chatService.off('channelsLoaded', handleChannelsLoaded);
       chatService.off('messagesLoaded', handleMessagesLoaded);
       chatService.off('newMessages', handleNewMessages);
       chatService.off('connectionChanged', handleConnectionChanged);
       chatService.off('typingChanged', handleTypingChanged);
-      // Clean up the new listeners we added
-      chatService.off('newMessage', () => {});
-      chatService.off('messagesUpdated', () => {});
     };
   }, []);
 
@@ -89,20 +110,7 @@ export default function ChatScreen() {
           }
         } catch (error) {
           console.log('⚠️ Could not get current user ID:', error);
-          // Fallback: try to get from auth service directly
-          try {
-            const { authService } = await import('../services/auth');
-            const fallbackClient = authService.getClient();
-            if (fallbackClient && fallbackClient.uid) {
-              setCurrentUserId(fallbackClient.uid);
-              console.log(`👤 Current user ID set via fallback: ${fallbackClient.uid}`);
-            }
-          } catch (fallbackError) {
-            console.log('⚠️ Fallback also failed:', fallbackError);
-          }
         }
-
-        // Don't auto-select - stay on chat list
       }
     } catch (error) {
       console.error('Failed to initialize chat:', error);
@@ -113,13 +121,13 @@ export default function ChatScreen() {
 
   const setupChatListeners = () => {
     console.log('🔗 Setting up ChatScreen event listeners');
-    
+
     chatService.on('channelsLoaded', handleChannelsLoaded);
     chatService.on('messagesLoaded', handleMessagesLoaded);
     chatService.on('newMessages', handleNewMessages);
     chatService.on('connectionChanged', handleConnectionChanged);
     chatService.on('typingChanged', handleTypingChanged);
-    
+
     // Also listen for individual message events
     chatService.on('newMessage', ({ channelId, message }) => {
       console.log(`📨 ChatScreen received single new message for channel ${channelId}:`, message.id);
@@ -136,7 +144,7 @@ export default function ChatScreen() {
         });
       }
     });
-    
+
     chatService.on('messagesUpdated', ({ channelId }) => {
       console.log(`🔄 Messages updated event for channel ${channelId}`);
       if (selectedChannel?.id === channelId) {
@@ -168,7 +176,7 @@ export default function ChatScreen() {
         // Check for duplicate messages by ID
         const existingIds = new Set(prev.map(m => m.id));
         const uniqueNewMessages = newMessages.filter(m => !existingIds.has(m.id));
-        
+
         if (uniqueNewMessages.length > 0) {
           console.log(`🔄 Adding ${uniqueNewMessages.length} unique new messages to UI`);
           const updated = [...prev, ...uniqueNewMessages];
@@ -179,8 +187,6 @@ export default function ChatScreen() {
       });
     }
   };
-
-
 
   const handleConnectionChanged = (status: 'connected' | 'disconnected') => {
     setConnectionStatus(status);
@@ -198,7 +204,7 @@ export default function ChatScreen() {
     setMessages([]);
     setTypingUsers([]);
 
-    // 🔧 FIX: Subscribe to longpolling for real-time updates
+    // Subscribe to longpolling for real-time updates
     console.log(`📡 Subscribing to longpolling for channel ${channel.id}`);
     chatService.subscribeToChannel(channel.id);
 
@@ -259,6 +265,13 @@ export default function ChatScreen() {
     setIsReconnecting(false);
   };
 
+  // Scroll to bottom of messages
+  const scrollToBottom = () => {
+    setTimeout(() => {
+      flatListRef.current?.scrollToEnd({ animated: true });
+    }, 100);
+  };
+
   const handleTextChange = (text: string) => {
     setMessageText(text);
 
@@ -292,24 +305,10 @@ export default function ChatScreen() {
     if (selectedChannel) {
       // Start typing indicator
       chatService.startTyping(selectedChannel.id);
-
-      // Clear existing timeout
-      if (typingTimeoutRef.current) {
-        clearTimeout(typingTimeoutRef.current);
-      }
-
-      // Set timeout to stop typing
-      typingTimeoutRef.current = setTimeout(() => {
-        chatService.stopTyping(selectedChannel.id);
-      }, 2000);
     }
   };
 
-  const scrollToBottom = () => {
-    setTimeout(() => {
-      flatListRef.current?.scrollToEnd({ animated: true });
-    }, 100);
-  };
+  // scrollToBottom function already defined above
 
   const handleMentionUser = (user: { id: number; name: string; email?: string }) => {
     if (mentionStartIndex !== -1) {
@@ -333,6 +332,12 @@ export default function ChatScreen() {
       setShowMembersModal(true);
     }
   };
+
+  // scrollToBottom already defined above
+
+  // Mention functionality removed for offline-first simplicity
+
+  // Channel members functionality removed for offline-first simplicity
 
   const handleAttachmentPress = () => {
     if (Platform.OS === 'ios') {
@@ -482,11 +487,11 @@ export default function ChatScreen() {
 
   const renderTypingIndicator = () => {
     if (typingUsers.length === 0) return null;
-    
-    const typingText = typingUsers.length === 1 
+
+    const typingText = typingUsers.length === 1
       ? `${typingUsers[0].name} is typing...`
       : `${typingUsers.length} people are typing...`;
-    
+
     return (
       <View style={styles.typingContainer}>
         <Text style={styles.typingText}>{typingText}</Text>
@@ -494,6 +499,8 @@ export default function ChatScreen() {
       </View>
     );
   };
+
+  // Typing indicators removed for offline-first simplicity
 
   if (loading) {
     return (
@@ -948,6 +955,50 @@ const styles = StyleSheet.create({
   messagesContent: {
     paddingVertical: 8,
     flexGrow: 1,
+  },
+  messageBubble: {
+    marginHorizontal: 16,
+    marginVertical: 4,
+    padding: 12,
+    borderRadius: 16,
+    maxWidth: '80%',
+  },
+  ownMessage: {
+    alignSelf: 'flex-end',
+    backgroundColor: '#007AFF',
+  },
+  otherMessage: {
+    alignSelf: 'flex-start',
+    backgroundColor: '#E5E5EA',
+  },
+  authorName: {
+    fontSize: 12,
+    color: '#666',
+    marginBottom: 4,
+    fontWeight: '500',
+  },
+  messageText: {
+    fontSize: 16,
+    lineHeight: 20,
+  },
+  ownMessageText: {
+    color: '#FFFFFF',
+  },
+  otherMessageText: {
+    color: '#000000',
+  },
+  messageFooter: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginTop: 4,
+  },
+  timestamp: {
+    fontSize: 11,
+    color: '#999',
+  },
+  syncStatus: {
+    marginLeft: 8,
   },
   emptyMessagesContainer: {
     flex: 1,
