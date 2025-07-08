@@ -189,11 +189,13 @@ class ChatService {
       this.handleBusNotification(notification);
     });
 
-    // NEW: Listen for call invitations
+    // NEW: Listen for call invitations from longpolling
     longpollingService.on('callInvitation', (invitation: any) => {
-      console.log('📞 CALL INVITATION received in ChatService:', invitation);
+      console.log('📞 CALL INVITATION received in ChatService from longpolling:', invitation);
       this.emit('callInvitation', invitation);
     });
+
+    // REMOVED: This was causing infinite loops - CallService already listens to longpolling directly
 
     longpollingService.on('presenceUpdate', (presence: any) => {
       this.emit('presenceUpdate', presence);
@@ -323,17 +325,60 @@ class ChatService {
           enrichedMessage = enrichedMessages[0] || processedMessage;
         }
 
-        // DISABLED: Automatic call invitation detection from chat messages
-        // This was causing unwanted call invitations when opening chat threads
+        // FIXED: Smart call invitation detection - only for RECENT calls from OTHER users
         if (enrichedMessage.body && (
           enrichedMessage.body.includes('started a live conference') ||
           enrichedMessage.body.includes('📞 Audio call started') ||
           enrichedMessage.body.includes('📹 Video call started') ||
-          enrichedMessage.body.includes('call started')
+          enrichedMessage.body.includes('call started') ||
+          enrichedMessage.body.includes('started a video conference') ||
+          enrichedMessage.body.includes('started an audio conference')
         )) {
-          console.log('📞 Call-related message detected (not auto-creating invitation):', enrichedMessage.body);
-          // Just log the message, don't create automatic call invitations
-          // Calls should only be initiated by user action (pressing call buttons)
+          console.log('📞 Call START message detected:', enrichedMessage.body);
+
+          // Only create call invitations for RECENT messages (within last 30 seconds)
+          const messageTime = new Date(enrichedMessage.date).getTime();
+          const now = Date.now();
+          const timeDiff = now - messageTime;
+
+          // Only process if message is recent (within 30 seconds) and from longpolling (real-time)
+          if (timeDiff < 30000 && source === 'longpolling') {
+            console.log('📞 Recent call START message from longpolling - creating invitation');
+
+            // Extract caller info from message
+            const callerName = enrichedMessage.email_from?.replace(/[<>]/g, '') || 'Unknown User';
+            const isVideo = enrichedMessage.body.includes('Video') || enrichedMessage.body.includes('video') || enrichedMessage.body.includes('conference');
+
+            // Create call invitation
+            const callInvitation = {
+              call_id: `web_call_${Date.now()}_${channelId}`,
+              caller_id: enrichedMessage.author_id,
+              caller_name: callerName,
+              channel_id: channelId,
+              channel_name: `Channel ${channelId}`,
+              call_type: isVideo ? 'video' : 'audio',
+              is_video: isVideo,
+              timestamp: enrichedMessage.date,
+              source: 'odoo_web'
+            };
+
+            console.log('📞 Emitting call invitation for Odoo web call:', callInvitation);
+
+            // FIXED: Emit directly via longpolling service (CallService listens to this)
+            // Don't emit on 'this' to avoid infinite loops
+            longpollingService.emit('callInvitation', callInvitation);
+          } else {
+            console.log(`📞 Call message too old (${Math.round(timeDiff/1000)}s) or from polling - ignoring`);
+          }
+        }
+
+        // SEPARATE: Handle call status messages (answered, ended, etc.) - don't create invitations for these
+        if (enrichedMessage.body && (
+          enrichedMessage.body.includes('📞 Call answered') ||
+          enrichedMessage.body.includes('📞 Call ended') ||
+          enrichedMessage.body.includes('📞 Call declined')
+        )) {
+          console.log('📞 Call STATUS message detected (not creating invitation):', enrichedMessage.body);
         }
 
         // Get existing messages for this channel
@@ -343,7 +388,15 @@ class ChatService {
         const messageExists = existingMessages.some(m => m.id === enrichedMessage.id);
         const wasRecentlyProcessed = this.recentlyProcessedMessages.has(enrichedMessage.id);
 
-        if (!messageExists && !wasRecentlyProcessed) {
+        // Check if there are any optimistic messages that might need removal
+        const hasOptimisticMessages = existingMessages.some(m => (m as any).isOptimistic);
+
+        if (!messageExists && (!wasRecentlyProcessed || hasOptimisticMessages)) {
+          // Log why we're processing this message
+          if (wasRecentlyProcessed && hasOptimisticMessages) {
+            console.log(`🔄 Processing recently processed message ${enrichedMessage.id} to remove optimistic messages`);
+          }
+
           // Add to recently processed to prevent duplicate processing
           this.recentlyProcessedMessages.add(enrichedMessage.id);
 
@@ -365,19 +418,50 @@ class ChatService {
             const msgTime = new Date(msg.date).getTime();
             const timeDiff = Math.abs(messageTime - msgTime);
 
-            const sameContent = msg.body === enrichedMessage.body;
+            // Check for exact content match (with HTML decoding)
+            const decodedEnrichedBodyFull = enrichedMessage.body
+              .replace(/&lt;/g, '<')
+              .replace(/&gt;/g, '>')
+              .replace(/&amp;/g, '&')
+              .replace(/&quot;/g, '"')
+              .replace(/&#39;/g, "'");
+            const sameContent = msg.body === enrichedMessage.body || msg.body === decodedEnrichedBodyFull;
             const sameAuthor = msg.author_id[0] === enrichedMessage.author_id[0];
             const withinTimeWindow = timeDiff < 30000; // 30 seconds
 
-            // Clean the HTML content for comparison
+            // Clean and decode HTML content for comparison
             const cleanMsgBody = msg.body.replace(/<[^>]*>/g, '').trim();
-            const cleanEnrichedBody = enrichedMessage.body.replace(/<[^>]*>/g, '').trim();
+
+            // Decode HTML entities in the incoming message
+            const decodedEnrichedBody = enrichedMessage.body
+              .replace(/&lt;/g, '<')
+              .replace(/&gt;/g, '>')
+              .replace(/&amp;/g, '&')
+              .replace(/&quot;/g, '"')
+              .replace(/&#39;/g, "'");
+            const cleanEnrichedBody = decodedEnrichedBody.replace(/<[^>]*>/g, '').trim();
+
             const similarContent = cleanMsgBody === cleanEnrichedBody;
+
+            console.log(`🔍 Comparing optimistic vs real message:
+              Optimistic: "${cleanMsgBody}"
+              Real: "${cleanEnrichedBody}"
+              Similar: ${similarContent}`);
 
             if (sameContent || similarContent || (sameAuthor && withinTimeWindow)) {
               console.log(`🗑️ Removing optimistic message (exact: ${sameContent}, similar: ${similarContent}, same author within 30s: ${sameAuthor && withinTimeWindow})`);
+              console.log(`🗑️ Removed optimistic message ID: ${msg.id}, body: "${msg.body}"`);
               return false;
             }
+
+            // Debug: Log why we're keeping this optimistic message
+            if ((msg as any).isOptimistic) {
+              console.log(`🤔 Keeping optimistic message ID: ${msg.id} (no match found)`);
+              console.log(`   - Same content: ${sameContent}`);
+              console.log(`   - Similar content: ${similarContent}`);
+              console.log(`   - Same author within 30s: ${sameAuthor && withinTimeWindow}`);
+            }
+
             return true;
           });
 
@@ -411,6 +495,9 @@ class ChatService {
 
         } else {
           console.log(`📨 Message ${enrichedMessage.id} already exists or was recently processed in channel ${channelId}, skipping (source: ${source})`);
+          console.log(`   - Message exists: ${messageExists}`);
+          console.log(`   - Recently processed: ${wasRecentlyProcessed}`);
+          console.log(`   - Has optimistic messages: ${hasOptimisticMessages}`);
         }
 
       } finally {
@@ -858,6 +945,13 @@ class ChatService {
         isOptimistic: true // Flag to identify optimistic messages
       };
 
+      console.log(`📝 Creating optimistic message:`, {
+        id: optimisticMessage.id,
+        body: optimisticMessage.body,
+        cleanBody: cleanBody,
+        author_id: optimisticMessage.author_id
+      });
+
       // Add to local messages immediately
       const existingMessages = this.channelMessages.get(channelId) || [];
       const updatedMessages = [...existingMessages, optimisticMessage];
@@ -870,6 +964,19 @@ class ChatService {
       setTimeout(() => {
         this.checkForNewMessages(channelId);
       }, 500);
+
+      // Also set up a cleanup timer to remove optimistic messages after 10 seconds
+      setTimeout(() => {
+        console.log(`🧹 Cleaning up optimistic messages for channel ${channelId} after 10 seconds`);
+        const existingMessages = this.channelMessages.get(channelId) || [];
+        const nonOptimisticMessages = existingMessages.filter(msg => !(msg as any).isOptimistic);
+
+        if (nonOptimisticMessages.length !== existingMessages.length) {
+          console.log(`🧹 Removed ${existingMessages.length - nonOptimisticMessages.length} stale optimistic messages`);
+          this.channelMessages.set(channelId, nonOptimisticMessages);
+          this.emit('newMessages', { channelId, messages: [] }); // Trigger UI refresh
+        }
+      }, 10000);
 
       this.emit('messageSent', { channelId, body: cleanBody });
       return true;

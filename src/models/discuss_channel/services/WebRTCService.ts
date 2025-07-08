@@ -5,6 +5,7 @@
 
 import { authService } from '../../base/services/BaseAuthService';
 import longpollingService from '../../base/services/BaseLongpollingService';
+import { ODOO_CONFIG } from '../../../config/odoo';
 
 // WebRTC imports (will be available after react-native-webrtc installation)
 let RTCPeerConnection: any;
@@ -88,7 +89,7 @@ class WebRTCService {
   }
 
   /**
-   * Initiate WebRTC call
+   * Initiate WebRTC call using HTTP endpoints
    */
   async initiateCall(channelId: number, callType: 'audio' | 'video' = 'video'): Promise<string> {
     try {
@@ -101,13 +102,13 @@ class WebRTCService {
       const client = authService.getClient();
       if (!client) throw new Error('No authenticated client');
 
-      // Start call on Odoo backend
-      const callData = await client.callModel('discuss.channel', 'mobile_start_webrtc_call', [], {
-        channel_id: channelId,
-        call_type: callType,
-      });
+      // First, create RTC session using the working model
+      const sessionData = await this.createRTCSession(channelId, callType);
+      console.log('📞 RTC session created:', sessionData);
 
-      console.log('📞 Call data received:', callData);
+      // Join the call using HTTP endpoint
+      const joinResponse = await this.joinCallViaHTTP(channelId, sessionData.sessionId);
+      console.log('📞 Joined call via HTTP:', joinResponse);
 
       // Set up local media
       await this.setupLocalMedia(callType);
@@ -115,13 +116,16 @@ class WebRTCService {
       // Create peer connection
       await this.createPeerConnection();
 
+      // Generate unique call ID
+      const callId = `call_${channelId}_${Date.now()}`;
+
       // Store call info
       this.currentCall = {
-        callId: callData.call_id,
-        sessionId: callData.session_id,
+        callId,
+        sessionId: sessionData.sessionId,
         channelId,
-        callerId: callData.caller_id,
-        callerName: callData.caller_name,
+        callerId: sessionData.partnerId,
+        callerName: sessionData.partnerName || 'Unknown',
         callType,
         status: 'initiating',
         isIncoming: false,
@@ -130,11 +134,144 @@ class WebRTCService {
       // Create and send offer
       await this.createAndSendOffer();
 
+      // Notify other members about the call
+      await this.notifyCallMembers(channelId, callId, callType);
+
       this.emit('callInitiated', this.currentCall);
-      return callData.call_id;
+      return callId;
 
     } catch (error) {
       console.error('❌ Failed to initiate WebRTC call:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Create RTC session using the working model
+   */
+  private async createRTCSession(channelId: number, callType: 'audio' | 'video'): Promise<any> {
+    try {
+      const client = authService.getClient();
+      if (!client) throw new Error('No authenticated client');
+
+      // Authenticate to get UID
+      const authResult = await client.authenticate();
+      const currentUid = authResult.uid;
+
+      // Get current user info
+      const users = await client.callModel('res.users', 'read', [currentUid], {
+        fields: ['partner_id', 'name']
+      });
+      const partnerId = users[0].partner_id[0];
+      const partnerName = users[0].name;
+
+      // Get channel member ID (required field)
+      const members = await client.callModel('discuss.channel.member', 'search_read', [
+        [['channel_id', '=', channelId], ['partner_id', '=', partnerId]]
+      ], { fields: ['id'], limit: 1 });
+
+      if (!members.length) {
+        throw new Error('User is not a member of this channel');
+      }
+
+      const channelMemberId = members[0].id;
+
+      // Create RTC session
+      const sessionData = {
+        channel_id: channelId,
+        partner_id: partnerId,
+        channel_member_id: channelMemberId,
+        is_camera_on: callType === 'video',
+        is_muted: false,
+        is_screen_sharing_on: false,
+      };
+
+      const sessionId = await client.callModel('discuss.channel.rtc.session', 'create', [sessionData]);
+
+      return {
+        sessionId,
+        partnerId,
+        partnerName,
+        channelMemberId,
+      };
+
+    } catch (error) {
+      console.error('❌ Failed to create RTC session:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Join call via HTTP endpoint
+   */
+  private async joinCallViaHTTP(channelId: number, sessionId: number): Promise<any> {
+    try {
+      const client = authService.getClient();
+      if (!client) throw new Error('No authenticated client');
+
+      const response = await fetch(`${ODOO_CONFIG.baseURL}/mail/rtc/channel/join_call`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${ODOO_CONFIG.apiKey}`,
+        },
+        body: JSON.stringify({
+          jsonrpc: '2.0',
+          method: 'call',
+          params: {
+            channel_id: channelId,
+            session_id: sessionId,
+          },
+          id: Date.now(),
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      }
+
+      return await response.json();
+
+    } catch (error) {
+      console.error('❌ Failed to join call via HTTP:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Notify call members via HTTP endpoint
+   */
+  private async notifyCallMembers(channelId: number, callId: string, callType: string): Promise<any> {
+    try {
+      const client = authService.getClient();
+      if (!client) throw new Error('No authenticated client');
+
+      const response = await fetch(`${ODOO_CONFIG.baseURL}/mail/rtc/session/notify_call_members`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${ODOO_CONFIG.apiKey}`,
+        },
+        body: JSON.stringify({
+          jsonrpc: '2.0',
+          method: 'call',
+          params: {
+            channel_id: channelId,
+            call_id: callId,
+            call_type: callType,
+          },
+          id: Date.now(),
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      }
+
+      return await response.json();
+
+    } catch (error) {
+      console.error('❌ Failed to notify call members:', error);
       throw error;
     }
   }

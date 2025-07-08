@@ -117,11 +117,22 @@ export default function ChatScreen() {
     setupChatListeners();
 
     return () => {
+      // Cleanup ChatService listeners
       chatService.off('channelsLoaded', handleChannelsLoaded);
       chatService.off('messagesLoaded', handleMessagesLoaded);
       chatService.off('newMessages', handleNewMessages);
       chatService.off('connectionChanged', handleConnectionChanged);
       chatService.off('typingChanged', handleTypingChanged);
+
+      // Cleanup CallService listeners
+      callService.off('incomingCall', handleIncomingCall);
+      callService.off('showIncomingCallModal', handleShowIncomingCallModal);
+      callService.off('callStarted', handleCallStarted);
+      callService.off('callAnswered', handleCallStarted);
+
+      // Cleanup other listeners
+      longpollingService.off('message', () => {});
+      chatService.off('callInvitation', () => {});
     };
   }, []);
 
@@ -172,6 +183,7 @@ export default function ChatScreen() {
     callService.on('incomingCall', handleIncomingCallDebug);
     callService.on('showIncomingCallModal', handleShowIncomingCallModal);
     callService.on('callStarted', handleCallStarted);
+    callService.on('callAnswered', handleCallStarted); // Handle answered calls the same way
 
     // Debug: Log all longpolling events
     const handleLongpollingMessage = (message: any) => {
@@ -692,10 +704,25 @@ export default function ChatScreen() {
     navigation.navigate('CallScreen', { callSession: serializedCallSession });
   };
 
-  const handleAnswerCall = () => {
-    setShowIncomingCall(false);
-    if (incomingCallOffer) {
-      // Call service will handle the answer and trigger handleCallStarted
+  const handleAnswerCall = async () => {
+    try {
+      console.log('📞 Answering call:', incomingCallOffer);
+      setShowIncomingCall(false);
+
+      if (incomingCallOffer) {
+        // Actually answer the call through CallService
+        const success = await callService.answerCall(incomingCallOffer);
+        if (success) {
+          console.log('✅ Call answered successfully');
+          // handleCallStarted will be triggered by the callAnswered event
+        } else {
+          console.error('❌ Failed to answer call');
+          setIncomingCallOffer(null);
+        }
+      }
+    } catch (error) {
+      console.error('❌ Error answering call:', error);
+      setIncomingCallOffer(null);
     }
   };
 
