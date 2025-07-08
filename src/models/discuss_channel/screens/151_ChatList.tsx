@@ -180,19 +180,15 @@ export default function ChatScreen() {
 
     longpollingService.on('message', handleLongpollingMessage);
 
-    // Handle call invitations from chat messages (chat-based calling)
+    // DISABLED: Automatic call invitation handling from chat messages
+    // This was causing unwanted calls when opening chat threads with call history
     const handleChatCallInvitation = (invitation: any) => {
-      console.log('📞 CALL INVITATION from chat message:', invitation);
-
-      // Only handle chat-based call invitations, not RTC-based ones
-      if (invitation.source === 'chat_message') {
-        console.log('📞 Processing chat-based call invitation');
-        callService.handleCallInvitation(invitation);
-      } else {
-        console.log('📞 Ignoring non-chat call invitation');
-      }
+      console.log('📞 CALL INVITATION from chat message (DISABLED):', invitation);
+      // Don't automatically handle call invitations from chat messages
+      // Calls should only be initiated by explicit user action (pressing call buttons)
     };
 
+    // Keep the listener for debugging but don't process invitations
     chatService.on('callInvitation', handleChatCallInvitation);
 
     // Setup WebRTC listeners
@@ -216,20 +212,8 @@ export default function ChatScreen() {
       `.trim());
     }, 2000);
 
-    // Also listen for individual message events
-    chatService.on('newMessage', ({ channelId, message }) => {
-      if (selectedChannelRef.current?.id === channelId) {
-        setMessages(prev => {
-          const exists = prev.some(m => m.id === message.id);
-          if (!exists) {
-            const updated = [...prev, message];
-            setTimeout(scrollToBottom, 100);
-            return updated;
-          }
-          return prev;
-        });
-      }
-    });
+    // REMOVED: Individual message listener to prevent duplicates
+    // The 'newMessages' listener below handles all message updates
 
     chatService.on('messagesUpdated', ({ channelId }) => {
       console.log(`🔄 Messages updated event for channel ${channelId}`);
@@ -271,8 +255,23 @@ export default function ChatScreen() {
 
   const handleNewMessages = ({ channelId, messages: newMessages }: { channelId: number; messages: ChatMessage[] }) => {
     console.log(`📨 handleNewMessages for channel ${channelId}, selected: ${selectedChannelRef.current?.id}`);
-    if (selectedChannelRef.current?.id === channelId) {
+
+    // Handle messages for the selected channel OR if no channel is selected but we have messages for a channel
+    const shouldProcessMessages = selectedChannelRef.current?.id === channelId ||
+                                 (!selectedChannelRef.current && channels.some(c => c.id === channelId));
+
+    if (shouldProcessMessages) {
       console.log(`🔄 ChatScreen received ${newMessages.length} new messages for channel ${channelId}`);
+
+      // If no channel is selected but we're getting messages, auto-select the channel
+      if (!selectedChannelRef.current && channels.length > 0) {
+        const channel = channels.find(c => c.id === channelId);
+        if (channel) {
+          console.log(`🔄 Auto-selecting channel ${channelId} due to new messages`);
+          setSelectedChannel(channel);
+        }
+      }
+
       setMessages(prev => {
         // Check for duplicate messages by ID
         const existingIds = new Set(prev.map(m => m.id));
@@ -281,8 +280,14 @@ export default function ChatScreen() {
         if (uniqueNewMessages.length > 0) {
           console.log(`🔄 Adding ${uniqueNewMessages.length} unique new messages to UI`);
           const updated = [...prev, ...uniqueNewMessages];
+
+          // Sort by date to maintain proper order
+          updated.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+
           setTimeout(scrollToBottom, 100);
           return updated;
+        } else {
+          console.log(`🔄 No new unique messages to add (${newMessages.length} messages were duplicates)`);
         }
         return prev;
       });
@@ -736,7 +741,12 @@ export default function ChatScreen() {
   };
 
   const handleStartAudioCall = async () => {
-    if (!selectedChannel) return;
+    if (!selectedChannel) {
+      Alert.alert('No Channel Selected', 'Please select a channel to start a call.');
+      return;
+    }
+
+    console.log(`📞 User initiated audio call for channel ${selectedChannel.id}`);
 
     try {
       const success = await callService.startCall(selectedChannel.id, selectedChannel.name, false);
@@ -744,12 +754,18 @@ export default function ChatScreen() {
         Alert.alert('Call Failed', 'Unable to start audio call. Please try again.');
       }
     } catch (error) {
+      console.error('Audio call failed:', error);
       Alert.alert('Call Failed', 'Unable to start audio call. Please check your connection.');
     }
   };
 
   const handleStartVideoCall = async () => {
-    if (!selectedChannel) return;
+    if (!selectedChannel) {
+      Alert.alert('No Channel Selected', 'Please select a channel to start a video call.');
+      return;
+    }
+
+    console.log(`📞 User initiated video call for channel ${selectedChannel.id}`);
 
     try {
       // Try WebRTC first if available
@@ -758,12 +774,13 @@ export default function ChatScreen() {
         const callId = await callService.startWebRTCCall(selectedChannel.id, selectedChannel.name, 'video');
 
         // Navigate to video call screen
-        navigation.navigate('VideoCallScreen', {
+        navigation.navigate('VideoCallScreen' as never, {
           callId,
           isIncoming: false
-        });
+        } as never);
       } else {
         // Fallback to chat-based calling
+        console.log('📞 WebRTC not available, using chat-based calling');
         const success = await callService.startCall(selectedChannel.id, selectedChannel.name, true);
         if (!success) {
           Alert.alert('Call Failed', 'Unable to start video call. Please try again.');

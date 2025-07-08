@@ -267,12 +267,36 @@ class ChatService {
           }
         }
 
+        // Convert server date (UTC) to local timezone
+        let localDate = messageData.date || new Date().toISOString();
+        if (messageData.date) {
+          try {
+            // Odoo sends dates in UTC format like "2025-07-08 00:35:58"
+            // We need to treat this as UTC and convert to local time
+            let serverDate: Date;
+
+            if (messageData.date.includes('T')) {
+              // Already in ISO format
+              serverDate = new Date(messageData.date);
+            } else {
+              // Odoo format: "2025-07-08 00:35:58" - treat as UTC
+              serverDate = new Date(messageData.date + 'Z'); // Add Z to indicate UTC
+            }
+
+            localDate = serverDate.toISOString();
+            console.log(`🕐 Converted server time ${messageData.date} to local: ${localDate}`);
+          } catch (error) {
+            console.warn('⚠️ Failed to parse message date:', messageData.date);
+            localDate = new Date().toISOString();
+          }
+        }
+
         // Process the message to match our ChatMessage interface
         const processedMessage: ChatMessage = {
           id: messageData.id,
           body: messageData.body || '',
           author_id: Array.isArray(authorId) ? authorId : [0, authorName],
-          date: messageData.date || new Date().toISOString(),
+          date: localDate,
           message_type: messageData.message_type || 'comment',
           model: messageData.model || 'discuss.channel',
           res_id: channelId,
@@ -299,45 +323,17 @@ class ChatService {
           enrichedMessage = enrichedMessages[0] || processedMessage;
         }
 
-        // Enhanced call message detection for chat-based calling (no RTC required)
+        // DISABLED: Automatic call invitation detection from chat messages
+        // This was causing unwanted call invitations when opening chat threads
         if (enrichedMessage.body && (
           enrichedMessage.body.includes('started a live conference') ||
           enrichedMessage.body.includes('📞 Audio call started') ||
           enrichedMessage.body.includes('📹 Video call started') ||
           enrichedMessage.body.includes('call started')
         )) {
-          console.log('📞 Call invitation message detected:', enrichedMessage.body);
-
-          // Only create call invitations for actual call starts, not status messages
-          const isCallStatusMessage = enrichedMessage.body.includes('answered') ||
-                                     enrichedMessage.body.includes('ended') ||
-                                     enrichedMessage.body.includes('declined') ||
-                                     enrichedMessage.body.includes('missed');
-
-          if (!isCallStatusMessage) {
-            // Determine if it's a video call
-            const isVideo = enrichedMessage.body.includes('Video') ||
-                           enrichedMessage.body.includes('📹') ||
-                           enrichedMessage.body.includes('conference');
-
-            // Create call invitation for chat-based calling
-            const callInvitation = {
-              call_id: `call-${enrichedMessage.id}`,
-              caller_id: enrichedMessage.author_id[0],
-              caller_name: enrichedMessage.author_id[1] || 'Unknown User',
-              channel_id: channelId,
-              channel_name: `Channel ${channelId}`,
-              call_type: isVideo ? 'video' : 'audio',
-              isVideo: isVideo,
-              timestamp: Date.now(),
-              source: 'chat_message' // Mark as chat-based call
-            };
-
-            console.log('📞 Emitting chat-based call invitation:', callInvitation);
-            this.emit('callInvitation', callInvitation);
-          } else {
-            console.log('📞 Call status message (not creating invitation):', enrichedMessage.body);
-          }
+          console.log('📞 Call-related message detected (not auto-creating invitation):', enrichedMessage.body);
+          // Just log the message, don't create automatic call invitations
+          // Calls should only be initiated by user action (pressing call buttons)
         }
 
         // Get existing messages for this channel
@@ -357,10 +353,33 @@ class ChatService {
             entries.slice(0, 25).forEach(id => this.recentlyProcessedMessages.delete(id));
           }
 
-          // Remove any optimistic messages with the same content
-          const filteredMessages = existingMessages.filter(msg =>
-            !(msg as any).isOptimistic || msg.body !== enrichedMessage.body
-          );
+          // Remove any optimistic messages that match this real message
+          const filteredMessages = existingMessages.filter(msg => {
+            if (!(msg as any).isOptimistic) return true;
+
+            // Remove optimistic message if:
+            // 1. Exact same content (body)
+            // 2. Same author and similar content
+            // 3. Any optimistic message from same author within 30 seconds
+            const messageTime = new Date(enrichedMessage.date).getTime();
+            const msgTime = new Date(msg.date).getTime();
+            const timeDiff = Math.abs(messageTime - msgTime);
+
+            const sameContent = msg.body === enrichedMessage.body;
+            const sameAuthor = msg.author_id[0] === enrichedMessage.author_id[0];
+            const withinTimeWindow = timeDiff < 30000; // 30 seconds
+
+            // Clean the HTML content for comparison
+            const cleanMsgBody = msg.body.replace(/<[^>]*>/g, '').trim();
+            const cleanEnrichedBody = enrichedMessage.body.replace(/<[^>]*>/g, '').trim();
+            const similarContent = cleanMsgBody === cleanEnrichedBody;
+
+            if (sameContent || similarContent || (sameAuthor && withinTimeWindow)) {
+              console.log(`🗑️ Removing optimistic message (exact: ${sameContent}, similar: ${similarContent}, same author within 30s: ${sameAuthor && withinTimeWindow})`);
+              return false;
+            }
+            return true;
+          });
 
           // Add to channel messages
           const updatedMessages = [...filteredMessages, enrichedMessage];
@@ -372,12 +391,10 @@ class ChatService {
 
           console.log(`✅ Added new message ${enrichedMessage.id} to channel ${channelId} from ${source}`);
 
-          // CRITICAL: Force UI update with immediate emission
-          this.emit('newMessage', { channelId, message: enrichedMessage });
+          // Emit only one event to prevent duplicates
           this.emit('newMessages', { channelId, messages: [enrichedMessage] });
-          this.emit('messagesUpdated', { channelId });
 
-          console.log(`📡 Emitted real-time message events for channel ${channelId}`);
+          console.log(`📡 Emitted real-time message event for channel ${channelId}`);
 
           // If this is from longpolling, disable polling temporarily to avoid race conditions
           if (source === 'longpolling' && this.currentPollingChannelId === channelId) {
@@ -830,7 +847,7 @@ class ChatService {
       // Immediately add optimistic message to UI
       const optimisticMessage = {
         id: -Math.floor(Date.now() / 1000), // Negative timestamp to avoid conflicts with real IDs
-        body: cleanBody,
+        body: `<p>${cleanBody}</p>`, // Match server HTML format
         author_id: [this.currentUserId, 'You'],
         date: new Date().toISOString(),
         message_type: 'comment',
@@ -846,9 +863,8 @@ class ChatService {
       const updatedMessages = [...existingMessages, optimisticMessage];
       this.channelMessages.set(channelId, updatedMessages);
 
-      // Emit immediately for instant UI update
+      // Emit immediately for instant UI update (single event to prevent duplicates)
       this.emit('newMessages', { channelId, messages: [optimisticMessage] });
-      this.emit('messagesUpdated', { channelId });
 
       // Trigger message refresh to get the real message and replace optimistic one
       setTimeout(() => {

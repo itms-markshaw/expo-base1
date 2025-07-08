@@ -179,20 +179,33 @@ class WebRTCService {
     try {
       console.log('📞 Ending WebRTC call');
 
-      if (this.currentCall) {
+      // Prevent multiple end call attempts
+      if (!this.currentCall) {
+        console.log('📞 No active WebRTC call to end');
+        return;
+      }
+
+      const callToEnd = this.currentCall;
+
+      // Try to notify Odoo backend (but don't fail if it doesn't work)
+      try {
         const client = authService.getClient();
         if (client) {
           await client.callModel('discuss.channel', 'mobile_end_webrtc_call', [], {
-            call_id: this.currentCall.callId,
+            call_id: callToEnd.callId,
           });
         }
+      } catch (backendError) {
+        console.log('ℹ️ Backend call end notification failed (expected for basic Odoo)');
       }
 
       this.cleanup();
-      this.emit('callEnded', { callId: this.currentCall?.callId });
+      this.emit('callEnded', { callId: callToEnd.callId });
 
     } catch (error) {
       console.error('❌ Failed to end WebRTC call:', error);
+      // Ensure cleanup happens even if there's an error
+      this.cleanup();
     }
   }
 

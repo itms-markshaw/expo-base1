@@ -113,7 +113,8 @@ export default function VideoCallScreen() {
     });
 
     webRTCService.on('callEnded', () => {
-      navigation.goBack();
+      // Use replace instead of goBack to avoid navigation stack issues
+      navigation.replace('Chat');
     });
 
     webRTCService.on('cameraToggled', (enabled) => {
@@ -143,10 +144,12 @@ export default function VideoCallScreen() {
   const handleEndCall = async () => {
     try {
       await webRTCService.endCall();
-      navigation.goBack();
+      // Use replace instead of goBack to avoid navigation stack issues
+      navigation.replace('Chat');
     } catch (error) {
       console.error('Failed to end call:', error);
-      navigation.goBack();
+      // Ensure we always navigate away from call screen
+      navigation.replace('Chat');
     }
   };
 
@@ -194,7 +197,7 @@ export default function VideoCallScreen() {
             Video calling requires a development build with react-native-webrtc.
             Please use expo-dev-client to enable video calling.
           </Text>
-          <TouchableOpacity style={styles.fallbackButton} onPress={() => navigation.goBack()}>
+          <TouchableOpacity style={styles.fallbackButton} onPress={() => navigation.replace('Chat')}>
             <Text style={styles.fallbackButtonText}>Go Back</Text>
           </TouchableOpacity>
         </View>

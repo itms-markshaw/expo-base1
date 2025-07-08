@@ -272,6 +272,14 @@ class CallService {
    */
   async endCall(): Promise<void> {
     try {
+      // Prevent multiple end call attempts
+      if (!this.currentCall || this.currentCall.status === 'ended') {
+        console.log('📞 Call already ended or no active call');
+        return;
+      }
+
+      console.log(`📞 Ending call: ${this.currentCall.id}`);
+
       // Stop audio recording if active
       if (this.audioRecording) {
         await this.audioRecording.stopAndUnloadAsync();
@@ -279,23 +287,26 @@ class CallService {
       }
 
       // Update call session
-      if (this.currentCall) {
-        this.currentCall.status = 'ended';
-        this.currentCall.endTime = new Date();
-        if (this.currentCall.startTime) {
-          this.currentCall.duration =
-            (this.currentCall.endTime.getTime() - this.currentCall.startTime.getTime()) / 1000;
-        }
-
-        // Send call end notification via Odoo
-        await this.sendCallEnd(this.currentCall.id);
-
-        this.emit('callEnded', this.currentCall);
-        this.currentCall = null;
+      const callToEnd = this.currentCall;
+      this.currentCall.status = 'ended';
+      this.currentCall.endTime = new Date();
+      if (this.currentCall.startTime) {
+        this.currentCall.duration =
+          (this.currentCall.endTime.getTime() - this.currentCall.startTime.getTime()) / 1000;
       }
+
+      // Clear current call first to prevent duplicate calls
+      this.currentCall = null;
+
+      // Send call end notification via Odoo (only once)
+      await this.sendCallEnd(callToEnd.id);
+
+      this.emit('callEnded', callToEnd);
 
     } catch (error) {
       console.error('Error ending call:', error);
+      // Ensure call is cleared even if there's an error
+      this.currentCall = null;
     }
   }
 
@@ -440,21 +451,8 @@ class CallService {
 
       console.log('✅ Call answer notification sent via chat');
 
-      // Optional: Try to update RTC session if available (but don't fail)
-      try {
-        await client.callModel('mail.rtc.session', 'update_and_broadcast', [], {
-          session_id: callId,
-          values: {
-            is_screen_sharing_on: false,
-            is_camera_on: this.currentCall?.isVideo || false,
-            is_muted: false,
-          }
-        });
-        console.log('✅ Bonus: Updated RTC session in Odoo');
-      } catch (rtcError) {
-        console.log('ℹ️ RTC session update not available (expected for basic Odoo)');
-        // This is expected and fine - chat-based calling works without RTC
-      }
+      // Skip RTC session updates for chat-based calling
+      console.log('ℹ️ Using chat-based calling (RTC not required)');
 
       // Simulate call connection
       this.simulateCallConnection();
