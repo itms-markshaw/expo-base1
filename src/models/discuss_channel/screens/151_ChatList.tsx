@@ -22,7 +22,9 @@ import {
   ActivityIndicator,
   Alert,
   ActionSheetIOS,
+  Animated,
 } from 'react-native';
+import { Swipeable, GestureHandlerRootView } from 'react-native-gesture-handler';
 import { MaterialIcons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import * as DocumentPicker from 'expo-document-picker';
@@ -36,6 +38,9 @@ import { ChannelMembersModal } from '../components';
 import ScreenBadge from '../../../components/ScreenBadge';
 import attachmentUploadService, { AttachmentUpload, UploadProgress } from '../../base/services/BC-S008_AttachmentUploadService';
 import { callService } from '../../base/services/BC-S010_CallService';
+import webRTCSignalingTestService from '../../base/services/BC-S013_WebRTCSignalingTest';
+import realWebRTCService from '../../base/services/BC-S014_RealWebRTCService';
+import webRTCDetector from '../../base/services/BC-S015_WebRTCDetector';
 import IncomingCallModal from '../../base/components/BC-C009_IncomingCallModal';
 import { longpollingService } from '../../base/services/BaseLongpollingService';
 import webRTCService, { WebRTCCall } from '../services/WebRTCService';
@@ -75,6 +80,7 @@ export default function ChatScreen() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [messageText, setMessageText] = useState('');
   const [loading, setLoading] = useState(true);
+  const [loadingFresh, setLoadingFresh] = useState(false);
   const [sending, setSending] = useState(false);
   const [typingUsers, setTypingUsers] = useState<TypingUser[]>([]);
   const [connectionStatus, setConnectionStatus] = useState<'connected' | 'disconnected' | 'connecting'>('connecting');
@@ -131,7 +137,6 @@ export default function ChatScreen() {
       callService.off('callAnswered', handleCallStarted);
 
       // Cleanup other listeners
-      longpollingService.off('message', () => {});
       chatService.off('callInvitation', () => {});
     };
   }, []);
@@ -185,12 +190,8 @@ export default function ChatScreen() {
     callService.on('callStarted', handleCallStarted);
     callService.on('callAnswered', handleCallStarted); // Handle answered calls the same way
 
-    // Debug: Log all longpolling events
-    const handleLongpollingMessage = (message: any) => {
-      console.log('🚌 Longpolling message in Chat UI:', message);
-    };
-
-    longpollingService.on('message', handleLongpollingMessage);
+    // REMOVED: Direct longpolling listener to prevent duplicate processing
+    // The ChatService already handles longpolling messages, no need to listen here too
 
     // DISABLED: Automatic call invitation handling from chat messages
     // This was causing unwanted calls when opening chat threads with call history
@@ -252,7 +253,19 @@ export default function ChatScreen() {
   };
 
   const handleChannelsLoaded = (loadedChannels: ChatChannel[]) => {
+    console.log(`📱 ✅ Displaying ${loadedChannels.length} channels instantly`);
     setChannels(loadedChannels);
+
+    // If this is the first load (cache), hide main loading but show background refresh
+    if (loading) {
+      setLoading(false);
+      setLoadingFresh(true);
+      console.log('📱 Cache loaded - UI ready, fetching fresh data...');
+    } else {
+      // This is fresh data, hide background loading
+      setLoadingFresh(false);
+      console.log('📱 Fresh data loaded - all done!');
+    }
     // Don't auto-select - let user choose from list
   };
 
@@ -285,21 +298,56 @@ export default function ChatScreen() {
       }
 
       setMessages(prev => {
+        // IMMEDIATE OPTIMISTIC CLEANUP: Remove optimistic messages that match incoming real messages
+        let filteredPrev = prev;
+
+        for (const newMsg of newMessages) {
+          // Remove any optimistic messages that match this real message
+          const beforeCount = filteredPrev.length;
+          filteredPrev = filteredPrev.filter(msg => {
+            const isOptimistic = msg.id.toString().startsWith('temp_') || msg.id < 0;
+            if (!isOptimistic) return true;
+
+            // Check if this optimistic message matches the incoming real message
+            const cleanOptimisticBody = msg.body.replace(/<[^>]*>/g, '').trim();
+            const cleanRealBody = newMsg.body.replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/<[^>]*>/g, '').trim();
+            const sameContent = cleanOptimisticBody === cleanRealBody;
+
+            if (sameContent) {
+              console.log(`🗑️ UI: Immediately removing optimistic message "${cleanOptimisticBody}" for real message ${newMsg.id}`);
+              return false;
+            }
+            return true;
+          });
+
+          if (filteredPrev.length !== beforeCount) {
+            console.log(`🧹 UI: Removed ${beforeCount - filteredPrev.length} optimistic messages`);
+          }
+        }
+
         // Check for duplicate messages by ID
-        const existingIds = new Set(prev.map(m => m.id));
+        const existingIds = new Set(filteredPrev.map(m => m.id));
         const uniqueNewMessages = newMessages.filter(m => !existingIds.has(m.id));
 
         if (uniqueNewMessages.length > 0) {
           console.log(`🔄 Adding ${uniqueNewMessages.length} unique new messages to UI`);
-          const updated = [...prev, ...uniqueNewMessages];
+          const updated = [...filteredPrev, ...uniqueNewMessages];
 
           // Sort by date to maintain proper order
           updated.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
 
+          // Limit to last 25 messages to prevent memory issues and respect UI limit
+          const limitedMessages = updated.slice(-25);
+          if (limitedMessages.length < updated.length) {
+            console.log(`📨 Trimmed messages to last 25 (was ${updated.length})`);
+          }
+
           setTimeout(scrollToBottom, 100);
-          return updated;
+          return limitedMessages;
         } else {
           console.log(`🔄 No new unique messages to add (${newMessages.length} messages were duplicates)`);
+          // Still return the filtered messages (with optimistic ones removed)
+          return filteredPrev;
         }
         return prev;
       });
@@ -327,15 +375,21 @@ export default function ChatScreen() {
     chatService.subscribeToChannel(channel.id);
 
     // Load initial 25 messages for this channel
-    const loadedMessages = await chatService.loadChannelMessages(channel.id, 25);
+    const loadedMessages = await chatService.loadChannelMessages(channel.id, 25, 0);
 
-    // Set messages directly as well as through the event listener
-    setMessages(loadedMessages);
+    // Set messages directly (limit to 25 to ensure consistency)
+    const limitedMessages = loadedMessages.slice(-25);
+    setMessages(limitedMessages);
 
     // Check if we have fewer than 25 messages, meaning no more to load
     if (loadedMessages.length < 25) {
       setHasMoreMessages(false);
     }
+
+    console.log(`📨 Loaded ${limitedMessages.length} messages for channel ${channel.id} (limited to 25)`);
+
+    // Scroll to bottom after loading
+    setTimeout(scrollToBottom, 100);
   };
 
   const loadMoreMessages = async () => {
@@ -819,6 +873,279 @@ export default function ChatScreen() {
     }
   };
 
+  // Phase 2: Test WebRTC Signaling (Expo Go compatible)
+  const handleTestWebRTCSignaling = async () => {
+    if (!selectedChannel) {
+      Alert.alert('No Channel Selected', 'Please select a channel to test signaling.');
+      return;
+    }
+
+    console.log(`🧪 Testing WebRTC signaling for channel ${selectedChannel.id}`);
+
+    try {
+      // Use a mock session ID for testing
+      const mockSessionId = Date.now();
+      const success = await webRTCSignalingTestService.runPhase2Test(selectedChannel.id, mockSessionId);
+
+      if (success) {
+        console.log('✅ Phase 2: WebRTC signaling test completed');
+        Alert.alert('Phase 2 Success', 'WebRTC signaling test completed! Check the chat for signaling messages.');
+      } else {
+        console.log('❌ Phase 2: WebRTC signaling test failed');
+        Alert.alert('Phase 2 Failed', 'WebRTC signaling test failed. Check the logs.');
+      }
+    } catch (error) {
+      console.error('❌ WebRTC signaling test error:', error);
+      Alert.alert('Test Error', 'WebRTC signaling test encountered an error.');
+    }
+  };
+
+  // Phase 3 & 4: Test Real WebRTC with STUN servers (Development Build)
+  const handleTestRealWebRTC = async () => {
+    if (!selectedChannel) {
+      Alert.alert('No Channel Selected', 'Please select a channel to test real WebRTC.');
+      return;
+    }
+
+    console.log(`🚀 Testing real WebRTC with STUN servers for channel ${selectedChannel.id}`);
+
+    try {
+      // Use a mock session ID for testing
+      const mockSessionId = Date.now();
+      const callId = await realWebRTCService.startCall(selectedChannel.id, mockSessionId, 'audio');
+
+      console.log('✅ Phase 3 & 4: Real WebRTC call started!');
+      Alert.alert(
+        'Phase 3 & 4 Success!',
+        `Real WebRTC call started with Google STUN servers!\n\nCall ID: ${callId}\n\nCheck logs for STUN server activity and P2P connection status.`
+      );
+
+    } catch (error) {
+      console.error('❌ Real WebRTC test error:', error);
+      Alert.alert('WebRTC Error', `Real WebRTC test failed: ${error.message}`);
+    }
+  };
+
+  // Leave channel functionality - PERMANENT (syncs to Odoo)
+  const handleLeaveChannel = async (channel: any) => {
+    Alert.alert(
+      'Leave Channel',
+      `Are you sure you want to leave "${channel.name}"? This will remove you from the channel permanently.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Leave',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              console.log(`🚪 Leaving channel ${channel.id}: ${channel.name}`);
+
+              // Step 1: Remove from Odoo server (permanent)
+              const client = chatService.getAuthenticatedClient();
+              if (client) {
+                try {
+                  // Get current user's partner ID
+                  const authResult = await client.authenticate();
+                  const userData = await client.callModel('res.users', 'read', [authResult.uid], {
+                    fields: ['partner_id']
+                  });
+                  const partnerId = userData[0].partner_id[0];
+
+                  // Find and remove channel membership
+                  const memberIds = await client.callModel('discuss.channel.member', 'search', [
+                    [['channel_id', '=', channel.id], ['partner_id', '=', partnerId]]
+                  ]);
+
+                  if (memberIds.length > 0) {
+                    await client.callModel('discuss.channel.member', 'unlink', [memberIds]);
+                    console.log('✅ Removed from Odoo channel membership');
+                  }
+                } catch (odooError) {
+                  console.log('⚠️ Could not remove from Odoo (offline?):', odooError.message);
+                }
+              }
+
+              // Step 2: Remove from local database
+              const db = databaseService.getDatabase();
+              if (db) {
+                await db.runAsync('DELETE FROM discuss_channel WHERE id = ?', [channel.id]);
+                // Also remove related messages
+                await db.runAsync('DELETE FROM mail_message WHERE res_id = ? AND model = ?',
+                  [channel.id, 'discuss.channel']);
+              }
+
+              // Step 3: Remove from UI
+              setChannels(prev => prev.filter(c => c.id !== channel.id));
+
+              // If this was the selected channel, clear selection
+              if (selectedChannel?.id === channel.id) {
+                setSelectedChannel(null);
+                setMessages([]);
+              }
+
+              console.log('✅ Successfully left channel permanently');
+
+            } catch (error) {
+              console.error('❌ Failed to leave channel:', error);
+              Alert.alert('Error', 'Failed to leave channel. Please try again.');
+            }
+          }
+        }
+      ]
+    );
+  };
+
+  // Clear all messages for dev testing - PERMANENT (syncs to Odoo)
+  const handleClearAllMessages = async () => {
+    if (!selectedChannel) return;
+
+    Alert.alert(
+      'Clear All Messages (DEV)',
+      `⚠️ DEVELOPER TOOL ⚠️\n\nThis will PERMANENTLY delete ALL messages in "${selectedChannel.name}" from both local database AND Odoo server.\n\nThis action cannot be undone!`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'CLEAR ALL',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              console.log(`🗑️ PERMANENT: Clearing all messages for channel ${selectedChannel.id}`);
+
+              // Step 1: Get all message IDs (from UI and database)
+              const db = databaseService.getDatabase();
+              let messageIds: number[] = [];
+
+              // Get message IDs from current UI state (these are definitely the messages we want to delete)
+              const uiMessageIds = messages.map(msg => msg.id);
+              console.log(`📋 Found ${uiMessageIds.length} messages in UI to delete`);
+
+              if (db) {
+                // Try multiple query patterns to find messages
+                let messages: any[] = [];
+
+                // Pattern 1: Standard res_id + model
+                try {
+                  messages = await db.getAllAsync(
+                    'SELECT id FROM mail_message WHERE res_id = ? AND model = ?',
+                    [selectedChannel.id, 'discuss.channel']
+                  );
+                  console.log(`📋 Pattern 1: Found ${messages.length} messages`);
+                } catch (error) {
+                  console.log('⚠️ Pattern 1 failed:', error);
+                }
+
+                // Pattern 2: Just res_id (if model field is missing)
+                if (messages.length === 0) {
+                  try {
+                    messages = await db.getAllAsync(
+                      'SELECT id FROM mail_message WHERE res_id = ?',
+                      [selectedChannel.id]
+                    );
+                    console.log(`📋 Pattern 2: Found ${messages.length} messages`);
+                  } catch (error) {
+                    console.log('⚠️ Pattern 2 failed:', error);
+                  }
+                }
+
+                // Pattern 3: Check all messages for this channel (debug)
+                if (messages.length === 0) {
+                  try {
+                    const allMessages = await db.getAllAsync(
+                      'SELECT id, res_id, model FROM mail_message LIMIT 10'
+                    );
+                    console.log('📋 Sample messages in database:', allMessages);
+
+                    // Check what columns exist in the table
+                    const tableInfo = await db.getAllAsync(
+                      'PRAGMA table_info(mail_message)'
+                    );
+                    console.log('📋 mail_message table columns:', tableInfo.map((col: any) => col.name));
+
+                    // Try to find messages for discuss.channel model with our channel ID
+                    messages = await db.getAllAsync(
+                      'SELECT id FROM mail_message WHERE model = ? AND res_id = ?',
+                      ['discuss.channel', selectedChannel.id.toString()]
+                    );
+                    console.log(`📋 Pattern 3: Found ${messages.length} messages for discuss.channel`);
+                  } catch (error) {
+                    console.log('⚠️ Pattern 3 failed:', error);
+                  }
+                }
+
+                const dbMessageIds = messages.map((msg: any) => msg.id);
+                console.log(`📋 Found ${dbMessageIds.length} messages in database`);
+
+                // Combine UI and database message IDs
+                messageIds = [...new Set([...uiMessageIds, ...dbMessageIds])];
+                console.log(`📋 Total unique message IDs to delete: ${messageIds.length}`);
+              } else {
+                // If no database access, use UI message IDs
+                messageIds = uiMessageIds;
+                console.log(`📋 Using ${messageIds.length} UI message IDs (no database access)`);
+              }
+
+              // Step 2: Delete from Odoo server (permanent)
+              const client = chatService.getAuthenticatedClient();
+              if (client && messageIds.length > 0) {
+                try {
+                  console.log(`🌐 Deleting ${messageIds.length} messages from Odoo server...`);
+                  await client.callModel('mail.message', 'unlink', [messageIds]);
+                  console.log('✅ Messages deleted from Odoo server');
+                } catch (odooError: any) {
+                  console.log('⚠️ Could not delete from Odoo (offline?):', odooError.message);
+                }
+              } else if (messageIds.length === 0) {
+                console.log('⚠️ No message IDs found to delete from Odoo');
+              }
+
+              // Step 3: Delete from local database (use correct field types)
+              if (db) {
+                // Delete using the correct field types based on what we found
+                let deletedCount = 0;
+
+                // Pattern 1: Standard model + res_id (string)
+                try {
+                  const result1 = await db.runAsync(
+                    'DELETE FROM mail_message WHERE model = ? AND res_id = ?',
+                    ['discuss.channel', selectedChannel.id.toString()]
+                  );
+                  deletedCount += result1.changes || 0;
+                  console.log(`🗑️ Deleted ${result1.changes || 0} messages (pattern 1)`);
+                } catch (error) {
+                  console.log('⚠️ Delete pattern 1 failed:', error);
+                }
+
+                // Pattern 2: res_id as integer
+                try {
+                  const result2 = await db.runAsync(
+                    'DELETE FROM mail_message WHERE model = ? AND res_id = ?',
+                    ['discuss.channel', selectedChannel.id]
+                  );
+                  deletedCount += result2.changes || 0;
+                  console.log(`🗑️ Deleted ${result2.changes || 0} messages (pattern 2)`);
+                } catch (error) {
+                  console.log('⚠️ Delete pattern 2 failed:', error);
+                }
+
+                console.log(`✅ Total deleted ${deletedCount} messages from local database`);
+              }
+
+              // Step 4: Clear messages from UI
+              setMessages([]);
+
+              console.log('✅ All messages permanently cleared');
+              Alert.alert('Success', `Permanently deleted ${messageIds.length} messages from both local database and Odoo server.`);
+
+            } catch (error) {
+              console.error('❌ Failed to clear messages:', error);
+              Alert.alert('Error', 'Failed to clear messages. Please try again.');
+            }
+          }
+        }
+      ]
+    );
+  };
+
   const renderMessage = ({ item, index }: { item: ChatMessage; index: number }) => {
     const previousMessage = index > 0 ? messages[index - 1] : undefined;
     const nextMessage = index < messages.length - 1 ? messages[index + 1] : undefined;
@@ -876,7 +1203,7 @@ export default function ChatScreen() {
 
   // Typing indicators removed for offline-first simplicity
 
-  if (loading) {
+  if (loading && channels.length === 0) {
     return (
       <SafeAreaView style={styles.container}>
         <View style={styles.loadingContainer}>
@@ -888,7 +1215,8 @@ export default function ChatScreen() {
   }
 
   return (
-    <SafeAreaView style={styles.container}>
+    <GestureHandlerRootView style={{ flex: 1 }}>
+      <SafeAreaView style={styles.container}>
       <ScreenBadge screenNumber={151} />
       {/* Header */}
       <View style={styles.header}>
@@ -909,14 +1237,24 @@ export default function ChatScreen() {
         </TouchableOpacity>
 
         <View style={styles.headerCenter}>
-          <Text style={styles.headerTitle}>
-            {selectedChannel ? selectedChannel.name : 'Chat'}
-          </Text>
+          <View style={styles.titleRow}>
+            <Text style={styles.headerTitle}>
+              {selectedChannel ? selectedChannel.name : 'Chat'}
+            </Text>
+            {/* Subtle refresh indicator when loading fresh data */}
+            {loadingFresh && !selectedChannel && (
+              <ActivityIndicator size="small" color="#007AFF" style={styles.refreshIndicator} />
+            )}
+          </View>
           {selectedChannel && selectedChannel.channel_type === 'channel' && (
             <Text style={styles.headerSubtitle}>
               {selectedChannel.member_count || 0} members
             </Text>
           )}
+          {/* WebRTC Mode Indicator */}
+          <Text style={styles.webrtcModeIndicator}>
+            {webRTCDetector.getModeDescription()}
+          </Text>
         </View>
 
         {/* Call buttons - only show when a channel is selected */}
@@ -933,6 +1271,31 @@ export default function ChatScreen() {
               onPress={handleStartVideoCall}
             >
               <MaterialIcons name="videocam" size={24} color="#007AFF" />
+            </TouchableOpacity>
+            {/* Phase 2: WebRTC Signaling Test (always available) */}
+            <TouchableOpacity
+              style={[styles.callButton, { backgroundColor: '#FF9500' }]}
+              onPress={handleTestWebRTCSignaling}
+            >
+              <MaterialIcons name="science" size={20} color="#FFF" />
+            </TouchableOpacity>
+
+            {/* Phase 3 & 4: Real WebRTC Test (only in development builds) */}
+            {webRTCDetector.isAvailable() && (
+              <TouchableOpacity
+                style={[styles.callButton, { backgroundColor: '#34C759' }]}
+                onPress={handleTestRealWebRTC}
+              >
+                <MaterialIcons name="rocket-launch" size={20} color="#FFF" />
+              </TouchableOpacity>
+            )}
+
+            {/* Dev: Clear all messages */}
+            <TouchableOpacity
+              style={[styles.callButton, { backgroundColor: '#FF3B30' }]}
+              onPress={handleClearAllMessages}
+            >
+              <MaterialIcons name="delete-sweep" size={20} color="#FFF" />
             </TouchableOpacity>
           </View>
         )}
@@ -951,10 +1314,21 @@ export default function ChatScreen() {
           data={channels}
           keyExtractor={(item) => item.id.toString()}
           renderItem={({ item }) => (
-            <TouchableOpacity
-              style={styles.chatListItem}
-              onPress={() => selectChannel(item)}
+            <Swipeable
+              renderRightActions={() => (
+                <TouchableOpacity
+                  style={styles.leaveChannelButton}
+                  onPress={() => handleLeaveChannel(item)}
+                >
+                  <MaterialIcons name="exit-to-app" size={24} color="#FFF" />
+                  <Text style={styles.leaveChannelText}>Leave</Text>
+                </TouchableOpacity>
+              )}
             >
+              <TouchableOpacity
+                style={styles.chatListItem}
+                onPress={() => selectChannel(item)}
+              >
               {/* Avatar with Channel Type Icons */}
               <View style={[
                 styles.chatAvatar,
@@ -1008,6 +1382,7 @@ export default function ChatScreen() {
                 <MaterialIcons name="chevron-right" size={20} color="#C7C7CC" />
               </View>
             </TouchableOpacity>
+            </Swipeable>
           )}
           style={styles.chatList}
           showsVerticalScrollIndicator={false}
@@ -1247,6 +1622,7 @@ export default function ChatScreen() {
         onDecline={handleDeclineWebRTCCall}
       />
     </SafeAreaView>
+    </GestureHandlerRootView>
   );
 }
 
@@ -1747,6 +2123,35 @@ const styles = StyleSheet.create({
     color: '#FFF',
     fontSize: 10,
     fontFamily: 'monospace',
+  },
+  webrtcModeIndicator: {
+    fontSize: 10,
+    color: '#666',
+    textAlign: 'center',
+    marginTop: 2,
+    fontStyle: 'italic',
+  },
+  leaveChannelButton: {
+    backgroundColor: '#FF3B30',
+    justifyContent: 'center',
+    alignItems: 'center',
+    width: 80,
+    height: '100%',
+    paddingHorizontal: 10,
+  },
+  leaveChannelText: {
+    color: '#FFF',
+    fontSize: 12,
+    fontWeight: '600',
+    marginTop: 4,
+  },
+  titleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  refreshIndicator: {
+    marginLeft: 8,
   },
 
 });

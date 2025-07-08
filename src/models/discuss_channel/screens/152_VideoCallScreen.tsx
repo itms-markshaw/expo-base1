@@ -18,14 +18,15 @@ import { MaterialIcons } from '@expo/vector-icons';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import webRTCService, { WebRTCCall } from '../services/WebRTCService';
 
-// Try to import RTCView
+// DISABLED: RTCView import for Expo Go compatibility
 let RTCView: any;
-try {
-  const webrtc = require('react-native-webrtc');
-  RTCView = webrtc.RTCView;
-} catch (error) {
-  console.log('📱 RTCView not available - using fallback');
-}
+// try {
+//   const webrtc = require('react-native-webrtc');
+//   RTCView = webrtc.RTCView;
+// } catch (error) {
+//   console.log('📱 RTCView not available - using fallback');
+// }
+console.log('📱 RTCView disabled for Expo Go compatibility');
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 

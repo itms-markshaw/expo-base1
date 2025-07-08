@@ -14,7 +14,13 @@
       "infoPlist": {
         "NSCameraUsageDescription": "This app needs access to camera for video calls",
         "NSMicrophoneUsageDescription": "This app needs access to microphone for calls",
-        "UIBackgroundModes": ["audio", "voip"]
+        "UIBackgroundModes": [
+          "audio",
+          "voip",
+          "audio",
+          "voip"
+        ],
+        "ITSAppUsesNonExemptEncryption": false
       }
     },
     "android": {

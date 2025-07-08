@@ -82,12 +82,21 @@ class NotificationService {
       // Setup notification response handler
       this.setupNotificationResponseHandler();
 
-      // Register for push notifications
-      this.expoPushToken = await this.registerForPushNotifications();
-      
-      if (this.expoPushToken) {
-        await this.sendTokenToOdoo(this.expoPushToken);
-      }
+      // Register for push notifications (non-blocking) - DISABLED for basic Odoo
+      console.log('ℹ️ Push notification registration disabled for basic Odoo installations');
+      console.log('ℹ️ To enable: add expo_push_token field to res.users model in Odoo');
+
+      // Still get the token for local use, but don't send to Odoo
+      this.registerForPushNotifications()
+        .then(token => {
+          this.expoPushToken = token;
+          if (token) {
+            console.log('📱 Push token obtained (stored locally only):', token.substring(0, 20) + '...');
+          }
+        })
+        .catch(error => {
+          console.log('⚠️ Push notification registration failed:', error.message);
+        });
 
       this.isInitialized = true;
       return true;
@@ -175,37 +184,55 @@ class NotificationService {
   }
 
   /**
-   * Send push token to Odoo backend
+   * Send push token to Odoo backend - DISABLED for basic Odoo installations
    */
   private async sendTokenToOdoo(token: string): Promise<void> {
+    // DISABLED: Push token registration disabled for basic Odoo installations
+    // This prevents XML-RPC errors when expo_push_token field doesn't exist
+
+    console.log('ℹ️ Push token registration to Odoo is disabled');
+    console.log('📱 Push token stored locally only:', token.substring(0, 20) + '...');
+    console.log('💡 To enable: Add expo_push_token field to res.users model in Odoo');
+
+    // Store token locally for future use
+    this.expoPushToken = token;
+
+    /* ORIGINAL CODE - UNCOMMENT WHEN ODOO HAS PUSH TOKEN FIELDS
     try {
       const client = authService.getClient();
       if (!client) {
+        console.log('ℹ️ No authenticated client - storing push token locally only');
+        this.expoPushToken = token;
         return;
       }
 
-      // Try to store the push token - this will fail gracefully if field doesn't exist
+      // Try to store the push token with timeout
       try {
-        await client.callModel('res.users', 'write', [client.uid], {
-          expo_push_token: token,
-          mobile_device_info: {
-            platform: Platform.OS,
-            device_name: Device.deviceName,
-            app_version: Constants.expoConfig?.version,
-          }
-        });
-        console.log('✅ Push token sent to Odoo successfully');
-      } catch (fieldError) {
-        // Field doesn't exist in Odoo - this is expected for basic Odoo installations
-        console.log('ℹ️ Push token field not available in Odoo (this is normal for basic installations)');
+        const authResult = await client.authenticate();
 
-        // Store token locally for future use
-        this.expoPushToken = token;
+        const writePromise = client.callModel('res.users', 'write', [authResult.uid], {
+          expo_push_token: token
+        });
+
+        await Promise.race([
+          writePromise,
+          new Promise((_, reject) =>
+            setTimeout(() => reject(new Error('Push token write timeout')), 5000)
+          )
+        ]);
+
+        console.log('✅ Push token stored in Odoo');
+      } catch (fieldError: any) {
+        console.log('ℹ️ Push token field not available in Odoo:', fieldError.message);
       }
 
-    } catch (error) {
-      console.error('Failed to send push token to Odoo:', error);
+      this.expoPushToken = token;
+
+    } catch (error: any) {
+      console.log('⚠️ Could not send push token to Odoo:', error.message);
+      this.expoPushToken = token;
     }
+    */
   }
 
   /**

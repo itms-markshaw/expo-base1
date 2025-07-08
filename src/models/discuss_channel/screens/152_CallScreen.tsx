@@ -51,9 +51,27 @@ export default function CallScreen({ route, navigation }: CallScreenProps) {
       }
     }, 1000);
 
+    // Update audio quality info every 5 seconds
+    const audioInterval = setInterval(async () => {
+      if (currentCall.status === 'connected') {
+        try {
+          const quality = await callService.getAudioStatus();
+          setAudioQuality(quality);
+        } catch (error) {
+          console.log('Audio quality check failed:', error.message);
+        }
+      }
+    }, 5000);
+
     // Listen for call events
     const handleCallConnected = (call: CallSession) => {
       setCurrentCall(call);
+    };
+
+    const handleCallStatusChanged = (data: any) => {
+      if (data.call) {
+        setCurrentCall(data.call);
+      }
     };
 
     const handleCallEnded = () => {
@@ -61,11 +79,13 @@ export default function CallScreen({ route, navigation }: CallScreenProps) {
     };
 
     callService.on('callConnected', handleCallConnected);
+    callService.on('callStatusChanged', handleCallStatusChanged);
     callService.on('callEnded', handleCallEnded);
 
     return () => {
       clearInterval(interval);
       callService.off('callConnected', handleCallConnected);
+      callService.off('callStatusChanged', handleCallStatusChanged);
       callService.off('callEnded', handleCallEnded);
     };
   }, [currentCall, navigation]);
@@ -81,13 +101,13 @@ export default function CallScreen({ route, navigation }: CallScreenProps) {
     navigation.goBack();
   };
 
-  const handleToggleVideo = () => {
-    const enabled = callService.toggleVideo();
+  const handleToggleVideo = async () => {
+    const enabled = await callService.toggleVideo();
     setIsVideoEnabled(enabled);
   };
 
-  const handleToggleAudio = () => {
-    const enabled = callService.toggleAudio();
+  const handleToggleAudio = async () => {
+    const enabled = await callService.toggleAudio();
     setIsAudioEnabled(enabled);
   };
 
@@ -138,7 +158,7 @@ export default function CallScreen({ route, navigation }: CallScreenProps) {
           </View>
         </View>
         <Text style={styles.participantName}>
-          {currentCall.participants[0]?.name || 'Unknown'}
+          {callService.getCallerName()}
         </Text>
       </View>
     );
@@ -294,6 +314,24 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: 'rgba(255, 255, 255, 0.8)',
     textAlign: 'center',
+  },
+  qualityIndicator: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 4,
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    backgroundColor: 'rgba(76, 175, 80, 0.2)',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(76, 175, 80, 0.3)',
+  },
+  qualityText: {
+    fontSize: 10,
+    color: '#4CAF50',
+    marginLeft: 4,
+    fontWeight: '600',
   },
   controlsContainer: {
     position: 'absolute',

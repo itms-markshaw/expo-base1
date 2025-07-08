@@ -15,18 +15,19 @@ let MediaStream: any;
 let mediaDevices: any;
 let RTCView: any;
 
-// Try to import WebRTC modules
-try {
-  const webrtc = require('react-native-webrtc');
-  RTCPeerConnection = webrtc.RTCPeerConnection;
-  RTCIceCandidate = webrtc.RTCIceCandidate;
-  RTCSessionDescription = webrtc.RTCSessionDescription;
-  MediaStream = webrtc.MediaStream;
-  mediaDevices = webrtc.mediaDevices;
-  RTCView = webrtc.RTCView;
-} catch (error) {
-  console.log('📱 WebRTC not available - using fallback mode');
-}
+// CONDITIONAL: WebRTC imports (auto-detects availability)
+import webRTCDetector from '../../base/services/BC-S015_WebRTCDetector';
+
+// Get WebRTC modules conditionally
+const webRTCModules = webRTCDetector.getModules();
+RTCPeerConnection = webRTCModules.RTCPeerConnection;
+RTCIceCandidate = webRTCModules.RTCIceCandidate;
+RTCSessionDescription = webRTCModules.RTCSessionDescription;
+MediaStream = webRTCModules.MediaStream;
+mediaDevices = webRTCModules.mediaDevices;
+RTCView = webRTCModules.RTCView;
+
+console.log(`📱 WebRTC Service: ${webRTCDetector.getModeDescription()}`);
 
 export interface WebRTCCall {
   callId: string;
@@ -65,10 +66,10 @@ class WebRTCService {
   }
 
   /**
-   * Check if WebRTC is available
+   * Check if WebRTC is available (uses detector)
    */
   isAvailable(): boolean {
-    return this.isWebRTCAvailable;
+    return webRTCDetector.isAvailable();
   }
 
   /**

@@ -12,6 +12,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { syncService } from '../../base/services/BaseSyncService';
 import { offlineQueueService } from './OfflineQueueService';
 import { useAppStore } from '../../../store';
+import syncCoordinator from './SyncCoordinator';
 
 export interface AutoSyncSettings {
   autoSyncOnLaunch: boolean;
@@ -29,11 +30,12 @@ class AutoSyncService {
   private appState: AppStateStatus = AppState.currentState;
   private isOnline = true;
   private lastSyncTime = 0;
+  private lastSyncAttempt = 0;
   private backgroundSyncTimer: NodeJS.Timeout | null = null;
   private isInitialized = false;
   
   private settings: AutoSyncSettings = {
-    autoSyncOnLaunch: true,
+    autoSyncOnLaunch: false, // Disabled by default to prevent startup errors
     autoSyncOnForeground: true,
     autoSyncOnNetworkReconnect: true,
     backgroundSyncEnabled: true,
@@ -54,6 +56,9 @@ class AutoSyncService {
       // Initialize offline queue service
       await offlineQueueService.initialize();
 
+      // Initialize sync coordinator with sync service reference
+      syncCoordinator.setSyncService(syncService);
+
       // Set up app state listener
       this.setupAppStateListener();
 
@@ -64,9 +69,22 @@ class AutoSyncService {
       await this.loadSettings();
       await this.loadLastSyncTime();
 
-      // Auto-sync on launch if enabled
+      // Auto-sync on launch if enabled (with longer delay for stability)
       if (this.settings.autoSyncOnLaunch) {
-        setTimeout(() => this.triggerAutoSync('launch'), 2000); // Delay to let app fully load
+        console.log('ℹ️ Auto-sync on launch is enabled, but delaying to prevent conflicts...');
+        setTimeout(() => {
+          // Double-check that no sync is running before attempting
+          const { syncStatus } = useAppStore.getState();
+          if (!syncStatus.isRunning) {
+            this.triggerAutoSync('launch').catch(error => {
+              console.log('⚠️ Launch auto-sync failed (this is normal on first startup):', error.message);
+            });
+          } else {
+            console.log('⚠️ Sync already running during launch delay - skipping auto-sync');
+          }
+        }, 10000); // Increased delay to 10 seconds to let other services initialize
+      } else {
+        console.log('ℹ️ Auto-sync on launch is disabled (recommended for stability)');
       }
 
       this.isInitialized = true;
@@ -184,6 +202,13 @@ class AutoSyncService {
       return;
     }
 
+    // Check if authentication is ready
+    const { isAuthenticated } = useAppStore.getState();
+    if (!isAuthenticated) {
+      console.log(`🔐 Skipping auto-sync (${trigger}) - not authenticated`);
+      return;
+    }
+
     // Check network preferences (WiFi only)
     if (this.settings.wifiOnlySync && !(await this.isOnWifi())) {
       console.log(`📡 Skipping auto-sync (${trigger}) - WiFi required but not connected`);
@@ -198,24 +223,51 @@ class AutoSyncService {
 
     try {
       console.log(`🚀 Triggering auto-sync (${trigger})`);
-      
+
       // Get selected models from store
       const { selectedModels, syncStatus } = useAppStore.getState();
-      
+
       // Don't start if sync is already running
       if (syncStatus.isRunning) {
         console.log('⏳ Sync already in progress - skipping auto-sync');
         return;
       }
 
-      // Start sync
-      await syncService.startSync(selectedModels);
+      // Additional check: wait a bit if sync was very recently started
+      const timeSinceLastAttempt = now - (this.lastSyncAttempt || 0);
+      if (timeSinceLastAttempt < 10000) { // 10 seconds
+        console.log(`⏳ Recent sync attempt (${Math.round(timeSinceLastAttempt / 1000)}s ago) - skipping auto-sync`);
+        return;
+      }
+
+      this.lastSyncAttempt = now;
+
+      // Check if we have any models selected
+      if (!selectedModels || selectedModels.length === 0) {
+        console.log(`ℹ️ No models selected for sync - skipping auto-sync (${trigger})`);
+        return;
+      }
+
+      // Use sync coordinator to prevent conflicts (with fallback)
+      try {
+        await syncCoordinator.requestSync(selectedModels, `auto-sync-${trigger}`);
+      } catch (coordinatorError: any) {
+        console.log(`⚠️ Sync coordinator failed, using direct sync: ${coordinatorError.message}`);
+        // Fallback to direct sync service
+        await syncService.startSync(selectedModels);
+      }
+
       this.lastSyncTime = now;
       await this.saveLastSyncTime();
-      
+
       console.log(`✅ Auto-sync (${trigger}) completed`);
-    } catch (error) {
-      console.error(`❌ Auto-sync (${trigger}) failed:`, error);
+    } catch (error: any) {
+      // Don't log full error details for common startup issues
+      if (error.message.includes('timeout') || error.message.includes('network') || error.message.includes('authentication')) {
+        console.log(`⚠️ Auto-sync (${trigger}) failed: ${error.message} (this is normal on startup)`);
+      } else {
+        console.error(`❌ Auto-sync (${trigger}) failed:`, error.message);
+      }
     }
   }
 
@@ -356,6 +408,16 @@ class AutoSyncService {
     }
 
     console.log('⚙️ Auto-sync settings updated:', this.settings);
+  }
+
+  /**
+   * Enable auto-sync on launch after first successful manual sync
+   */
+  async enableAutoSyncOnLaunch(): Promise<void> {
+    if (!this.settings.autoSyncOnLaunch) {
+      console.log('✅ Enabling auto-sync on launch after successful manual sync');
+      await this.updateSettings({ autoSyncOnLaunch: true });
+    }
   }
 
   /**
