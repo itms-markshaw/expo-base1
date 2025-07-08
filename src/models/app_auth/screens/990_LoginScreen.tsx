@@ -8,7 +8,7 @@
  * User authentication screen
  */
 
-import React from 'react';
+import React, { useEffect } from 'react';
 import {
   View,
   Text,
@@ -26,11 +26,21 @@ import ScreenBadge from '../../../components/ScreenBadge';
 export default function LoginScreen() {
   const { login, authLoading } = useAppStore();
 
+  // Auto-login for testing in development mode
+  useEffect(() => {
+    if (__DEV__) {
+      console.log('🔐 Development mode detected - attempting auto-login...');
+      handleLogin();
+    }
+  }, []);
+
   const handleLogin = async () => {
     try {
+      console.log('🔐 Attempting login with configured credentials...');
       await login();
       // Navigation will be handled by App.tsx based on auth state
     } catch (error) {
+      console.error('❌ Login failed:', error);
       Alert.alert('Login Failed', error.message);
     }
   };
@@ -49,6 +59,9 @@ export default function LoginScreen() {
         {/* Server Info */}
         <View style={styles.serverInfo}>
           <Text style={styles.serverTitle}>Server Configuration</Text>
+          {__DEV__ && (
+            <Text style={styles.devModeText}>🔧 Development Mode - Auto-login enabled</Text>
+          )}
           
           <View style={styles.serverCard}>
             <View style={styles.serverRow}>
@@ -220,5 +233,15 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     lineHeight: 20,
     marginBottom: 8,
+  },
+  devModeText: {
+    fontSize: 12,
+    color: '#FF9500',
+    textAlign: 'center',
+    fontWeight: '600',
+    marginTop: 8,
+    backgroundColor: '#FFF3E0',
+    padding: 8,
+    borderRadius: 6,
   },
 });

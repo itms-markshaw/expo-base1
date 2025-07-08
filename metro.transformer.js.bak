@@ -1,0 +1,14 @@
+const { transform } = require('@expo/metro-config/babel-transformer');
+
+module.exports.transform = function({ src, filename, options }) {
+  // Replace import.meta with a safe fallback for web builds
+  if (options.platform === 'web') {
+    // More comprehensive import.meta replacement
+    src = src.replace(/import\.meta(?:\.\w+)?/g, '(typeof globalThis !== "undefined" ? globalThis : typeof window !== "undefined" ? window : {})');
+    
+    // Also handle dynamic imports that might cause issues
+    src = src.replace(/import\(/g, 'require(');
+  }
+  
+  return transform({ src, filename, options });
+};

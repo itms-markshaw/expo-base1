@@ -81,6 +81,7 @@ export default function ChatScreen() {
   const [messageText, setMessageText] = useState('');
   const [loading, setLoading] = useState(true);
   const [loadingFresh, setLoadingFresh] = useState(false);
+  const [isInitialLoad, setIsInitialLoad] = useState(true);
   const [sending, setSending] = useState(false);
   const [typingUsers, setTypingUsers] = useState<TypingUser[]>([]);
   const [connectionStatus, setConnectionStatus] = useState<'connected' | 'disconnected' | 'connecting'>('connecting');
@@ -274,7 +275,11 @@ export default function ChatScreen() {
     if (selectedChannelRef.current?.id === channelId) {
       console.log(`📨 Setting ${loadedMessages.length} loaded messages`);
       setMessages(loadedMessages);
-      scrollToBottom();
+
+      // Only auto-scroll if not during initial load
+      if (!isInitialLoad) {
+        scrollToBottom();
+      }
     }
   };
 
@@ -342,7 +347,10 @@ export default function ChatScreen() {
             console.log(`📨 Trimmed messages to last 25 (was ${updated.length})`);
           }
 
-          setTimeout(scrollToBottom, 100);
+          // Only auto-scroll if not during initial load
+          if (!isInitialLoad) {
+            setTimeout(scrollToBottom, 100);
+          }
           return limitedMessages;
         } else {
           console.log(`🔄 No new unique messages to add (${newMessages.length} messages were duplicates)`);
@@ -365,8 +373,13 @@ export default function ChatScreen() {
   };
 
   const selectChannel = async (channel: ChatChannel) => {
+    // Save current messages as last rendered state before switching
+    if (selectedChannelRef.current && messages.length > 0) {
+      chatService.saveLastRenderedMessages(selectedChannelRef.current.id, messages);
+      console.log('💾 Saved last rendered state for previous channel');
+    }
+
     setSelectedChannel(channel);
-    setMessages([]);
     setTypingUsers([]);
     setHasMoreMessages(true);
     setShowLoadMore(false);
@@ -374,10 +387,49 @@ export default function ChatScreen() {
     // Subscribe to longpolling for real-time updates
     chatService.subscribeToChannel(channel.id);
 
-    // Load initial 25 messages for this channel
-    const loadedMessages = await chatService.loadChannelMessages(channel.id, 25, 0);
+    // INSTANT LOADING: Check for last rendered messages first
+    const lastRendered = chatService.getLastRenderedMessages(channel.id);
+    console.log(`📨 🔍 Checking for last rendered messages for channel ${channel.id}: found ${lastRendered.length}`);
 
-    // Set messages directly (limit to 25 to ensure consistency)
+    if (lastRendered.length > 0) {
+      console.log('⚡ Displaying', lastRendered.length, 'last rendered messages INSTANTLY');
+      setMessages(lastRendered);
+
+      // NO SCROLLING ANIMATION - just set position instantly
+      setTimeout(() => {
+        flatListRef.current?.scrollToEnd({ animated: false });
+      }, 50);
+
+      console.log('⚡ INSTANT LOAD COMPLETE - messages displayed from cache');
+
+      // Load fresh data in background silently (don't update UI immediately)
+      setTimeout(async () => {
+        try {
+          console.log('🔄 Loading fresh data in background...');
+          const freshMessages = await chatService.loadChannelMessages(channel.id, 25, 0);
+          const limitedMessages = freshMessages.slice(-25);
+          console.log('🔄 Background refresh complete, updating UI silently');
+          setMessages(limitedMessages);
+
+          // Check if we have fewer than 25 messages
+          if (freshMessages.length < 25) {
+            setHasMoreMessages(false);
+          }
+        } catch (error) {
+          console.warn('⚠️ Background refresh failed:', error);
+        }
+      }, 1000); // Delay background refresh
+
+      return;
+    } else {
+      console.log('📨 ⚠️ No last rendered messages found - proceeding with fresh load');
+    }
+
+    // Fresh load (first time or no cache)
+    setMessages([]);
+    setIsInitialLoad(true);
+
+    const loadedMessages = await chatService.loadChannelMessages(channel.id, 25, 0);
     const limitedMessages = loadedMessages.slice(-25);
     setMessages(limitedMessages);
 
@@ -386,10 +438,14 @@ export default function ChatScreen() {
       setHasMoreMessages(false);
     }
 
-    console.log(`📨 Loaded ${limitedMessages.length} messages for channel ${channel.id} (limited to 25)`);
+    console.log(`📨 Loaded ${limitedMessages.length} messages for channel ${channel.id} (fresh load)`);
 
-    // Scroll to bottom after loading
-    setTimeout(scrollToBottom, 100);
+    // Mark initial load as complete and scroll to bottom once
+    setIsInitialLoad(false);
+    setTimeout(() => {
+      scrollToBottom();
+      console.log(`📨 Initial load complete - scrolled to bottom`);
+    }, 100);
   };
 
   const loadMoreMessages = async () => {
@@ -1428,7 +1484,7 @@ export default function ChatScreen() {
               renderItem={renderMessage}
               style={styles.messagesList}
               contentContainerStyle={styles.messagesContent}
-              onContentSizeChange={scrollToBottom}
+              onContentSizeChange={() => flatListRef.current?.scrollToEnd({ animated: false })}
               onScroll={handleScroll}
               scrollEventThrottle={16}
               showsVerticalScrollIndicator={false}

@@ -1274,7 +1274,10 @@ class SyncService {
       console.log(`🔄 ${modelName}: incremental sync (${timeDiff}min ago)`);
 
       const domain = [['write_date', '>=', syncMetadata.last_sync_write_date]];
-      return domain;
+
+      // Add model-specific filters
+      const modelSpecificFilters = this.getModelSpecificFilters(modelName);
+      return [...domain, ...modelSpecificFilters];
     } else {
       // INITIAL SYNC: Use time period for first sync
       console.log(`📅 INITIAL SYNC: ${modelName} - using time period filter`);
@@ -1283,16 +1286,18 @@ class SyncService {
       const hasSyncAllOverride = this.syncSettings.modelSyncAllOverrides?.[modelName] === true;
       if (hasSyncAllOverride) {
         console.log(`📊 INITIAL SYNC: ${modelName} - sync all override enabled, fetching all records`);
-        return [];
+        const modelSpecificFilters = this.getModelSpecificFilters(modelName);
+        return modelSpecificFilters;
       }
 
       // Get time period for this model (override or global)
       const timePeriod = this.syncSettings.modelOverrides[modelName] || this.syncSettings.globalTimePeriod;
 
-      // If 'all', return empty domain (no filtering)
+      // If 'all', return only model-specific filters (no time filtering)
       if (timePeriod === 'all') {
         console.log(`📊 INITIAL SYNC: ${modelName} - fetching all records`);
-        return [];
+        const modelSpecificFilters = this.getModelSpecificFilters(modelName);
+        return modelSpecificFilters;
       }
 
       // Get days to go back
@@ -1307,13 +1312,53 @@ class SyncService {
       const dateThreshold = daysAgo.toISOString().split('T')[0] + ' 00:00:00';
 
       console.log(`📅 INITIAL SYNC: ${modelName} - last ${timePeriodOption.days} days (since ${dateThreshold})`);
-      return [['write_date', '>=', dateThreshold]];
+      const timeDomain = [['write_date', '>=', dateThreshold]];
+
+      // Add model-specific filters
+      const modelSpecificFilters = this.getModelSpecificFilters(modelName);
+      return [...timeDomain, ...modelSpecificFilters];
     }
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
       console.error(`❌ Failed to build domain for ${modelName}:`, errorMessage);
-      // Return safe default - no filtering
-      return [];
+      // Return safe default - only model-specific filters
+      const modelSpecificFilters = this.getModelSpecificFilters(modelName);
+      return modelSpecificFilters;
+    }
+  }
+
+  /**
+   * Get model-specific filters to apply during sync
+   */
+  private getModelSpecificFilters(modelName: string): any[] {
+    switch (modelName) {
+      case 'discuss.channel':
+        // Only sync active channels to match Odoo web behavior
+        return [['active', '=', true]];
+
+      case 'res.partner':
+        // Only sync active partners
+        return [['active', '=', true]];
+
+      case 'res.users':
+        // Only sync active users
+        return [['active', '=', true]];
+
+      case 'hr.employee':
+        // Only sync active employees
+        return [['active', '=', true]];
+
+      case 'product.product':
+        // Only sync active products
+        return [['active', '=', true]];
+
+      case 'product.template':
+        // Only sync active product templates
+        return [['active', '=', true]];
+
+      default:
+        // No specific filters for other models
+        return [];
     }
   }
 

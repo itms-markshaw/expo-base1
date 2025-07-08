@@ -14,9 +14,9 @@
       "infoPlist": {
         "NSCameraUsageDescription": "This app needs access to camera for video calls",
         "NSMicrophoneUsageDescription": "This app needs access to microphone for calls",
+        "NSCalendarsUsageDescription": "This app needs access to calendar to sync events and activities from your Odoo system",
+        "NSContactsUsageDescription": "This app needs access to contacts to sync customer and partner information from your Odoo system",
         "UIBackgroundModes": [
-          "audio",
-          "voip",
           "audio",
           "voip"
         ],

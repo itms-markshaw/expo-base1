@@ -4,7 +4,6 @@
  */
 
 export { chatService } from './ChatService';
-export { hybridChatService } from './HybridChatService';
 
 // Re-export base services for convenience
 export {

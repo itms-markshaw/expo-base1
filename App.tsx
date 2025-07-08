@@ -367,9 +367,11 @@ function MainTabs() {
 
 // App Content Component (inside provider)
 function AppContent() {
+  console.log('🔄 AppContent component starting...');
   const { isAuthenticated, authLoading, checkAuth } = useAppStore();
 
   useEffect(() => {
+    console.log('🔐 Checking authentication...');
     checkAuth();
   }, []);
 
@@ -409,13 +411,80 @@ function AppContent() {
   );
 }
 
+// Error Boundary Component
+class ErrorBoundary extends React.Component<{children: React.ReactNode}, {hasError: boolean, error?: Error}> {
+  constructor(props: {children: React.ReactNode}) {
+    super(props);
+    this.state = { hasError: false };
+  }
+
+  static getDerivedStateFromError(error: Error) {
+    console.error('🚨 App Error Boundary caught error:', error);
+    return { hasError: true, error };
+  }
+
+  componentDidCatch(error: Error, errorInfo: any) {
+    console.error('🚨 App Error Boundary details:', error, errorInfo);
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <View style={styles.errorContainer}>
+          <Text style={styles.errorTitle}>Something went wrong</Text>
+          <Text style={styles.errorText}>
+            {this.state.error?.message || 'Unknown error occurred'}
+          </Text>
+          <Text style={styles.errorDetails}>
+            Check the console for more details
+          </Text>
+        </View>
+      );
+    }
+
+    return this.props.children;
+  }
+}
+
 // Main App Component
 export default function App() {
+  console.log('🚀 App component starting...');
+
   return (
-    <GestureHandlerRootView style={{ flex: 1 }}>
-      <AppStoreProvider>
-        <AppContent />
-      </AppStoreProvider>
-    </GestureHandlerRootView>
+    <ErrorBoundary>
+      <GestureHandlerRootView style={{ flex: 1 }}>
+        <AppStoreProvider>
+          <AppContent />
+        </AppStoreProvider>
+      </GestureHandlerRootView>
+    </ErrorBoundary>
   );
 }
+
+// Error styles
+const styles = StyleSheet.create({
+  errorContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
+    backgroundColor: '#fff',
+  },
+  errorTitle: {
+    fontSize: 24,
+    fontWeight: 'bold',
+    color: '#d32f2f',
+    marginBottom: 16,
+  },
+  errorText: {
+    fontSize: 16,
+    color: '#666',
+    textAlign: 'center',
+    marginBottom: 16,
+  },
+  errorDetails: {
+    fontSize: 14,
+    color: '#999',
+    textAlign: 'center',
+  },
+});

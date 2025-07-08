@@ -64,6 +64,7 @@ class ChatService {
   private currentUserPartnerId: number | null = null;
   private currentChannels = new Map<number, ChatChannel>();
   private channelMessages = new Map<number, ChatMessage[]>();
+  private lastRenderedMessages = new Map<number, ChatMessage[]>(); // Cache of last displayed messages
   private typingUsers = new Map<number, Map<number, TypingUser>>();
   private eventListeners = new Map<string, Function[]>();
 
@@ -557,12 +558,15 @@ class ChatService {
 
       let channels = [];
 
-      // Try to load from cache first for faster loading
+      // OFFLINE FIRST: Try to load from cache first for faster loading
+      let hasOfflineData = false;
       try {
+        console.log('📱 🔍 Checking for cached channels in SQLite...');
         const cachedChannels = await syncService.getCachedData('discuss.channel');
         if (cachedChannels && cachedChannels.length > 0) {
-          console.log(`📱 Found ${cachedChannels.length} cached channels - using offline data`);
+          console.log(`📱 ✅ Found ${cachedChannels.length} cached channels - using offline data`);
           channels = cachedChannels;
+          hasOfflineData = true;
 
           // Emit cached channels immediately without processing (for speed)
           console.log(`📱 ✅ Displaying ${channels.length} cached channels instantly`);
@@ -581,14 +585,26 @@ class ChatService {
 
           // Continue to load fresh data in background but don't block UI
           console.log('📱 Cached channels loaded, fetching fresh data in background...');
+        } else {
+          console.log('📱 ⚠️ No cached channels found in SQLite');
         }
       } catch (cacheError) {
         console.warn('⚠️ Failed to load cached channels:', cacheError);
       }
 
-      // Always try to get fresh data (but don't block if we have cache)
+      // Try to get fresh data only if we have network connectivity
       const shouldLoadFresh = true; // Always refresh for real-time chat
       if (shouldLoadFresh) {
+        // Check if we're authenticated and have network
+        const isAuth = await authService.isAuthenticated();
+        if (!isAuth) {
+          console.log('📱 ⚠️ Not authenticated - using offline data only');
+          if (!hasOfflineData) {
+            console.log('📱 ❌ No offline data available and not authenticated');
+            this.emit('error', { type: 'loadChannels', error: new Error('No offline data and not authenticated') });
+          }
+          return;
+        }
         console.log('📱 Loading channels from server...');
 
         try {
@@ -628,6 +644,7 @@ class ChatService {
               channels = await client.searchRead('discuss.channel',
                 [
                   ['channel_member_ids.partner_id', '=', currentPartnerId],
+                  ['active', '=', true],              // Only active channels
                   '|',
                   ['channel_type', '=', 'chat'],      // Direct messages
                   ['channel_type', '=', 'channel']    // Group channels
@@ -639,13 +656,23 @@ class ChatService {
                 { order: 'id desc' }
               );
 
-              console.log(`📱 Found ${channels.length} channels with partner filter`);
+              console.log(`📱 ✅ PARTNER FILTER: Found ${channels.length} active channels`);
             } else {
               console.log(`⚠️ Invalid partner ID (${currentPartnerId}), skipping partner-based filtering`);
             }
           }
         } catch (error) {
           console.warn('❌ Partner-based filtering failed:', error);
+
+          // If network request failed but we have offline data, that's OK
+          if (hasOfflineData) {
+            console.log('📱 ✅ Network failed but offline data available - continuing with cached data');
+            return;
+          } else {
+            console.log('📱 ❌ Network failed and no offline data available');
+            this.emit('error', { type: 'loadChannels', error });
+            return;
+          }
         }
 
         // Fallback: If no channels found with partner filter, try simpler approach
@@ -656,6 +683,7 @@ class ChatService {
             channels = await client.searchRead('discuss.channel',
               [
                 ['is_member', '=', true],
+                ['active', '=', true],              // Only active channels
                 '|',
                 ['channel_type', '=', 'chat'],      // Direct messages
                 ['channel_type', '=', 'channel']    // Group channels
@@ -667,10 +695,27 @@ class ChatService {
               { order: 'id desc' }
             );
 
-            console.log(`📱 Found ${channels.length} channels with is_member filter`);
+            console.log(`📱 ✅ IS_MEMBER FILTER: Found ${channels.length} active channels`);
+
+            // DEDUPLICATION: Remove duplicate channels first
+            let originalCount = channels.length;
+            const seenChannels = new Set();
+            channels = channels.filter(channel => {
+              const key = `${channel.channel_type}-${channel.name}`;
+              if (seenChannels.has(key)) {
+                console.log(`📱 🔄 Removing duplicate: ${channel.name} (${channel.channel_type})`);
+                return false;
+              }
+              seenChannels.add(key);
+              return true;
+            });
+
+            if (channels.length !== originalCount) {
+              console.log(`📱 ✅ Deduplicated: ${originalCount} → ${channels.length} channels`);
+              originalCount = channels.length;
+            }
 
             // Filter channels to match Odoo web behavior (remove inactive/archived)
-            const originalCount = channels.length;
             channels = channels.filter(channel => {
               // Keep active channels (active field might be undefined, which means active)
               const isActive = channel.active !== false;
@@ -697,6 +742,7 @@ class ChatService {
             console.log('📱 Last resort - loading all channels...');
             channels = await client.searchRead('discuss.channel',
               [
+                ['active', '=', true],              // Only active channels
                 '|',
                 ['channel_type', '=', 'chat'],      // Direct messages
                 ['channel_type', '=', 'channel']    // Group channels
@@ -708,7 +754,7 @@ class ChatService {
               { order: 'id desc', limit: 50 } // Limit to prevent too many results
             );
 
-            console.log(`📱 Found ${channels.length} total channels (unfiltered)`);
+            console.log(`📱 ⚠️ LAST RESORT: Found ${channels.length} active channels (limited to 50)`);
           }
         }
       }
@@ -747,7 +793,7 @@ class ChatService {
       const channelsWithActivity = await Promise.all(
         channels.map(async (channel) => {
           try {
-            // Try to get cached messages first
+            // Try to get cached messages first from BaseSyncService
             let lastMessage = null;
             try {
               const cachedMessages = await syncService.getCachedData('mail.message', {
@@ -834,6 +880,35 @@ class ChatService {
   }
 
   /**
+   * Get last rendered messages instantly (no loading, no scrolling)
+   */
+  getLastRenderedMessages(channelId: number): ChatMessage[] {
+    console.log(`📨 🔍 Checking lastRenderedMessages cache for channel ${channelId}...`);
+    console.log(`📨 🔍 Cache has ${this.lastRenderedMessages.size} channels stored`);
+
+    const lastRendered = this.lastRenderedMessages.get(channelId);
+    if (lastRendered && lastRendered.length > 0) {
+      console.log(`📨 ⚡ Returning ${lastRendered.length} last rendered messages instantly for channel ${channelId}`);
+      return lastRendered;
+    }
+    console.log(`📨 ⚠️ No last rendered messages found for channel ${channelId} (cache entry: ${lastRendered ? 'exists but empty' : 'does not exist'})`);
+    return [];
+  }
+
+  /**
+   * Save the current rendered state for instant loading next time
+   */
+  saveLastRenderedMessages(channelId: number, messages: ChatMessage[]): void {
+    this.lastRenderedMessages.set(channelId, [...messages]);
+    console.log(`📨 💾 Saved ${messages.length} messages as last rendered state for channel ${channelId}`);
+    console.log(`📨 💾 Cache now has ${this.lastRenderedMessages.size} channels stored`);
+
+    // Debug: Show what's in the cache
+    const stored = this.lastRenderedMessages.get(channelId);
+    console.log(`📨 💾 Verification: stored ${stored?.length || 0} messages for channel ${channelId}`);
+  }
+
+  /**
    * Load messages for a specific channel (cache first, then live data)
    * Limited to last 50 messages by default for performance
    */
@@ -842,24 +917,26 @@ class ChatService {
       console.log(`📨 Loading messages for channel ${channelId} (cache first)...`);
 
       const client = authService.getClient();
-      if (!client) {
-        throw new Error('No authenticated client available');
-      }
+      const isAuth = await authService.isAuthenticated();
 
       let messages = [];
 
-      // Try to load from cache first for instant loading
+      // OFFLINE FIRST: Try to load from BaseSyncService (authoritative source)
       try {
+        console.log(`📨 🔍 Checking BaseSyncService for channel ${channelId} messages...`);
         const cachedMessages = await syncService.getCachedData('mail.message', {
           model: 'discuss.channel',
           res_id: channelId
         });
+
         if (cachedMessages && cachedMessages.length > 0) {
-          console.log(`📨 Found ${cachedMessages.length} cached messages for channel ${channelId} - applying limit ${limit}`);
+          console.log(`📨 ✅ Found ${cachedMessages.length} cached messages in BaseSyncService`);
+
+          // Filter and sort messages properly
           messages = cachedMessages
             .filter(msg => msg.model === 'discuss.channel' && msg.res_id === channelId)
             .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
-            .slice(offset, offset + limit); // Apply offset and limit properly
+            .slice(offset, offset + limit);
 
           // Process and emit cached messages immediately
           if (messages.length > 0) {
@@ -878,19 +955,23 @@ class ChatService {
             }).reverse(); // Chronological order
 
             this.channelMessages.set(channelId, processedMessages);
+            this.saveLastRenderedMessages(channelId, processedMessages); // Save for instant loading
             this.emit('messagesLoaded', { channelId, messages: processedMessages });
 
             console.log(`📨 Cached messages loaded, fetching fresh data in background...`);
           }
+        } else {
+          console.log(`📨 ⚠️ No cached messages found in BaseSyncService for channel ${channelId}`);
         }
       } catch (cacheError) {
-        console.warn('⚠️ Failed to load cached messages:', cacheError);
+        console.warn('⚠️ Failed to load cached messages from BaseSyncService:', cacheError);
       }
 
-      // Always try to get fresh data in background for real-time updates
-      try {
-        console.log(`📨 Loading fresh messages from server for channel ${channelId} (limit: ${limit}, offset: ${offset})...`);
-        const freshMessages = await client.searchRead('mail.message',
+      // Try to get fresh data only if we have network connectivity
+      if (client && isAuth) {
+        try {
+          console.log(`📨 Loading fresh messages from server for channel ${channelId} (limit: ${limit}, offset: ${offset})...`);
+          const freshMessages = await client.searchRead('mail.message',
           [
             ['model', '=', 'discuss.channel'],
             ['res_id', '=', channelId]
@@ -906,13 +987,22 @@ class ChatService {
         if (messagesWithAttachments.length > 0) {
           messages = messagesWithAttachments;
         }
-      } catch (serverError) {
-        console.warn('⚠️ Failed to load fresh messages, using cached data:', serverError);
-        // If we have cached messages, that's fine - we already emitted them
-        if (messages.length > 0) {
-          return messages.map(msg => ({ ...msg, authorName: 'Cached User', cleanAuthorName: 'Cached User' }));
+        } catch (serverError) {
+          console.warn('⚠️ Failed to load fresh messages, using cached data:', serverError);
+          // If we have cached messages, that's fine - we already emitted them
+          if (messages.length > 0) {
+            console.log('📨 ✅ Using cached messages due to network error');
+          } else {
+            console.log('📨 ❌ No cached messages and network failed');
+            throw serverError;
+          }
         }
-        throw serverError; // Only throw if we have no cached data
+      } else {
+        console.log('📨 ⚠️ No network connectivity - using cached messages only');
+        if (messages.length === 0) {
+          console.log('📨 ❌ No cached messages available and no network');
+          throw new Error('No cached messages available and no network connectivity');
+        }
       }
 
       console.log(`📨 Found ${messages.length} messages for channel ${channelId}`);
@@ -958,12 +1048,18 @@ class ChatService {
         };
       });
 
-      // Reverse to get chronological order
-      const sortedMessages = processedMessages.reverse();
+      // Sort to get chronological order (oldest to newest for proper display)
+      const sortedMessages = processedMessages.sort((a, b) =>
+        new Date(a.date).getTime() - new Date(b.date).getTime()
+      );
 
       this.channelMessages.set(channelId, sortedMessages);
+      this.saveLastRenderedMessages(channelId, sortedMessages); // Save for instant loading
+
+      // Emit all messages at once for instant UI loading (no scroll chaos)
       this.emit('messagesLoaded', { channelId, messages: sortedMessages });
 
+      console.log(`✅ Loaded ${sortedMessages.length} messages for channel ${channelId} (instant load)`);
       return sortedMessages;
     } catch (error) {
       console.error(`❌ Failed to load messages for channel ${channelId}:`, error);
