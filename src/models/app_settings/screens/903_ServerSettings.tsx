@@ -22,10 +22,13 @@ import { ODOO_CONFIG } from '../../../config/odoo';
 import ScreenBadge from '../../../components/ScreenBadge';
 
 export default function ServerSettingsScreen({ navigation }: any) {
-  const [serverUrl, setServerUrl] = useState(ODOO_CONFIG.baseURL || '');
-  const [database, setDatabase] = useState(ODOO_CONFIG.db || '');
+  // Safe config access with fallbacks
+  const [serverUrl, setServerUrl] = useState(ODOO_CONFIG?.baseURL || 'https://itmsgroup.com.au');
+  const [database, setDatabase] = useState(ODOO_CONFIG?.db || 'your-database');
   const [port, setPort] = useState('8069'); // Default port
-  const [useHttps, setUseHttps] = useState(ODOO_CONFIG.baseURL?.startsWith('https') || false);
+  const [useHttps, setUseHttps] = useState(
+    (ODOO_CONFIG?.baseURL && ODOO_CONFIG.baseURL.startsWith('https')) || false
+  );
   const [timeout, setTimeout] = useState('30');
   const [retryAttempts, setRetryAttempts] = useState('3');
 

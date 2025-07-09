@@ -21,13 +21,38 @@ import { useAppStore } from '../../../store';
 import ScreenBadge from '../../../components/ScreenBadge';
 
 export default function AccountSettingsScreen({ navigation }: any) {
-  const { user, updateUser } = useAppStore();
+  const { user, updateUser, logout } = useAppStore();
   const [displayName, setDisplayName] = useState(user?.name || '');
   const [email, setEmail] = useState(user?.email || '');
 
   const handleSave = () => {
     // TODO: Implement user profile update
     Alert.alert('Success', 'Account settings updated');
+  };
+
+  const handleLogout = () => {
+    Alert.alert(
+      'Logout',
+      'Are you sure you want to logout?',
+      [
+        {
+          text: 'Cancel',
+          style: 'cancel',
+        },
+        {
+          text: 'Logout',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              await logout();
+              // Navigation will be handled automatically by App.tsx when isAuthenticated becomes false
+            } catch (error) {
+              Alert.alert('Error', 'Failed to logout. Please try again.');
+            }
+          },
+        },
+      ]
+    );
   };
 
   return (
@@ -92,10 +117,10 @@ export default function AccountSettingsScreen({ navigation }: any) {
             <MaterialIcons name="chevron-right" size={24} color="#666" />
           </TouchableOpacity>
 
-          <TouchableOpacity style={styles.actionItem}>
-            <MaterialIcons name="download" size={24} color="#666" />
-            <Text style={styles.actionText}>Export Data</Text>
-            <MaterialIcons name="chevron-right" size={24} color="#666" />
+          <TouchableOpacity style={[styles.actionItem, styles.logoutItem]} onPress={handleLogout}>
+            <MaterialIcons name="logout" size={24} color="#FF3B30" />
+            <Text style={[styles.actionText, styles.logoutText]}>Logout</Text>
+            <MaterialIcons name="chevron-right" size={24} color="#FF3B30" />
           </TouchableOpacity>
         </View>
       </ScrollView>
@@ -179,5 +204,13 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: '#000',
     marginLeft: 12,
+  },
+  logoutItem: {
+    borderBottomWidth: 0, // Remove border for last item
+    marginTop: 8, // Add some spacing
+  },
+  logoutText: {
+    color: '#FF3B30', // Red color for logout
+    fontWeight: '500',
   },
 });
