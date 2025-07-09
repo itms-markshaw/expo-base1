@@ -22,10 +22,10 @@ import { ODOO_CONFIG } from '../../../config/odoo';
 import ScreenBadge from '../../../components/ScreenBadge';
 
 export default function ServerSettingsScreen({ navigation }: any) {
-  const [serverUrl, setServerUrl] = useState(ODOO_CONFIG.url);
-  const [database, setDatabase] = useState(ODOO_CONFIG.database);
-  const [port, setPort] = useState(ODOO_CONFIG.port?.toString() || '8069');
-  const [useHttps, setUseHttps] = useState(ODOO_CONFIG.url.startsWith('https'));
+  const [serverUrl, setServerUrl] = useState(ODOO_CONFIG.baseURL || '');
+  const [database, setDatabase] = useState(ODOO_CONFIG.db || '');
+  const [port, setPort] = useState('8069'); // Default port
+  const [useHttps, setUseHttps] = useState(ODOO_CONFIG.baseURL?.startsWith('https') || false);
   const [timeout, setTimeout] = useState('30');
   const [retryAttempts, setRetryAttempts] = useState('3');
 
