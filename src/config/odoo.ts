@@ -59,16 +59,10 @@ export const ODOO_CONFIG = {
   }
 };
 
-// Development configuration override
-export const DEV_CONFIG = {
-  ...ODOO_CONFIG,
-  baseURL: 'http://localhost:8069', // Local development server
-  websocket: {
-    ...ODOO_CONFIG.websocket,
-    enabled: false // Disable WebSocket in dev if not available
-  }
-};
+// Since both development and production use the same server,
+// we can just export the same config for both environments
+console.log('🌐 Using Odoo server: https://itmsgroup.com.au');
+console.log(`🔧 Environment: ${typeof __DEV__ !== 'undefined' && __DEV__ ? 'Development' : 'Production'}`);
 
-// Export default config based on environment
-const isDev = typeof __DEV__ !== 'undefined' ? __DEV__ : false;
-export default isDev ? DEV_CONFIG : ODOO_CONFIG;
+// Export the same config for all environments
+export default ODOO_CONFIG;

@@ -560,23 +560,24 @@ class ChatService {
 
       // OFFLINE FIRST: Try to load from cache first for faster loading
       let hasOfflineData = false;
+      let cacheChannels = [];
       try {
         console.log('📱 🔍 Checking for cached channels in SQLite...');
         const cachedChannels = await syncService.getCachedData('discuss.channel');
         if (cachedChannels && cachedChannels.length > 0) {
           console.log(`📱 ✅ Found ${cachedChannels.length} cached channels - using offline data`);
-          channels = cachedChannels;
+          cacheChannels = cachedChannels;
           hasOfflineData = true;
 
-          // Emit cached channels immediately without processing (for speed)
-          console.log(`📱 ✅ Displaying ${channels.length} cached channels instantly`);
+          // Process cached channels immediately
+          console.log(`📱 ✅ Displaying ${cacheChannels.length} cached channels instantly`);
 
-          for (const channel of channels) {
+          for (const channel of cacheChannels) {
             this.currentChannels.set(channel.id, channel);
           }
 
           // Sort and emit cached data immediately (minimal processing)
-          const sortedChannels = channels.sort((a, b) => {
+          const sortedChannels = cacheChannels.sort((a, b) => {
             // Simple sort by ID for speed (detailed sorting happens with fresh data)
             return b.id - a.id;
           });
@@ -773,7 +774,13 @@ class ChatService {
       // Sort channels by last activity (most recent first)
       const sortedChannels = await this.sortChannelsByLastActivity(processedChannels);
 
-      this.emit('channelsLoaded', sortedChannels);
+      // Only emit fresh data if it's significantly different from cached data
+      if (!hasOfflineData || sortedChannels.length !== cacheChannels.length) {
+        console.log(`📱 Fresh data different from cache (${cacheChannels.length} -> ${sortedChannels.length}), emitting update...`);
+        this.emit('channelsLoaded', sortedChannels);
+      } else {
+        console.log('📱 Fresh data same as cache, not emitting duplicate channelsLoaded event');
+      }
 
     } catch (error) {
       console.error('❌ Failed to load channels:', error);

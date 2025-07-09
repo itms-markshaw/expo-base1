@@ -23,13 +23,28 @@ import {
   Alert,
   ActionSheetIOS,
   Animated,
+  Image,
 } from 'react-native';
 import { Swipeable, GestureHandlerRootView } from 'react-native-gesture-handler';
 import { MaterialIcons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import * as DocumentPicker from 'expo-document-picker';
+// Conditional imports to prevent white screen if packages are missing
+let FileSystem: any;
+let MediaLibrary: any;
+let Sharing: any;
+
+try {
+  FileSystem = require('expo-file-system');
+  MediaLibrary = require('expo-media-library');
+  Sharing = require('expo-sharing');
+} catch (error) {
+  console.warn('Some expo packages not available:', error);
+}
 import { databaseService } from '../../base/services/BaseDatabaseService';
 import { syncService } from '../../base/services/BaseSyncService';
+import { authService } from '../../base/services/BaseAuthService';
+import { ODOO_CONFIG } from '../../../config/odoo';
 import chatService, { ChatChannel, ChatMessage, TypingUser } from '../services/ChatService';
 import { useAppNavigation } from '../../../components/AppNavigationProvider';
 import { useNavigation } from '@react-navigation/native';
@@ -102,6 +117,9 @@ export default function ChatScreen() {
   const [showWebRTCCallModal, setShowWebRTCCallModal] = useState(false);
   const [incomingWebRTCCall, setIncomingWebRTCCall] = useState<WebRTCCall | null>(null);
   const [debugInfo, setDebugInfo] = useState('');
+  const [showImageViewer, setShowImageViewer] = useState(false);
+  const [selectedImageUri, setSelectedImageUri] = useState<string>('');
+  const [selectedImageName, setSelectedImageName] = useState<string>('');
 
   // Use refs to access current values in event listeners
   const selectedChannelRef = useRef<ChatChannel | null>(null);
@@ -255,15 +273,27 @@ export default function ChatScreen() {
 
   const handleChannelsLoaded = (loadedChannels: ChatChannel[]) => {
     console.log(`📱 ✅ Displaying ${loadedChannels.length} channels instantly`);
-    setChannels(loadedChannels);
-
+    
     // If this is the first load (cache), hide main loading but show background refresh
     if (loading) {
+      // First load: Cache data - display immediately
+      setChannels(loadedChannels);
       setLoading(false);
       setLoadingFresh(true);
       console.log('📱 Cache loaded - UI ready, fetching fresh data...');
     } else {
-      // This is fresh data, hide background loading
+      // Fresh data: Only update if significantly different to prevent flickering
+      const currentChannels = channels;
+      const isDifferent = loadedChannels.length !== currentChannels.length ||
+                          loadedChannels.some(newCh => !currentChannels.find(oldCh => oldCh.id === newCh.id));
+      
+      if (isDifferent) {
+        console.log(`📱 Fresh data different (${currentChannels.length} -> ${loadedChannels.length}), updating...`);
+        setChannels(loadedChannels);
+      } else {
+        console.log('📱 Fresh data same as cache, no update needed');
+      }
+      
       setLoadingFresh(false);
       console.log('📱 Fresh data loaded - all done!');
     }
@@ -779,15 +809,75 @@ export default function ChatScreen() {
     // Handle different attachment types
     if (attachment?.mimetype?.startsWith('image/')) {
       // Open image in full screen viewer
-      // You could implement a modal image viewer here
-      Alert.alert('Image Attachment', `Opening ${filename}`, [
-        { text: 'OK' }
-      ]);
+      const imageUri = attachment.url || attachment.uri || `${ODOO_CONFIG.url}/web/content/${attachmentId}`;
+      setSelectedImageUri(imageUri);
+      setSelectedImageName(filename);
+      setShowImageViewer(true);
     } else {
-      // Handle other file types
-      Alert.alert('Attachment', `Opening ${filename}`, [
-        { text: 'OK' }
-      ]);
+      // Handle other file types - show download option
+      Alert.alert(
+        'Attachment',
+        `${filename}\n\nWhat would you like to do?`,
+        [
+          { text: 'Cancel', style: 'cancel' },
+          { text: 'Download', onPress: () => downloadAttachment(attachmentId, filename, attachment) }
+        ]
+      );
+    }
+  };
+
+  const handleAttachmentLongPress = (attachmentId: number, filename: string, attachment: any) => {
+    console.log('📎 Attachment long pressed:', { attachmentId, filename, attachment });
+
+    // Simplified - just show basic info for now
+    Alert.alert('Attachment', `${filename}\n\nDownload feature temporarily disabled.`);
+  };
+
+  const downloadAttachment = async (attachmentId: number, filename: string, attachment: any) => {
+    try {
+      console.log('📥 Starting download for:', filename);
+
+      // Check if required packages are available
+      if (!FileSystem || !MediaLibrary || !Sharing) {
+        Alert.alert('Feature not available', 'Download functionality is not available in this build.');
+        return;
+      }
+
+      // Request permissions
+      const { status } = await MediaLibrary.requestPermissionsAsync();
+      if (status !== 'granted') {
+        Alert.alert('Permission needed', 'Media library permission is required to save files.');
+        return;
+      }
+
+      // Get attachment URL
+      const attachmentUrl = attachment.url || attachment.uri || `${ODOO_CONFIG.url}/web/content/${attachmentId}`;
+
+      // Download to cache directory first
+      const downloadResult = await FileSystem.downloadAsync(
+        attachmentUrl,
+        FileSystem.documentDirectory + filename
+      );
+
+      if (downloadResult.status === 200) {
+        // For images, save to photo library
+        if (attachment?.mimetype?.startsWith('image/')) {
+          await MediaLibrary.saveToLibraryAsync(downloadResult.uri);
+          Alert.alert('Success', `Image saved to photo library: ${filename}`);
+        } else {
+          // For other files, use sharing
+          if (await Sharing.isAvailableAsync()) {
+            await Sharing.shareAsync(downloadResult.uri);
+          } else {
+            Alert.alert('Success', `File downloaded: ${filename}`);
+          }
+        }
+      } else {
+        throw new Error('Download failed');
+      }
+    } catch (error) {
+      console.error('❌ Download failed:', error);
+      Alert.alert('Download Error', 'Failed to download attachment. Please try again.');
     }
   };
 
@@ -1238,6 +1328,7 @@ export default function ChatScreen() {
           );
         }}
         onAttachmentPress={handleAttachmentView}
+        onAttachmentLongPress={handleAttachmentLongPress}
       />
     );
   };
@@ -1297,10 +1388,6 @@ export default function ChatScreen() {
             <Text style={styles.headerTitle}>
               {selectedChannel ? selectedChannel.name : 'Chat'}
             </Text>
-            {/* Subtle refresh indicator when loading fresh data */}
-            {loadingFresh && !selectedChannel && (
-              <ActivityIndicator size="small" color="#007AFF" style={styles.refreshIndicator} />
-            )}
           </View>
           {selectedChannel && selectedChannel.channel_type === 'channel' && (
             <Text style={styles.headerSubtitle}>
@@ -1677,6 +1764,44 @@ export default function ChatScreen() {
         onAccept={handleAcceptWebRTCCall}
         onDecline={handleDeclineWebRTCCall}
       />
+
+      {/* Full Screen Image Viewer Modal */}
+      {showImageViewer && (
+        <View style={styles.imageViewerModal}>
+          <TouchableOpacity
+            style={styles.imageViewerCloseButton}
+            onPress={() => setShowImageViewer(false)}
+          >
+            <MaterialIcons name="close" size={30} color="#FFF" />
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={styles.imageViewerDownloadButton}
+            onPress={() => {
+              setShowImageViewer(false);
+              // Extract attachment info from the selected image
+              const attachmentId = selectedImageUri.match(/\/(\d+)$/)?.[1];
+              if (attachmentId) {
+                downloadAttachment(
+                  parseInt(attachmentId),
+                  selectedImageName,
+                  { mimetype: 'image/jpeg', url: selectedImageUri }
+                );
+              }
+            }}
+          >
+            <MaterialIcons name="download" size={24} color="#FFF" />
+          </TouchableOpacity>
+
+          <Image
+            source={{ uri: selectedImageUri }}
+            style={styles.fullScreenImage}
+            resizeMode="contain"
+          />
+
+          <Text style={styles.imageViewerTitle}>{selectedImageName}</Text>
+        </View>
+      )}
     </SafeAreaView>
     </GestureHandlerRootView>
   );
@@ -2206,8 +2331,53 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  refreshIndicator: {
-    marginLeft: 8,
+
+  // Image Viewer Modal Styles
+  imageViewerModal: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(0, 0, 0, 0.95)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    zIndex: 9999,
+  },
+  imageViewerCloseButton: {
+    position: 'absolute',
+    top: 50,
+    right: 20,
+    zIndex: 10000,
+    padding: 10,
+    borderRadius: 20,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+  },
+  imageViewerDownloadButton: {
+    position: 'absolute',
+    top: 50,
+    left: 20,
+    zIndex: 10000,
+    padding: 10,
+    borderRadius: 20,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+  },
+  fullScreenImage: {
+    width: '100%',
+    height: '100%',
+  },
+  imageViewerTitle: {
+    position: 'absolute',
+    bottom: 50,
+    left: 20,
+    right: 20,
+    color: '#FFF',
+    fontSize: 16,
+    fontWeight: '500',
+    textAlign: 'center',
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    padding: 10,
+    borderRadius: 8,
   },
 
 });

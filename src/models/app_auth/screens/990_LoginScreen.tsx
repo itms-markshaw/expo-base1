@@ -8,7 +8,7 @@
  * User authentication screen
  */
 
-import React, { useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   View,
   Text,
@@ -26,13 +26,11 @@ import ScreenBadge from '../../../components/ScreenBadge';
 export default function LoginScreen() {
   const { login, authLoading } = useAppStore();
 
-  // Auto-login for testing in development mode
-  useEffect(() => {
-    if (__DEV__) {
-      console.log('🔐 Development mode detected - attempting auto-login...');
-      handleLogin();
-    }
-  }, []);
+  // TESTING: Pre-fill credentials for easy navigation testing
+  const [serverUrl] = useState('https://itmsgroup.com.au');
+  const [database] = useState('ITMS_v17_3_backup_2025_02_17_08_15');
+  const [username] = useState('mark.shaw@itmsgroup.com.au');
+  const [apiKey] = useState('ea186501b420d9b656eecf026f04f74a975db27c');
 
   const handleLogin = async () => {
     try {
@@ -54,14 +52,13 @@ export default function LoginScreen() {
           <MaterialIcons name="cloud" size={80} color="#007AFF" />
           <Text style={styles.appTitle}>Odoo Sync</Text>
           <Text style={styles.appSubtitle}>Connect to your Odoo server</Text>
+          <Text style={styles.devModeText}>🧪 Testing Mode - Just Click Login!</Text>
         </View>
 
         {/* Server Info */}
         <View style={styles.serverInfo}>
           <Text style={styles.serverTitle}>Server Configuration</Text>
-          {__DEV__ && (
-            <Text style={styles.devModeText}>🔧 Development Mode - Auto-login enabled</Text>
-          )}
+
           
           <View style={styles.serverCard}>
             <View style={styles.serverRow}>

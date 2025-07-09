@@ -20,6 +20,7 @@ class SyncCoordinator {
    */
   setSyncService(syncService: any): void {
     this.syncServiceRef = syncService;
+    console.log('✅ Sync coordinator: Sync service reference set');
   }
 
   /**
@@ -61,9 +62,16 @@ class SyncCoordinator {
     console.log(`🚀 Sync coordinator: Starting sync for ${source} with models: ${models.join(', ')}`);
     
     try {
-      // Check if sync service is available
+      // Check if sync service is available, with fallback initialization
       if (!this.syncServiceRef) {
-        throw new Error('Sync service not initialized in coordinator');
+        console.log('⚠️ Sync service not set in coordinator, attempting fallback initialization...');
+        // Import and set sync service as fallback
+        const { syncService } = await import('../../base/services/BaseSyncService');
+        this.setSyncService(syncService);
+
+        if (!this.syncServiceRef) {
+          throw new Error('Sync service not initialized in coordinator');
+        }
       }
 
       await this.syncServiceRef.startSync(models);
