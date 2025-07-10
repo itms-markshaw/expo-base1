@@ -147,6 +147,120 @@ export default function ChatScreen() {
   const selectedChannelRef = useRef<ChatChannel | null>(null);
   const messagesRef = useRef<ChatMessage[]>([]);
 
+  // ==================== HELPER FUNCTIONS ====================
+
+  /**
+   * Clean HTML content by decoding entities and removing tags
+   */
+  const cleanHtmlContent = (htmlText: string): string => {
+    if (!htmlText) return '';
+
+    let cleanText = htmlText;
+
+    // First decode HTML entities
+    cleanText = cleanText
+      .replace(/&lt;/g, '<')
+      .replace(/&gt;/g, '>')
+      .replace(/&amp;/g, '&')
+      .replace(/&quot;/g, '"')
+      .replace(/&#39;/g, "'")
+      .replace(/&nbsp;/g, ' ')
+      .replace(/&apos;/g, "'")
+      .replace(/&cent;/g, '¢')
+      .replace(/&pound;/g, '£')
+      .replace(/&yen;/g, '¥')
+      .replace(/&euro;/g, '€')
+      .replace(/&copy;/g, '©')
+      .replace(/&reg;/g, '®');
+
+    // Remove HTML tags
+    cleanText = cleanText.replace(/<[^>]*>/g, '');
+
+    // Clean up extra whitespace
+    cleanText = cleanText.replace(/\s+/g, ' ').trim();
+
+    return cleanText;
+  };
+
+  /**
+   * Clean channel name by removing current user's name from direct messages
+   */
+  const getCleanChannelName = (channel: ChatChannel): string => {
+    if (!channel.name) return 'Unknown Channel';
+
+    // For direct messages, remove current user's name
+    if (channel.channel_type === 'chat') {
+      const names = channel.name.split(', ').map(name => name.trim());
+      if (names.length > 1) {
+        // Get current user info to filter out their name
+        const currentUser = authService.getCurrentUser();
+        const currentUserName = currentUser?.name || 'Mark Shaw'; // Fallback
+
+        // Return the other person's name (not current user)
+        const otherNames = names.filter(name =>
+          !name.includes(currentUserName) &&
+          name !== currentUserName
+        );
+
+        if (otherNames.length > 0) {
+          return otherNames[0];
+        }
+      }
+    }
+
+    return channel.name;
+  };
+
+  /**
+   * Get last message preview for a channel
+   */
+  const getLastMessagePreview = (channel: ChatChannel): string => {
+    try {
+      const messages = chatService.getChannelMessages(channel.id);
+      if (messages && messages.length > 0) {
+        const lastMessage = messages[messages.length - 1];
+
+        // Get clean message body using the HTML cleaning utility
+        let messageText = cleanHtmlContent(lastMessage.body || '');
+        if (messageText.length > 50) {
+          messageText = messageText.substring(0, 50) + '...';
+        }
+
+        // Add sender prefix for group chats
+        if (channel.channel_type === 'channel' && lastMessage.author_id) {
+          const currentUser = authService.getCurrentUser();
+
+          // Extract author name from author_id array [id, name]
+          let authorName = '';
+          if (Array.isArray(lastMessage.author_id) && lastMessage.author_id.length > 1) {
+            authorName = lastMessage.author_id[1];
+          }
+
+          if (authorName) {
+            const isOwnMessage = authorName === currentUser?.name;
+            const prefix = isOwnMessage ? 'You: ' : `${authorName}: `;
+            return prefix + messageText;
+          }
+        }
+
+        return messageText || 'Message';
+      }
+    } catch (error) {
+      console.warn('Failed to get last message preview:', error);
+    }
+
+    // Fallback based on channel type
+    if (channel.channel_type === 'chat') {
+      return 'Tap to start chatting...';
+    } else if (channel.channel_type === 'channel') {
+      return `Group chat • ${channel.member_count || 0} members`;
+    } else if (channel.channel_type === 'livechat') {
+      return 'Live chat';
+    }
+
+    return 'No messages yet';
+  };
+
   // Update refs when state changes
   useEffect(() => {
     selectedChannelRef.current = selectedChannel;
@@ -266,10 +380,10 @@ export default function ChatScreen() {
 
         // Get current user ID for message bubbles from auth service
         try {
-          const client = chatService.getAuthenticatedClient();
-          if (client && client.uid) {
-            setCurrentUserId(client.uid);
-            console.log(`👤 Current user ID set to: ${client.uid}`);
+          const user = authService.getCurrentUser();
+          if (user && user.id) {
+            setCurrentUserId(user.id);
+            console.log(`👤 Current user ID set to: ${user.id}`);
           }
         } catch (error) {
           console.log('⚠️ Could not get current user ID:', error);
@@ -1320,18 +1434,137 @@ export default function ChatScreen() {
     // To show closed channels, we would need to modify the loadChannelsWithMembership method
   };
 
-  // Render right action for swipe (hide/leave channel)
+  // Render right actions for swipe (hide/leave channel)
   const renderRightAction = (channel: ChatChannel) => (
-    <TouchableOpacity
-      style={styles.leaveChannelButton}
-      onPress={() => handleFoldChannel(channel)}
-    >
-      <MaterialIcons name="visibility-off" size={24} color="#FFF" />
-      <Text style={styles.leaveChannelText}>Hide</Text>
-    </TouchableOpacity>
+    <View style={styles.swipeActionsContainer}>
+      {/* Hide/Fold Channel */}
+      <TouchableOpacity
+        style={[styles.swipeAction, styles.hideAction]}
+        onPress={() => handleHideChannel(channel)}
+      >
+        <MaterialIcons name="visibility-off" size={20} color="#FFF" />
+        <Text style={styles.swipeActionText}>Hide</Text>
+      </TouchableOpacity>
+
+      {/* Leave Channel (for group channels) */}
+      {channel.channel_type === 'channel' && (
+        <TouchableOpacity
+          style={[styles.swipeAction, styles.leaveAction]}
+          onPress={() => handleLeaveChannel(channel)}
+        >
+          <MaterialIcons name="exit-to-app" size={20} color="#FFF" />
+          <Text style={styles.swipeActionText}>Leave</Text>
+        </TouchableOpacity>
+      )}
+    </View>
   );
 
-  // Fold/Hide channel functionality (non-destructive)
+  // Hide channel functionality (fold/minimize)
+  const handleHideChannel = async (channel: ChatChannel) => {
+    try {
+      console.log(`📁 Hiding channel ${channel.id}: ${channel.name}`);
+
+      // Get authenticated client for direct API call
+      const client = chatService.getAuthenticatedClient();
+      if (!client) {
+        Alert.alert('Error', 'Not authenticated');
+        return;
+      }
+
+      // Get current user's partner ID from ChatService (more reliable)
+      const partnerId = chatService.getCurrentUserPartnerId();
+      if (!partnerId) {
+        Alert.alert('Error', 'User context not available');
+        return;
+      }
+
+      // Find the channel member record and update fold_state to 'closed'
+      const members = await client.searchRead('discuss.channel.member',
+        [['channel_id', '=', channel.id], ['partner_id', '=', partnerId]],
+        ['id']
+      );
+
+      if (members.length > 0) {
+        // Update fold_state to 'closed' to hide the channel
+        await client.update('discuss.channel.member', members[0].id, {
+          fold_state: 'closed'
+        });
+
+        console.log(`✅ Channel ${channel.name} hidden successfully`);
+
+        // Remove from UI immediately
+        setChannels(prev => prev.filter(ch => ch.id !== channel.id));
+
+        // Show success feedback
+        Alert.alert('Success', `${channel.name} has been hidden`);
+      } else {
+        Alert.alert('Error', 'Channel membership not found');
+      }
+    } catch (error) {
+      console.error('❌ Failed to hide channel:', error);
+      Alert.alert('Error', 'Failed to hide channel');
+    }
+  };
+
+  // Leave channel functionality (remove membership)
+  const handleLeaveChannel = async (channel: ChatChannel) => {
+    Alert.alert(
+      'Leave Channel',
+      `Are you sure you want to leave "${channel.name}"? You won't receive any more messages from this channel.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Leave',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              console.log(`🚪 Leaving channel ${channel.id}: ${channel.name}`);
+
+              // Get authenticated client for direct API call
+              const client = chatService.getAuthenticatedClient();
+              if (!client) {
+                Alert.alert('Error', 'Not authenticated');
+                return;
+              }
+
+              // Get current user's partner ID from ChatService (more reliable)
+              const partnerId = chatService.getCurrentUserPartnerId();
+              if (!partnerId) {
+                Alert.alert('Error', 'User context not available');
+                return;
+              }
+
+              // Find and delete the channel member record
+              const members = await client.searchRead('discuss.channel.member',
+                [['channel_id', '=', channel.id], ['partner_id', '=', partnerId]],
+                ['id']
+              );
+
+              if (members.length > 0) {
+                // Delete the channel member record to leave the channel
+                await client.delete('discuss.channel.member', members[0].id);
+
+                console.log(`✅ Left channel ${channel.name} successfully`);
+
+                // Remove from UI immediately
+                setChannels(prev => prev.filter(ch => ch.id !== channel.id));
+
+                // Show success feedback
+                Alert.alert('Success', `You have left "${channel.name}"`);
+              } else {
+                Alert.alert('Error', 'Channel membership not found');
+              }
+            } catch (error) {
+              console.error('❌ Failed to leave channel:', error);
+              Alert.alert('Error', 'Failed to leave channel');
+            }
+          }
+        }
+      ]
+    );
+  };
+
+  // Legacy function - keeping for compatibility
   const handleFoldChannel = async (channel: any) => {
     try {
       console.log(`📁 Folding channel ${channel.id}: ${channel.name}`);
@@ -1818,7 +2051,7 @@ export default function ChatScreen() {
               <View style={styles.chatInfo}>
                 <View style={styles.chatHeader}>
                   <Text style={styles.chatName} numberOfLines={1}>
-                    {item.name}
+                    {getCleanChannelName(item)}
                   </Text>
                   <Text style={styles.chatTime}>
                     {/* You can add last message time here */}
@@ -1826,12 +2059,7 @@ export default function ChatScreen() {
                   </Text>
                 </View>
                 <Text style={styles.chatPreview} numberOfLines={2}>
-                  {item.channel_type === 'chat'
-                    ? `💬 Direct message`
-                    : item.channel_type === 'channel'
-                    ? `👥 Group chat • ${item.member_count || 0} members`
-                    : `📢 ${item.channel_type || 'Channel'}`
-                  }
+                  {getLastMessagePreview(item)}
                 </Text>
               </View>
 
@@ -2687,6 +2915,32 @@ const styles = StyleSheet.create({
     fontFamily: 'monospace',
   },
 
+  // Swipe action styles
+  swipeActionsContainer: {
+    flexDirection: 'row',
+    height: '100%',
+  },
+  swipeAction: {
+    justifyContent: 'center',
+    alignItems: 'center',
+    width: 70,
+    height: '100%',
+    paddingHorizontal: 8,
+  },
+  hideAction: {
+    backgroundColor: '#FF9500', // Orange for hide
+  },
+  leaveAction: {
+    backgroundColor: '#FF3B30', // Red for leave
+  },
+  swipeActionText: {
+    color: '#FFF',
+    fontSize: 11,
+    fontWeight: '600',
+    marginTop: 2,
+  },
+
+  // Legacy styles (keeping for compatibility)
   leaveChannelButton: {
     backgroundColor: '#FF3B30',
     justifyContent: 'center',
