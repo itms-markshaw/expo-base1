@@ -46,6 +46,7 @@ import { syncService } from '../../base/services/BaseSyncService';
 import { authService } from '../../base/services/BaseAuthService';
 import { ODOO_CONFIG } from '../../../config/odoo';
 import chatService, { ChatChannel, ChatMessage, TypingUser } from '../services/ChatService';
+import { channelMemberService } from '../services/ChannelMemberService';
 import { useAppNavigation } from '../../../components/AppNavigationProvider';
 import { useNavigation } from '@react-navigation/native';
 import { MessageBubble, MentionPicker } from '../../base/components';
@@ -91,6 +92,8 @@ export default function ChatScreen() {
   const { showNavigationDrawer } = useAppNavigation();
   const navigation = useNavigation();
   const [channels, setChannels] = useState<ChatChannel[]>([]);
+  const [allChannels, setAllChannels] = useState<ChatChannel[]>([]); // Store all channels
+  const [showClosedChannels, setShowClosedChannels] = useState(false); // Toggle for closed channels
   const [selectedChannel, setSelectedChannel] = useState<ChatChannel | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [messageText, setMessageText] = useState('');
@@ -134,6 +137,15 @@ export default function ChatScreen() {
     messagesRef.current = messages;
   }, [messages]);
 
+  // Re-filter channels when toggle state changes
+  useEffect(() => {
+    if (allChannels.length > 0) {
+      filterChannelsByFoldState(allChannels).then(filteredChannels => {
+        setChannels(filteredChannels);
+      });
+    }
+  }, [showClosedChannels]);
+
   const flatListRef = useRef<FlatList>(null);
   const textInputRef = useRef<TextInput>(null);
 
@@ -170,6 +182,18 @@ export default function ChatScreen() {
 
         const loadedChannels = chatService.getChannels();
         setChannels(loadedChannels);
+
+        // AUTO-UNFOLD: Check for closed channels and unfold them automatically
+        const closedChannels = loadedChannels.filter(ch => ch.fold_state === 'closed');
+        if (closedChannels.length > 0) {
+          console.log(`📱 🔧 Auto-unfolding ${closedChannels.length} closed channels...`);
+          try {
+            await chatService.unfoldAllClosedChannels();
+            console.log(`📱 ✅ Auto-unfold completed`);
+          } catch (error) {
+            console.warn(`📱 ⚠️ Auto-unfold failed:`, error);
+          }
+        }
 
         // Get current user ID for message bubbles from auth service
         try {
@@ -271,25 +295,63 @@ export default function ChatScreen() {
     });
   };
 
-  const handleChannelsLoaded = (loadedChannels: ChatChannel[]) => {
-    console.log(`📱 ✅ Displaying ${loadedChannels.length} channels instantly`);
-    
+  // Filter channels based on fold state
+  const filterChannelsByFoldState = async (channelsToFilter: ChatChannel[]): Promise<ChatChannel[]> => {
+    if (showClosedChannels) {
+      // Show all channels
+      return channelsToFilter;
+    }
+
+    try {
+      // Get current user's channel memberships to check fold states
+      const memberships = await channelMemberService.getCurrentUserMemberships();
+      const closedChannelIds = new Set(
+        memberships
+          .filter(m => m.fold_state === 'closed')
+          .map(m => m.channel_id)
+      );
+
+      // Filter out closed channels
+      const visibleChannels = channelsToFilter.filter(channel => !closedChannelIds.has(channel.id));
+
+      const hiddenCount = channelsToFilter.length - visibleChannels.length;
+      if (hiddenCount > 0) {
+        console.log(`📱 🔒 Hiding ${hiddenCount} closed channels (${visibleChannels.length} visible)`);
+      }
+
+      return visibleChannels;
+    } catch (error) {
+      console.warn('Failed to filter channels by fold state:', error);
+      // If filtering fails, show all channels
+      return channelsToFilter;
+    }
+  };
+
+  const handleChannelsLoaded = async (loadedChannels: ChatChannel[]) => {
+    console.log(`📱 ✅ Loaded ${loadedChannels.length} channels, filtering by fold state...`);
+
+    // Store all channels
+    setAllChannels(loadedChannels);
+
+    // Filter channels based on fold state
+    const filteredChannels = await filterChannelsByFoldState(loadedChannels);
+
     // If this is the first load (cache), hide main loading but show background refresh
     if (loading) {
       // First load: Cache data - display immediately
-      setChannels(loadedChannels);
+      setChannels(filteredChannels);
       setLoading(false);
       setLoadingFresh(true);
       console.log('📱 Cache loaded - UI ready, fetching fresh data...');
     } else {
       // Fresh data: Only update if significantly different to prevent flickering
       const currentChannels = channels;
-      const isDifferent = loadedChannels.length !== currentChannels.length ||
-                          loadedChannels.some(newCh => !currentChannels.find(oldCh => oldCh.id === newCh.id));
-      
+      const isDifferent = filteredChannels.length !== currentChannels.length ||
+                          filteredChannels.some(newCh => !currentChannels.find(oldCh => oldCh.id === newCh.id));
+
       if (isDifferent) {
-        console.log(`📱 Fresh data different (${currentChannels.length} -> ${loadedChannels.length}), updating...`);
-        setChannels(loadedChannels);
+        console.log(`📱 Fresh data different (${currentChannels.length} -> ${filteredChannels.length}), updating...`);
+        setChannels(filteredChannels);
       } else {
         console.log('📱 Fresh data same as cache, no update needed');
       }
@@ -1072,6 +1134,26 @@ export default function ChatScreen() {
     }
   };
 
+  // Toggle showing closed channels
+  const handleToggleClosedChannels = async () => {
+    try {
+      const newShowClosed = !showClosedChannels;
+      setShowClosedChannels(newShowClosed);
+
+      // Re-filter channels with new setting
+      const filteredChannels = await filterChannelsByFoldState(allChannels);
+      setChannels(filteredChannels);
+
+      if (newShowClosed) {
+        console.log('📱 👁️ Now showing all channels (including closed)');
+      } else {
+        console.log('📱 🔒 Now hiding closed channels');
+      }
+    } catch (error) {
+      console.error('Error toggling closed channels:', error);
+    }
+  };
+
   // Leave channel functionality - PERMANENT (syncs to Odoo)
   const handleLeaveChannel = async (channel: any) => {
     Alert.alert(
@@ -1086,54 +1168,142 @@ export default function ChatScreen() {
             try {
               console.log(`🚪 Leaving channel ${channel.id}: ${channel.name}`);
 
-              // Step 1: Remove from Odoo server (permanent)
+              // Step 1: Remove from Odoo server (permanent) - FIXED
               const client = chatService.getAuthenticatedClient();
               if (client) {
                 try {
-                  // Get current user's partner ID
-                  const authResult = await client.authenticate();
-                  const userData = await client.callModel('res.users', 'read', [authResult.uid], {
-                    fields: ['partner_id']
-                  });
-                  const partnerId = userData[0].partner_id[0];
-
-                  // Find and remove channel membership
-                  const memberIds = await client.callModel('discuss.channel.member', 'search', [
-                    [['channel_id', '=', channel.id], ['partner_id', '=', partnerId]]
-                  ]);
-
-                  if (memberIds.length > 0) {
-                    await client.callModel('discuss.channel.member', 'unlink', [memberIds]);
-                    console.log('✅ Removed from Odoo channel membership');
+                  console.log('🔍 Getting current user partner ID...');
+                  
+                  // Get current user's partner ID with proper error handling
+                  let partnerId;
+                  try {
+                    const authResult = await client.authenticate();
+                    console.log(`👤 Current user ID: ${authResult.uid}`);
+                    
+                    const userData = await client.callModel('res.users', 'read', [authResult.uid], {
+                      fields: ['partner_id']
+                    });
+                    console.log('👤 User data:', userData);
+                    
+                    // Handle different partner_id formats
+                    if (userData && userData.length > 0) {
+                      const partnerIdField = userData[0].partner_id;
+                      if (Array.isArray(partnerIdField) && partnerIdField.length > 0) {
+                        partnerId = partnerIdField[0];
+                      } else if (typeof partnerIdField === 'number') {
+                        partnerId = partnerIdField;
+                      } else if (typeof partnerIdField === 'string') {
+                        // Try to parse XML-RPC format
+                        const match = partnerIdField.match(/<value><int>(\d+)<\/int>/);
+                        if (match) {
+                          partnerId = parseInt(match[1]);
+                        }
+                      }
+                    }
+                    
+                    console.log(`👤 Parsed partner ID: ${partnerId}`);
+                  } catch (userError) {
+                    console.error('❌ Failed to get user partner ID:', userError);
+                    throw userError;
                   }
+
+                  if (!partnerId) {
+                    throw new Error('Could not determine current user partner ID');
+                  }
+
+                  // Method 1: Try to leave channel using channel method (Odoo 18+)
+                  try {
+                    console.log(`🔄 Attempting to leave channel ${channel.id} using channel.leave method...`);
+                    await client.callModel('discuss.channel', 'action_unfollow', [channel.id]);
+                    console.log('✅ Successfully left channel using action_unfollow');
+                  } catch (channelMethodError) {
+                    console.log('⚠️ Channel method failed, trying member removal:', channelMethodError.message);
+                    
+                    // Method 2: Remove channel membership directly
+                    try {
+                      console.log(`🔍 Searching for channel membership for partner ${partnerId} in channel ${channel.id}...`);
+                      const memberIds = await client.callModel('discuss.channel.member', 'search', [
+                        [['channel_id', '=', channel.id], ['partner_id', '=', partnerId]]
+                      ]);
+                      
+                      console.log(`📋 Found ${memberIds.length} memberships:`, memberIds);
+
+                      if (memberIds.length > 0) {
+                        console.log(`🗑️ Removing ${memberIds.length} channel memberships...`);
+                        await client.callModel('discuss.channel.member', 'unlink', [memberIds]);
+                        console.log('✅ Removed from Odoo channel membership via member removal');
+                      } else {
+                        console.log('⚠️ No channel membership found - user may not be a member');
+                      }
+                    } catch (memberError) {
+                      console.error('❌ Member removal also failed:', memberError);
+                      throw memberError;
+                    }
+                  }
+                  
                 } catch (odooError) {
-                  console.log('⚠️ Could not remove from Odoo (offline?):', odooError.message);
+                  console.error('❌ Failed to remove from Odoo server:', odooError);
+                  Alert.alert(
+                    'Server Error', 
+                    `Failed to leave channel on server: ${odooError.message}\n\nThe channel will be removed locally, but you may still appear as a member on the server.`,
+                    [
+                      { text: 'Continue Anyway', onPress: () => {}, style: 'destructive' },
+                      { text: 'Cancel', style: 'cancel' }
+                    ]
+                  );
+                  return; // Don't proceed with local removal if server fails
                 }
+              } else {
+                console.warn('⚠️ No authenticated client - cannot remove from server');
+                Alert.alert(
+                  'Offline Mode',
+                  'Cannot connect to server. The channel will be removed locally only.',
+                  [
+                    { text: 'Continue', onPress: () => {}, style: 'destructive' },
+                    { text: 'Cancel', style: 'cancel' }
+                  ]
+                );
+                return;
               }
 
               // Step 2: Remove from local database
+              console.log('🗑️ Removing from local database...');
               const db = databaseService.getDatabase();
               if (db) {
-                await db.runAsync('DELETE FROM discuss_channel WHERE id = ?', [channel.id]);
-                // Also remove related messages
-                await db.runAsync('DELETE FROM mail_message WHERE res_id = ? AND model = ?',
-                  [channel.id, 'discuss.channel']);
+                try {
+                  await db.runAsync('DELETE FROM discuss_channel WHERE id = ?', [channel.id]);
+                  console.log('✅ Removed channel from local database');
+                  
+                  // Also remove related messages
+                  await db.runAsync('DELETE FROM mail_message WHERE res_id = ? AND model = ?',
+                    [channel.id, 'discuss.channel']);
+                  console.log('✅ Removed related messages from local database');
+                } catch (dbError) {
+                  console.error('❌ Failed to remove from local database:', dbError);
+                  // Continue anyway - UI removal is most important
+                }
               }
 
-              // Step 3: Remove from UI
+              // Step 3: Remove from UI and internal state
+              console.log('🎨 Removing from UI...');
               setChannels(prev => prev.filter(c => c.id !== channel.id));
+              
+              // Remove from ChatService internal state
+              chatService.removeChannel(channel.id);
 
               // If this was the selected channel, clear selection
               if (selectedChannel?.id === channel.id) {
                 setSelectedChannel(null);
                 setMessages([]);
+                console.log('✅ Cleared selected channel');
               }
 
               console.log('✅ Successfully left channel permanently');
+              Alert.alert('Success', `Left channel "${channel.name}" successfully.`);
 
             } catch (error) {
               console.error('❌ Failed to leave channel:', error);
-              Alert.alert('Error', 'Failed to leave channel. Please try again.');
+              Alert.alert('Error', `Failed to leave channel: ${error.message}`);
             }
           }
         }
@@ -1399,6 +1569,20 @@ export default function ChatScreen() {
             {webRTCDetector.getModeDescription()}
           </Text>
         </View>
+
+        {/* Toggle closed channels button - only show when no channel is selected */}
+        {!selectedChannel && (
+          <TouchableOpacity
+            style={[styles.callButton, { backgroundColor: showClosedChannels ? '#FF9500' : '#34C759' }]}
+            onPress={handleToggleClosedChannels}
+          >
+            <MaterialIcons
+              name={showClosedChannels ? "visibility-off" : "visibility"}
+              size={24}
+              color="#FFF"
+            />
+          </TouchableOpacity>
+        )}
 
         {/* Call buttons - only show when a channel is selected */}
         {selectedChannel && (

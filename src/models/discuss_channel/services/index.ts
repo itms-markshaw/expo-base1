@@ -4,6 +4,8 @@
  */
 
 export { chatService } from './ChatService';
+export { channelMemberService } from './ChannelMemberService';
+export { default as webRTCService } from './WebRTCService';
 
 // Re-export base services for convenience
 export {

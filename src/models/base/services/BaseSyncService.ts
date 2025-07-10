@@ -627,7 +627,11 @@ class SyncService {
         lastError: undefined
       });
 
-      console.log(`✅ Synced ${records.length} ${modelName} records (latest: ${latestWriteDate})`);
+      if (records.length === 0) {
+        console.log(`✅ ${modelName}: No new records since last sync`);
+      } else {
+        console.log(`✅ Synced ${records.length} ${modelName} records (latest: ${latestWriteDate})`);
+      }
       return records.length;
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
@@ -1272,8 +1276,10 @@ class SyncService {
       const now = new Date();
       const timeDiff = Math.round((now.getTime() - lastSyncTime.getTime()) / 1000 / 60); // minutes
       console.log(`🔄 ${modelName}: incremental sync (${timeDiff}min ago)`);
+      console.log(`📅 Last sync write_date: ${syncMetadata.last_sync_write_date}`);
 
-      const domain = [['write_date', '>=', syncMetadata.last_sync_write_date]];
+      // FIXED: Use '>' instead of '>=' to avoid re-syncing same records
+      const domain = [['write_date', '>', syncMetadata.last_sync_write_date]];
 
       // Add model-specific filters
       const modelSpecificFilters = this.getModelSpecificFilters(modelName);

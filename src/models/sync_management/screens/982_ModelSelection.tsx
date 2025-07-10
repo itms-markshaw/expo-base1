@@ -74,6 +74,14 @@ const MODEL_TEMPLATES: ModelTemplate[] = [
         required: true
       },
       {
+        name: 'discuss.channel.member',
+        displayName: 'Channel Memberships',
+        description: 'User memberships and channel visibility settings',
+        syncMode: 'all',
+        required: true,
+        dependencies: ['discuss.channel']
+      },
+      {
         name: 'mail.message',
         displayName: 'Messages',
         description: 'Chat messages and conversations',

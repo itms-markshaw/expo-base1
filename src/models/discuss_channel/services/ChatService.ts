@@ -37,6 +37,7 @@ export interface ChatChannel {
   is_pinned?: boolean;
   is_minimized?: boolean;
   state?: 'open' | 'folded' | 'closed';
+  fold_state?: 'open' | 'folded' | 'closed';
   // Odoo 18 specific fields
   uuid?: string;
   is_member?: boolean;
@@ -731,6 +732,8 @@ class ChatService {
 
               return isActive;
             });
+
+            // Note: fold_state is handled via discuss.channel.member, not discuss.channel
 
             if (channels.length !== originalCount) {
               console.log(`📱 Filtered to ${channels.length} active channels (was ${originalCount})`);
@@ -1554,6 +1557,21 @@ class ChatService {
   }
 
   /**
+   * Remove a channel from internal state (for leave functionality)
+   */
+  removeChannel(channelId: number): void {
+    this.currentChannels.delete(channelId);
+    this.channelMessages.delete(channelId);
+    this.lastRenderedMessages.delete(channelId);
+    this.typingUsers.delete(channelId);
+    
+    // Unsubscribe from longpolling
+    this.unsubscribeFromChannel(channelId);
+    
+    console.log(`🗑️ Removed channel ${channelId} from ChatService internal state`);
+  }
+
+  /**
    * Get service status
    */
   getStatus() {
@@ -1562,6 +1580,61 @@ class ChatService {
       channelCount: this.currentChannels.size,
       longpollingStatus: longpollingService.getStatus()
     };
+  }
+
+  /**
+   * Unfold a channel (change fold_state from 'closed' to 'open')
+   */
+  async unfoldChannel(channelId: number): Promise<boolean> {
+    try {
+      console.log(`📱 🔧 Unfolding channel ${channelId}...`);
+
+      const client = await xmlrpcService.getClient();
+
+      // Update the channel's fold_state to 'open'
+      await client.execute(
+        'discuss.channel',
+        'write',
+        [channelId],
+        { fold_state: 'open' }
+      );
+
+      console.log(`📱 ✅ Successfully unfolded channel ${channelId}`);
+      return true;
+    } catch (error) {
+      console.error(`📱 ❌ Failed to unfold channel ${channelId}:`, error);
+      return false;
+    }
+  }
+
+  /**
+   * Unfold all closed channels for the current user
+   */
+  async unfoldAllClosedChannels(): Promise<void> {
+    try {
+      console.log(`📱 🔧 Unfolding all closed channels...`);
+
+      const channels = Array.from(this.currentChannels.values());
+      const closedChannels = channels.filter(ch => ch.fold_state === 'closed');
+
+      if (closedChannels.length === 0) {
+        console.log(`📱 ℹ️ No closed channels to unfold`);
+        return;
+      }
+
+      console.log(`📱 🔧 Found ${closedChannels.length} closed channels to unfold`);
+
+      for (const channel of closedChannels) {
+        await this.unfoldChannel(channel.id);
+      }
+
+      // Refresh channels after unfolding
+      console.log(`📱 🔄 Refreshing channels after unfolding...`);
+      await this.loadChannels();
+
+    } catch (error) {
+      console.error(`📱 ❌ Failed to unfold closed channels:`, error);
+    }
   }
 
   /**

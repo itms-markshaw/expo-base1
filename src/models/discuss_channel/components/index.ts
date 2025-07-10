@@ -4,3 +4,4 @@
  */
 
 export { default as ChannelMembersModal } from './ChannelMembersModal';
+export { default as IncomingWebRTCCallModal } from './IncomingWebRTCCallModal';
