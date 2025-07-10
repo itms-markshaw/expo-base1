@@ -54,6 +54,7 @@ import { useNavigation } from '@react-navigation/native';
 import { MessageBubble, MentionPicker } from '../../base/components';
 import { ChannelMembersModal } from '../components';
 import ScreenBadge from '../../../components/ScreenBadge';
+import ChannelFilterSheet, { ChannelFilters } from '../../base/components/BC-C155_ChannelFilterSheet';
 import attachmentUploadService, { AttachmentUpload, UploadProgress } from '../../base/services/BC-S008_AttachmentUploadService';
 import { callService } from '../../base/services/BC-S010_CallService';
 import webRTCSignalingTestService from '../../base/services/BC-S013_WebRTCSignalingTest';
@@ -125,6 +126,20 @@ export default function ChatScreen() {
   const [selectedImageUri, setSelectedImageUri] = useState<string>('');
   const [selectedImageName, setSelectedImageName] = useState<string>('');
 
+  // Filter state
+  const [showFilterSheet, setShowFilterSheet] = useState(false);
+  const [channelFilters, setChannelFilters] = useState<ChannelFilters>({
+    groupBy: 'type',
+    sortBy: 'activity',
+    sortOrder: 'desc',
+    showDirectMessages: true,
+    showChannels: true,
+    showClosedChannels: false,
+    showFoldedChannels: false,
+    showEmptyChannels: true,
+    showArchivedChannels: false,
+  });
+
   // Use refs to access current values in event listeners
   const selectedChannelRef = useRef<ChatChannel | null>(null);
   const messagesRef = useRef<ChatMessage[]>([]);
@@ -138,14 +153,14 @@ export default function ChatScreen() {
     messagesRef.current = messages;
   }, [messages]);
 
-  // Re-filter channels when toggle state changes
+  // Re-filter channels when toggle state or filters change
   useEffect(() => {
     if (allChannels.length > 0) {
-      filterChannelsByFoldState(allChannels).then(filteredChannels => {
-        setChannels(filteredChannels);
+      filterChannelsByFoldState(allChannels).then(foldStateFiltered => {
+        applyFilters(foldStateFiltered, channelFilters);
       });
     }
-  }, [showClosedChannels]);
+  }, [showClosedChannels, channelFilters]);
 
   const flatListRef = useRef<FlatList>(null);
   const textInputRef = useRef<TextInput>(null);
@@ -185,8 +200,8 @@ export default function ChatScreen() {
         setAllChannels(loadedChannels);
 
         // Filter channels immediately on initial load
-        const filteredChannels = await filterChannelsByFoldState(loadedChannels);
-        setChannels(filteredChannels);
+        const foldStateFiltered = await filterChannelsByFoldState(loadedChannels);
+        applyFilters(foldStateFiltered, channelFilters);
 
         // AUTO-UNFOLD: Check for closed channels and unfold them automatically
         const closedChannels = loadedChannels.filter(ch => ch.fold_state === 'closed');
@@ -1500,6 +1515,58 @@ export default function ChatScreen() {
     );
   };
 
+  // Filter functions
+  const handleFiltersChange = (newFilters: ChannelFilters) => {
+    setChannelFilters(newFilters);
+    applyFilters(allChannels, newFilters);
+  };
+
+  const applyFilters = (channelsToFilter: ChatChannel[], filters: ChannelFilters) => {
+    let filteredChannels = [...channelsToFilter];
+
+    // Apply visibility filters
+    filteredChannels = filteredChannels.filter(channel => {
+      // Filter by channel type
+      if (channel.channel_type === 'chat' && !filters.showDirectMessages) return false;
+      if (channel.channel_type === 'channel' && !filters.showChannels) return false;
+
+      // Filter by status (if these fields exist)
+      if (!filters.showClosedChannels && channel.fold_state === 'closed') return false;
+      if (!filters.showFoldedChannels && channel.fold_state === 'folded') return false;
+
+      // Filter empty channels
+      if (!filters.showEmptyChannels && (channel.member_count || 0) === 0) return false;
+
+      return true;
+    });
+
+    // Apply sorting
+    filteredChannels.sort((a, b) => {
+      let comparison = 0;
+
+      switch (filters.sortBy) {
+        case 'name':
+          comparison = a.name.localeCompare(b.name);
+          break;
+        case 'activity':
+          // Sort by last message time (placeholder for now)
+          comparison = 0;
+          break;
+        case 'members':
+          comparison = (a.member_count || 0) - (b.member_count || 0);
+          break;
+        case 'unread':
+          // Sort by unread count (placeholder for now)
+          comparison = 0;
+          break;
+      }
+
+      return filters.sortOrder === 'desc' ? -comparison : comparison;
+    });
+
+    setChannels(filteredChannels);
+  };
+
   const renderMessage = ({ item, index }: { item: ChatMessage; index: number }) => {
     const previousMessage = index > 0 ? messages[index - 1] : undefined;
     const nextMessage = index < messages.length - 1 ? messages[index + 1] : undefined;
@@ -1615,14 +1682,22 @@ export default function ChatScreen() {
           )}
         </View>
 
-        {/* Chat Settings button - only show when no channel is selected */}
+        {/* Filter and Settings buttons - only show when no channel is selected */}
         {!selectedChannel && (
-          <TouchableOpacity
-            style={[styles.callButton, { backgroundColor: '#8E8E93' }]}
-            onPress={() => navigation.navigate('ChatSettings')}
-          >
-            <MaterialIcons name="settings" size={24} color="#FFF" />
-          </TouchableOpacity>
+          <View style={styles.callButtons}>
+            <TouchableOpacity
+              style={[styles.callButton, { backgroundColor: '#007AFF' }]}
+              onPress={() => setShowFilterSheet(true)}
+            >
+              <MaterialIcons name="filter-list" size={24} color="#FFF" />
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.callButton, { backgroundColor: '#8E8E93' }]}
+              onPress={() => navigation.navigate('ChatSettings')}
+            >
+              <MaterialIcons name="settings" size={24} color="#FFF" />
+            </TouchableOpacity>
+          </View>
         )}
 
         {/* Call buttons - only show when a channel is selected */}
@@ -2091,6 +2166,13 @@ export default function ChatScreen() {
         </View>
       )}
 
+      {/* Channel Filter Sheet */}
+      <ChannelFilterSheet
+        isVisible={showFilterSheet}
+        onClose={() => setShowFilterSheet(false)}
+        currentFilters={channelFilters}
+        onFiltersChange={handleFiltersChange}
+      />
 
     </SafeAreaView>
     </GestureHandlerRootView>
