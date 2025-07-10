@@ -101,12 +101,6 @@ export default function ChatScreen() {
   const [messageText, setMessageText] = useState('');
   const [loading, setLoading] = useState(true);
   const [loadingFresh, setLoadingFresh] = useState(false);
-
-  // Debug loading state changes
-  useEffect(() => {
-    const timestamp = new Date().toISOString().split('T')[1].split('.')[0];
-    console.log(`📱 🔄 [${timestamp}] LOADING STATE: loading=${loading}, loadingFresh=${loadingFresh}`);
-  }, [loading, loadingFresh]);
   const [isInitialLoad, setIsInitialLoad] = useState(true);
   const [sending, setSending] = useState(false);
   const [typingUsers, setTypingUsers] = useState<TypingUser[]>([]);
@@ -131,10 +125,6 @@ export default function ChatScreen() {
   const [showImageViewer, setShowImageViewer] = useState(false);
   const [selectedImageUri, setSelectedImageUri] = useState<string>('');
   const [selectedImageName, setSelectedImageName] = useState<string>('');
-
-  // Prevent rapid channel updates
-  const lastChannelUpdateRef = useRef<number>(0);
-  const channelUpdateTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   // Filter state
   const [showFilterSheet, setShowFilterSheet] = useState(false);
@@ -424,54 +414,35 @@ export default function ChatScreen() {
     return filteredChannels;
   };
 
-  const handleChannelsLoaded = async (loadedChannels: ChatChannel[]) => {
-    const now = Date.now();
-    const timeSinceLastUpdate = now - lastChannelUpdateRef.current;
+  const handleChannelsLoaded = (loadedChannels: ChatChannel[]) => {
+    console.log(`📱 ✅ handleChannelsLoaded called with ${loadedChannels.length} channels`);
 
-    console.log(`📱 ✅ handleChannelsLoaded called with ${loadedChannels.length} channels (${timeSinceLastUpdate}ms since last)`);
-    console.log(`📱 📋 Channel names: ${loadedChannels.map(ch => ch.name).join(', ')}`);
+    // Apply filters directly
+    console.log(`📱 🔄 Applying filters to ${loadedChannels.length} channels`);
+    let filteredChannels = [...loadedChannels];
 
-    // Clear any pending timeout
-    if (channelUpdateTimeoutRef.current) {
-      clearTimeout(channelUpdateTimeoutRef.current);
+    // Apply channel type filters
+    filteredChannels = filteredChannels.filter(channel => {
+      if (channel.channel_type === 'chat' && !channelFilters.showDirectMessages) return false;
+      if (channel.channel_type === 'channel' && !channelFilters.showChannels) return false;
+      return true;
+    });
+
+    console.log(`📱 🔄 FILTERED: ${loadedChannels.length} -> ${filteredChannels.length} channels`);
+
+    // Update states
+    setAllChannels(loadedChannels);
+    setChannels(filteredChannels);
+
+    // Update loading states
+    if (loading) {
+      setLoading(false);
+      setLoadingFresh(true);
+      console.log('📱 Cache-like data loaded - UI ready, fetching fresh if needed...');
+    } else {
+      setLoadingFresh(false);
+      console.log('📱 ✅ Final data loaded - UI updated!');
     }
-
-    // Debounce rapid updates - only process the latest one
-    channelUpdateTimeoutRef.current = setTimeout(() => {
-      console.log(`📱 🔄 Processing channel update (${loadedChannels.length} channels)`);
-
-      // Apply filters directly here to avoid useEffect conflicts
-      let filteredChannels = [...loadedChannels];
-
-      // Apply channel type filters (direct messages vs groups)
-      filteredChannels = filteredChannels.filter(channel => {
-        if (channel.channel_type === 'chat' && !channelFilters.showDirectMessages) return false;
-        if (channel.channel_type === 'channel' && !channelFilters.showChannels) return false;
-        return true;
-      });
-
-      console.log(`📱 🔄 FILTERED: ${loadedChannels.length} -> ${filteredChannels.length} channels`);
-      console.log(`📱 📋 Filtered names: ${filteredChannels.map(ch => ch.name).join(', ')}`);
-
-      // Store all channels (unfiltered) and set UI channels (filtered)
-      setAllChannels(loadedChannels);
-      setChannels(filteredChannels);
-      console.log(`📱 ✅ UI CHANNELS SET TO: ${filteredChannels.length} channels`);
-
-      lastChannelUpdateRef.current = Date.now();
-
-      // Update loading states
-      if (loading) {
-        setLoading(false);
-        setLoadingFresh(true);
-        console.log('📱 Cache loaded - UI ready, fetching fresh data...');
-      } else {
-        setLoadingFresh(false);
-        console.log('📱 ✅ Fresh data loaded - UI updated!');
-      }
-    }, 100); // 100ms debounce
-
-    // Don't auto-select - let user choose from list
   };
 
   const handleMessagesLoaded = ({ channelId, messages: loadedMessages }: { channelId: number; messages: ChatMessage[] }) => {

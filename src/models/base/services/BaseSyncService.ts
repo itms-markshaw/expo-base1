@@ -622,6 +622,30 @@ class SyncService {
       // Save to database
       await databaseService.saveRecords(tableName, records);
 
+      // Cleanup stale records for specific models
+      if (['discuss.channel', 'discuss.channel.member'].includes(modelName)) {
+        try {
+          const db = databaseService.getDatabase();
+          if (db) {
+            const serverIds = records.map(record => record.id);
+
+            if (serverIds.length > 0) {
+              const placeholders = serverIds.map(() => '?').join(',');
+              await db.runAsync(
+                `DELETE FROM ${tableName} WHERE id NOT IN (${placeholders})`,
+                serverIds
+              );
+              console.log(`🧹 Cleaned up stale records for ${modelName}: kept ${serverIds.length}`);
+            } else {
+              await db.runAsync(`DELETE FROM ${tableName}`);
+              console.log(`🧹 Cleared all records for ${modelName} (no server data)`);
+            }
+          }
+        } catch (cleanupError) {
+          console.warn(`⚠️ Failed to cleanup stale records for ${modelName}:`, cleanupError);
+        }
+      }
+
       // INCREMENTAL SYNC: Update sync metadata with latest write_date
       const latestWriteDate = this.getLatestWriteDate(records);
       await databaseService.updateSyncMetadata(modelName, {

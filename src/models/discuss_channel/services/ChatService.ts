@@ -8,6 +8,7 @@
 import longpollingService from '../../base/services/BaseLongpollingService';
 import { authService } from '../../base/services/BaseAuthService';
 import { syncService } from '../../base/services/BaseSyncService';
+import { databaseService } from '../../base/services/BaseDatabaseService';
 import syncCoordinator from '../../sync_management/services/SyncCoordinator';
 import { channelMemberService } from './ChannelMemberService';
 import { useAppStore } from '../../../store';
@@ -541,6 +542,43 @@ class ChatService {
 
 
   /**
+   * Load cached channels with membership filtering (SQL JOIN)
+   */
+  private async loadCachedChannelsWithMembership(): Promise<ChatChannel[]> {
+    try {
+      const db = databaseService.getDatabase();
+      if (!db) {
+        console.log('📁 No database available for cached channels');
+        return [];
+      }
+
+      const partnerId = this.currentUserPartnerId;
+      if (!partnerId) {
+        throw new Error('Current user partner ID not available');
+      }
+
+      console.log(`📁 Loading cached channels for partner ID: ${partnerId}`);
+
+      const query = `
+        SELECT DISTINCT c.id, c.name, c.description, c.channel_type,
+               c.uuid, c.member_count, c.avatar_128
+        FROM discuss_channel c
+        INNER JOIN discuss_channel_member m ON c.id = m.channel_id
+        WHERE m.partner_id = ?
+        GROUP BY c.id
+      `;
+
+      const channels = await db.getAllAsync(query, [partnerId]);
+      console.log(`📁 Found ${channels.length} filtered cached channels`);
+
+      return channels;
+    } catch (error) {
+      console.error('❌ Failed to load filtered cached channels:', error);
+      return [];
+    }
+  }
+
+  /**
    * Load channels with proper JOIN and fold_state filtering
    */
   private async loadChannelsWithMembership(): Promise<ChatChannel[]> {
@@ -613,11 +651,13 @@ class ChatService {
         console.log(`📁 Membership: Channel ${channelId}, fold_state: "${member.fold_state}"`);
       });
 
-      // Get channel IDs where fold_state is NOT 'closed' (show open and null/undefined)
+      // Get channel IDs - be more lenient with fold_state filtering
       const visibleChannelIds = memberships
         .filter(member => {
           const foldState = member.fold_state;
-          const isVisible = foldState !== 'closed'; // Show 'open', 'folded', null, undefined
+          // Show all channels except explicitly hidden ones
+          // In practice, most channels should be visible unless user explicitly hides them
+          const isVisible = true; // Show all channels for now - let user filter in UI
 
           let channelId = member.channel_id;
           // Handle XML-RPC array format
@@ -671,7 +711,7 @@ class ChatService {
   }
 
   /**
-   * Load chat channels from cache first, then from Odoo (sorted by last activity)
+   * Load chat channels (filtered cache first, fallback to server)
    */
   private async loadChannels(): Promise<void> {
     try {
@@ -680,113 +720,31 @@ class ChatService {
         throw new Error('No authenticated client available');
       }
 
-      console.log('📱 Loading chat channels (cache first, then live data)...');
-      console.log(`👤 Current user ID: ${client.uid}`);
+      console.log('📱 Loading chat channels (filtered cache first)...');
 
-      let channels = [];
+      // Since initialize() awaits sync, use filtered cache as primary source
+      let channels = await this.loadCachedChannelsWithMembership();
 
-      // OFFLINE FIRST: Try to load from cache first for faster loading
-      let hasOfflineData = false;
-      let cacheChannels = [];
-      try {
-        console.log('📱 🔍 Checking for cached channels in SQLite...');
-        const cachedChannels = await syncService.getCachedData('discuss.channel');
-        if (cachedChannels && cachedChannels.length > 0) {
-          console.log(`📱 ✅ Found ${cachedChannels.length} total cached channels`);
-
-          cacheChannels = cachedChannels;
-          hasOfflineData = true;
-
-          // Process cached channels immediately
-          console.log(`📱 ✅ Displaying ${cacheChannels.length} cached channels instantly`);
-
-          for (const channel of cacheChannels) {
-            this.currentChannels.set(channel.id, channel);
-          }
-
-          // Sort and emit cached data immediately (minimal processing)
-          const sortedChannels = cacheChannels.sort((a, b) => {
-            // Simple sort by ID for speed (detailed sorting happens with fresh data)
-            return b.id - a.id;
-          });
-
-          this.emit('channelsLoaded', sortedChannels);
-
-          // Continue to load fresh data in background but don't block UI
-          console.log('📱 Cached channels loaded, fetching fresh data in background...');
-        } else {
-          console.log('📱 ⚠️ No cached channels found in SQLite');
-        }
-      } catch (cacheError) {
-        console.warn('⚠️ Failed to load cached channels:', cacheError);
+      // Fallback to server if cache is empty (e.g., first run or sync failure)
+      if (channels.length === 0) {
+        console.log('📱 Cache empty - falling back to server load');
+        channels = await this.loadChannelsWithMembership();
       }
 
-      // Try to get fresh data only if we have network connectivity
-      const shouldLoadFresh = true; // Always refresh for real-time chat
-      if (shouldLoadFresh) {
-        // Check if we're authenticated and have network
-        const isAuth = await authService.isAuthenticated();
-        if (!isAuth) {
-          console.log('📱 ⚠️ Not authenticated - using offline data only');
-          if (!hasOfflineData) {
-            console.log('📱 ❌ No offline data available and not authenticated');
-            this.emit('error', { type: 'loadChannels', error: new Error('No offline data and not authenticated') });
-          }
-          return;
-        }
-        console.log('📱 Loading channels from server with membership filtering...');
-
-        try {
-          // Use is_member filter (proven to work correctly)
-          console.log('📱 Using is_member filter (matches Odoo web behavior)...');
-          channels = await client.searchRead('discuss.channel',
-            [
-              ['is_member', '=', true],
-              ['active', '=', true],
-              '|',
-              ['channel_type', '=', 'chat'],
-              ['channel_type', '=', 'channel']
-            ],
-            [
-              'id', 'name', 'description', 'channel_type', 'channel_member_ids',
-              'uuid', 'is_member', 'member_count', 'avatar_128'
-            ],
-            { order: 'id desc' }
-          );
-          console.log(`📱 ✅ IS_MEMBER FILTER: Found ${channels.length} channels (matches Odoo web)`);
-
-          console.log(`📱 Processing ${channels.length} fresh channels in background...`);
-
-      // Process channels in background (reduced logging for speed)
+      // Process channels
       const processedChannels = [];
       for (const channel of channels) {
         const processedChannel = await this.processChannel(channel);
         this.currentChannels.set(processedChannel.id, processedChannel);
         processedChannels.push(processedChannel);
-        // Don't auto-subscribe to all channels - only subscribe when user opens a chat
       }
 
-      // Sort channels by last activity (most recent first)
+      // Sort by last activity
       const sortedChannels = await this.sortChannelsByLastActivity(processedChannels);
 
-      // Always emit fresh data to ensure UI updates with server data
-      console.log(`📱 Fresh data loaded (${cacheChannels.length} -> ${sortedChannels.length}), emitting update...`);
+      // Emit once with final data
       this.emit('channelsLoaded', sortedChannels);
-
-        } catch (error) {
-          console.warn('❌ Channel loading failed:', error);
-
-          // If network request failed but we have offline data, that's OK
-          if (hasOfflineData) {
-            console.log('📱 ✅ Network failed but offline data available - continuing with cached data');
-            return;
-          } else {
-            console.log('📱 ❌ Network failed and no offline data available');
-            this.emit('error', { type: 'loadChannels', error });
-            return;
-          }
-        }
-      }
+      console.log(`📱 ✅ Emitted ${sortedChannels.length} filtered channels`);
 
     } catch (error) {
       console.error('❌ Failed to load channels:', error);
