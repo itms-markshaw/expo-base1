@@ -21,13 +21,14 @@ export default function SettingsMainScreen({ navigation }: any) {
   const navigateToCategory = (screenNumber: string) => {
     const screenMap: { [key: string]: string } = {
       '902': 'AccountSettings',
-      '903': 'ServerSettings', 
+      '903': 'ServerSettings',
       '904': 'NotificationSettings',
       '905': 'PrivacySettings',
       '906': 'AppearanceSettings',
       '907': 'SyncPreferences',
+      '152': 'ChatSettings',
     };
-    
+
     const screenName = screenMap[screenNumber];
     if (screenName) {
       navigation.navigate(screenName);
@@ -41,6 +42,13 @@ export default function SettingsMainScreen({ navigation }: any) {
       description: 'User profile and account preferences',
       icon: 'account-circle',
       color: '#007AFF',
+    },
+    {
+      id: '152',
+      title: 'Chat Settings',
+      description: 'Chat channels and messaging preferences',
+      icon: 'chat',
+      color: '#00BCD4',
     },
     {
       id: '904',

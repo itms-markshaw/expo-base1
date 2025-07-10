@@ -24,6 +24,9 @@ import {
   ActionSheetIOS,
   Animated,
   Image,
+  Modal,
+  Switch,
+  ScrollView,
 } from 'react-native';
 import { Swipeable, GestureHandlerRootView } from 'react-native-gesture-handler';
 import { MaterialIcons } from '@expo/vector-icons';
@@ -47,7 +50,6 @@ import { authService } from '../../base/services/BaseAuthService';
 import { ODOO_CONFIG } from '../../../config/odoo';
 import chatService, { ChatChannel, ChatMessage, TypingUser } from '../services/ChatService';
 import { channelMemberService } from '../services/ChannelMemberService';
-import { useAppNavigation } from '../../../components/AppNavigationProvider';
 import { useNavigation } from '@react-navigation/native';
 import { MessageBubble, MentionPicker } from '../../base/components';
 import { ChannelMembersModal } from '../components';
@@ -89,7 +91,6 @@ interface OfflineMessage {
 // Removed unused SCREEN_WIDTH
 
 export default function ChatScreen() {
-  const { showNavigationDrawer } = useAppNavigation();
   const navigation = useNavigation();
   const [channels, setChannels] = useState<ChatChannel[]>([]);
   const [allChannels, setAllChannels] = useState<ChatChannel[]>([]); // Store all channels
@@ -181,7 +182,11 @@ export default function ChatScreen() {
         await callService.initialize();
 
         const loadedChannels = chatService.getChannels();
-        setChannels(loadedChannels);
+        setAllChannels(loadedChannels);
+
+        // Filter channels immediately on initial load
+        const filteredChannels = await filterChannelsByFoldState(loadedChannels);
+        setChannels(filteredChannels);
 
         // AUTO-UNFOLD: Check for closed channels and unfold them automatically
         const closedChannels = loadedChannels.filter(ch => ch.fold_state === 'closed');
@@ -299,63 +304,64 @@ export default function ChatScreen() {
   const filterChannelsByFoldState = async (channelsToFilter: ChatChannel[]): Promise<ChatChannel[]> => {
     if (showClosedChannels) {
       // Show all channels
+      console.log(`📱 👁️ Showing all ${channelsToFilter.length} channels (including closed)`);
       return channelsToFilter;
     }
 
-    try {
-      // Get current user's channel memberships to check fold states
-      const memberships = await channelMemberService.getCurrentUserMemberships();
-      const closedChannelIds = new Set(
-        memberships
-          .filter(m => m.fold_state === 'closed')
-          .map(m => m.channel_id)
-      );
+    // SIMPLE FILTERING: Hide channels with specific patterns or names
+    // This is a temporary solution until discuss.channel.member sync works
+    const channelsToHide = [
+      '411-a', '411'  // Hide these specific channels for now
+    ];
 
-      // Filter out closed channels
-      const visibleChannels = channelsToFilter.filter(channel => !closedChannelIds.has(channel.id));
+    const visibleChannels = channelsToFilter.filter(channel => {
+      const shouldHide = channelsToHide.includes(channel.name) ||
+                        channel.name?.includes('test-') ||
+                        (channel.channel_type === 'channel' && channel.name?.startsWith('411'));
+      return !shouldHide;
+    });
 
-      const hiddenCount = channelsToFilter.length - visibleChannels.length;
-      if (hiddenCount > 0) {
-        console.log(`📱 🔒 Hiding ${hiddenCount} closed channels (${visibleChannels.length} visible)`);
-      }
-
-      return visibleChannels;
-    } catch (error) {
-      console.warn('Failed to filter channels by fold state:', error);
-      // If filtering fails, show all channels
-      return channelsToFilter;
+    const hiddenCount = channelsToFilter.length - visibleChannels.length;
+    if (hiddenCount > 0) {
+      console.log(`📱 🔒 SIMPLE FILTER: Hiding ${hiddenCount} channels (${visibleChannels.length} visible)`);
+      console.log(`📱 🔒 Hidden channels: ${channelsToFilter.filter(c => !visibleChannels.includes(c)).map(c => c.name).join(', ')}`);
+    } else {
+      console.log(`📱 ✅ No channels to hide with simple filter (${visibleChannels.length} visible)`);
     }
+
+    return visibleChannels;
   };
 
   const handleChannelsLoaded = async (loadedChannels: ChatChannel[]) => {
-    console.log(`📱 ✅ Loaded ${loadedChannels.length} channels, filtering by fold state...`);
+    console.log(`📱 ✅ Loaded ${loadedChannels.length} channels`);
 
     // Store all channels
     setAllChannels(loadedChannels);
 
-    // Filter channels based on fold state
-    const filteredChannels = await filterChannelsByFoldState(loadedChannels);
+    // Filter out closed channels by default (simple UI filtering)
+    const openChannels = await filterChannelsByFoldState(loadedChannels);
+    console.log(`📱 🔒 Showing ${openChannels.length} open channels (${loadedChannels.length - openChannels.length} closed channels hidden)`);
 
     // If this is the first load (cache), hide main loading but show background refresh
     if (loading) {
       // First load: Cache data - display immediately
-      setChannels(filteredChannels);
+      setChannels(openChannels);
       setLoading(false);
       setLoadingFresh(true);
       console.log('📱 Cache loaded - UI ready, fetching fresh data...');
     } else {
       // Fresh data: Only update if significantly different to prevent flickering
       const currentChannels = channels;
-      const isDifferent = filteredChannels.length !== currentChannels.length ||
-                          filteredChannels.some(newCh => !currentChannels.find(oldCh => oldCh.id === newCh.id));
+      const isDifferent = openChannels.length !== currentChannels.length ||
+                          openChannels.some(newCh => !currentChannels.find(oldCh => oldCh.id === newCh.id));
 
       if (isDifferent) {
-        console.log(`📱 Fresh data different (${currentChannels.length} -> ${filteredChannels.length}), updating...`);
-        setChannels(filteredChannels);
+        console.log(`📱 Fresh data different (${currentChannels.length} -> ${openChannels.length}), updating...`);
+        setChannels(openChannels);
       } else {
         console.log('📱 Fresh data same as cache, no update needed');
       }
-      
+
       setLoadingFresh(false);
       console.log('📱 Fresh data loaded - all done!');
     }
@@ -870,11 +876,12 @@ export default function ChatScreen() {
 
     // Handle different attachment types
     if (attachment?.mimetype?.startsWith('image/')) {
-      // Open image in full screen viewer
-      const imageUri = attachment.url || attachment.uri || `${ODOO_CONFIG.url}/web/content/${attachmentId}`;
-      setSelectedImageUri(imageUri);
-      setSelectedImageName(filename);
-      setShowImageViewer(true);
+      // Open image in full screen viewer - download first for better reliability
+      console.log('🖼️ Opening image for attachment:', attachmentId);
+      console.log('🖼️ Attachment details:', attachment);
+
+      // Download the image first to ensure it displays properly
+      downloadImageForViewer(attachmentId, filename, attachment);
     } else {
       // Handle other file types - show download option
       Alert.alert(
@@ -912,8 +919,8 @@ export default function ChatScreen() {
         return;
       }
 
-      // Get attachment URL
-      const attachmentUrl = attachment.url || attachment.uri || `${ODOO_CONFIG.url}/web/content/${attachmentId}`;
+      // Get attachment URL - use web/content for downloads to get original file
+      const attachmentUrl = attachment.url || attachment.uri || `${ODOO_CONFIG.baseURL}/web/content/${attachmentId}`;
 
       // Download to cache directory first
       const downloadResult = await FileSystem.downloadAsync(
@@ -940,6 +947,101 @@ export default function ChatScreen() {
     } catch (error) {
       console.error('❌ Download failed:', error);
       Alert.alert('Download Error', 'Failed to download attachment. Please try again.');
+    }
+  };
+
+  const shareAttachment = async (attachmentId: number, filename: string, attachment: any) => {
+    try {
+      console.log('📤 Starting share for:', filename);
+
+      // Check if required packages are available
+      if (!FileSystem || !Sharing) {
+        Alert.alert('Feature not available', 'Share functionality is not available in this build.');
+        return;
+      }
+
+      // Get attachment URL
+      const attachmentUrl = attachment.url || attachment.uri || `${ODOO_CONFIG.baseURL}/web/content/${attachmentId}`;
+
+      // Download to cache directory first
+      const downloadResult = await FileSystem.downloadAsync(
+        attachmentUrl,
+        FileSystem.cacheDirectory + filename
+      );
+
+      if (downloadResult.status === 200) {
+        // Share the file
+        if (await Sharing.isAvailableAsync()) {
+          await Sharing.shareAsync(downloadResult.uri, {
+            mimeType: attachment.mimetype || 'application/octet-stream',
+            dialogTitle: `Share ${filename}`,
+          });
+        } else {
+          Alert.alert('Share not available', 'Sharing is not available on this device.');
+        }
+      } else {
+        throw new Error('Download failed');
+      }
+    } catch (error) {
+      console.error('❌ Share failed:', error);
+      Alert.alert('Share Error', 'Failed to share attachment. Please try again.');
+    }
+  };
+
+  const downloadImageForViewer = async (attachmentId: number, filename: string, attachment: any) => {
+    try {
+      console.log('🖼️ Downloading image for viewer:', filename);
+
+      // Use the authenticated attachment service
+      const client = chatService.getAuthenticatedClient();
+      if (!client) {
+        throw new Error('No authenticated client available');
+      }
+
+      // Get attachment data via authenticated XML-RPC
+      const attachmentData = await client.callModel('ir.attachment', 'read', [attachmentId], {
+        fields: ['datas']
+      });
+
+      if (!attachmentData || attachmentData.length === 0 || !attachmentData[0].datas) {
+        throw new Error('No attachment data received');
+      }
+
+      const base64Data = attachmentData[0].datas;
+      console.log(`✅ Retrieved ${base64Data.length} characters of base64 data via XML-RPC`);
+
+      // Check if FileSystem is available
+      if (!FileSystem) {
+        // Create data URI for direct display
+        const mimeType = attachment.mimetype || 'image/png';
+        const dataUri = `data:${mimeType};base64,${base64Data}`;
+        setSelectedImageUri(dataUri);
+        setSelectedImageName(filename);
+        setShowImageViewer(true);
+        console.log('✅ Using data URI for image display');
+        return;
+      }
+
+      // Save to cache directory
+      const localPath = FileSystem.cacheDirectory + `image_${attachmentId}_${filename}`;
+      await FileSystem.writeAsStringAsync(localPath, base64Data, {
+        encoding: FileSystem.EncodingType.Base64,
+      });
+
+      // Use the local file URI for the viewer
+      setSelectedImageUri(localPath);
+      setSelectedImageName(filename);
+      setShowImageViewer(true);
+      console.log('✅ Image downloaded and cached successfully for viewer');
+
+    } catch (error) {
+      console.error('❌ Image download for viewer failed:', error);
+      // Final fallback - try direct URL (may not work without auth)
+      const imageUri = `${ODOO_CONFIG.baseURL}/web/content/${attachmentId}`;
+      setSelectedImageUri(imageUri);
+      setSelectedImageName(filename);
+      setShowImageViewer(true);
+      console.log('⚠️ Using fallback direct URL (may not display)');
     }
   };
 
@@ -1154,161 +1256,97 @@ export default function ChatScreen() {
     }
   };
 
-  // Leave channel functionality - PERMANENT (syncs to Odoo)
-  const handleLeaveChannel = async (channel: any) => {
-    Alert.alert(
-      'Leave Channel',
-      `Are you sure you want to leave "${channel.name}"? This will remove you from the channel permanently.`,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Leave',
-          style: 'destructive',
-          onPress: async () => {
-            try {
-              console.log(`🚪 Leaving channel ${channel.id}: ${channel.name}`);
+  // Fold/Hide channel functionality (non-destructive)
+  const handleFoldChannel = async (channel: any) => {
+    try {
+      console.log(`📁 Folding channel ${channel.id}: ${channel.name}`);
 
-              // Step 1: Remove from Odoo server (permanent) - FIXED
-              const client = chatService.getAuthenticatedClient();
-              if (client) {
-                try {
-                  console.log('🔍 Getting current user partner ID...');
-                  
-                  // Get current user's partner ID with proper error handling
-                  let partnerId;
-                  try {
-                    const authResult = await client.authenticate();
-                    console.log(`👤 Current user ID: ${authResult.uid}`);
-                    
-                    const userData = await client.callModel('res.users', 'read', [authResult.uid], {
-                      fields: ['partner_id']
-                    });
-                    console.log('👤 User data:', userData);
-                    
-                    // Handle different partner_id formats
-                    if (userData && userData.length > 0) {
-                      const partnerIdField = userData[0].partner_id;
-                      if (Array.isArray(partnerIdField) && partnerIdField.length > 0) {
-                        partnerId = partnerIdField[0];
-                      } else if (typeof partnerIdField === 'number') {
-                        partnerId = partnerIdField;
-                      } else if (typeof partnerIdField === 'string') {
-                        // Try to parse XML-RPC format
-                        const match = partnerIdField.match(/<value><int>(\d+)<\/int>/);
-                        if (match) {
-                          partnerId = parseInt(match[1]);
-                        }
-                      }
-                    }
-                    
-                    console.log(`👤 Parsed partner ID: ${partnerId}`);
-                  } catch (userError) {
-                    console.error('❌ Failed to get user partner ID:', userError);
-                    throw userError;
-                  }
+      // Update the channel membership to set fold_state to 'closed'
+      const client = chatService.getAuthenticatedClient();
+      if (client) {
+        try {
+          console.log('🔍 Getting current user partner ID...');
 
-                  if (!partnerId) {
-                    throw new Error('Could not determine current user partner ID');
-                  }
+          // Get current user's partner ID
+          const authResult = await client.authenticate();
+          const userData = await client.callModel('res.users', 'read', [authResult.uid], {
+            fields: ['partner_id']
+          });
 
-                  // Method 1: Try to leave channel using channel method (Odoo 18+)
-                  try {
-                    console.log(`🔄 Attempting to leave channel ${channel.id} using channel.leave method...`);
-                    await client.callModel('discuss.channel', 'action_unfollow', [channel.id]);
-                    console.log('✅ Successfully left channel using action_unfollow');
-                  } catch (channelMethodError) {
-                    console.log('⚠️ Channel method failed, trying member removal:', channelMethodError.message);
-                    
-                    // Method 2: Remove channel membership directly
-                    try {
-                      console.log(`🔍 Searching for channel membership for partner ${partnerId} in channel ${channel.id}...`);
-                      const memberIds = await client.callModel('discuss.channel.member', 'search', [
-                        [['channel_id', '=', channel.id], ['partner_id', '=', partnerId]]
-                      ]);
-                      
-                      console.log(`📋 Found ${memberIds.length} memberships:`, memberIds);
-
-                      if (memberIds.length > 0) {
-                        console.log(`🗑️ Removing ${memberIds.length} channel memberships...`);
-                        await client.callModel('discuss.channel.member', 'unlink', [memberIds]);
-                        console.log('✅ Removed from Odoo channel membership via member removal');
-                      } else {
-                        console.log('⚠️ No channel membership found - user may not be a member');
-                      }
-                    } catch (memberError) {
-                      console.error('❌ Member removal also failed:', memberError);
-                      throw memberError;
-                    }
-                  }
-                  
-                } catch (odooError) {
-                  console.error('❌ Failed to remove from Odoo server:', odooError);
-                  Alert.alert(
-                    'Server Error', 
-                    `Failed to leave channel on server: ${odooError.message}\n\nThe channel will be removed locally, but you may still appear as a member on the server.`,
-                    [
-                      { text: 'Continue Anyway', onPress: () => {}, style: 'destructive' },
-                      { text: 'Cancel', style: 'cancel' }
-                    ]
-                  );
-                  return; // Don't proceed with local removal if server fails
-                }
-              } else {
-                console.warn('⚠️ No authenticated client - cannot remove from server');
-                Alert.alert(
-                  'Offline Mode',
-                  'Cannot connect to server. The channel will be removed locally only.',
-                  [
-                    { text: 'Continue', onPress: () => {}, style: 'destructive' },
-                    { text: 'Cancel', style: 'cancel' }
-                  ]
-                );
-                return;
-              }
-
-              // Step 2: Remove from local database
-              console.log('🗑️ Removing from local database...');
-              const db = databaseService.getDatabase();
-              if (db) {
-                try {
-                  await db.runAsync('DELETE FROM discuss_channel WHERE id = ?', [channel.id]);
-                  console.log('✅ Removed channel from local database');
-                  
-                  // Also remove related messages
-                  await db.runAsync('DELETE FROM mail_message WHERE res_id = ? AND model = ?',
-                    [channel.id, 'discuss.channel']);
-                  console.log('✅ Removed related messages from local database');
-                } catch (dbError) {
-                  console.error('❌ Failed to remove from local database:', dbError);
-                  // Continue anyway - UI removal is most important
-                }
-              }
-
-              // Step 3: Remove from UI and internal state
-              console.log('🎨 Removing from UI...');
-              setChannels(prev => prev.filter(c => c.id !== channel.id));
-              
-              // Remove from ChatService internal state
-              chatService.removeChannel(channel.id);
-
-              // If this was the selected channel, clear selection
-              if (selectedChannel?.id === channel.id) {
-                setSelectedChannel(null);
-                setMessages([]);
-                console.log('✅ Cleared selected channel');
-              }
-
-              console.log('✅ Successfully left channel permanently');
-              Alert.alert('Success', `Left channel "${channel.name}" successfully.`);
-
-            } catch (error) {
-              console.error('❌ Failed to leave channel:', error);
-              Alert.alert('Error', `Failed to leave channel: ${error.message}`);
+          let partnerId;
+          if (userData && userData.length > 0) {
+            const partnerIdField = userData[0].partner_id;
+            if (Array.isArray(partnerIdField) && partnerIdField.length > 0) {
+              partnerId = partnerIdField[0];
+            } else if (typeof partnerIdField === 'number') {
+              partnerId = partnerIdField;
             }
           }
+
+          if (!partnerId) {
+            throw new Error('Could not determine current user partner ID');
+          }
+
+          // Find the channel membership and update fold_state to 'closed'
+          console.log(`🔄 Setting fold_state to 'closed' for channel ${channel.id}...`);
+          const membershipIds = await client.callModel('discuss.channel.member', 'search', [
+            [['channel_id', '=', channel.id], ['partner_id', '=', partnerId]]
+          ]);
+
+          if (membershipIds && membershipIds.length > 0) {
+            await client.callModel('discuss.channel.member', 'write', [membershipIds, {
+              fold_state: 'closed'
+            }]);
+            console.log(`✅ Successfully set fold_state to 'closed' for membership ${membershipIds[0]}`);
+          } else {
+            console.log('⚠️ No membership found to update');
+          }
+
+        } catch (odooError: any) {
+          console.error('❌ Failed to update fold state on server:', odooError);
+          // Continue with local update even if server fails
         }
-      ]
-    );
+      }
+
+      // Update local database
+      try {
+        console.log('🗄️ Updating local channel membership...');
+        // Update the fold_state in local database
+        const db = databaseService.getDatabase();
+        if (db) {
+          await db.runAsync(
+            'UPDATE discuss_channel_member SET fold_state = ? WHERE channel_id = ?',
+            ['closed', channel.id]
+          );
+          console.log('✅ Local fold state updated');
+        }
+      } catch (dbError) {
+        console.error('❌ Failed to update local fold state:', dbError);
+      }
+
+      // Update UI by re-filtering channels
+      try {
+        console.log('🔄 Refreshing channel list...');
+        const filteredChannels = await filterChannelsByFoldState(allChannels);
+        setChannels(filteredChannels);
+
+        // If this was the selected channel, clear selection
+        if (selectedChannel?.id === channel.id) {
+          setSelectedChannel(null);
+          setMessages([]);
+        }
+
+        console.log('✅ Channel list refreshed');
+      } catch (uiError) {
+        console.error('❌ Failed to refresh UI:', uiError);
+      }
+
+      console.log('✅ Successfully folded channel');
+
+    } catch (error: any) {
+      console.error('❌ Failed to fold channel:', error);
+      Alert.alert('Error', `Failed to hide channel: ${error.message}`);
+    }
   };
 
   // Clear all messages for dev testing - PERMANENT (syncs to Odoo)
@@ -1555,32 +1593,35 @@ export default function ChatScreen() {
 
         <View style={styles.headerCenter}>
           <View style={styles.titleRow}>
-            <Text style={styles.headerTitle}>
-              {selectedChannel ? selectedChannel.name : 'Chat'}
-            </Text>
+            {/* Small circular avatar for selected channel - replaces channel name */}
+            {selectedChannel ? (
+              <View style={styles.headerAvatar}>
+                {selectedChannel.channel_type === 'chat' ? (
+                  <MaterialIcons name="person" size={20} color="#FFF" />
+                ) : selectedChannel.channel_type === 'channel' ? (
+                  <MaterialIcons name="group" size={20} color="#FFF" />
+                ) : (
+                  <MaterialIcons name="chat-bubble" size={20} color="#FFF" />
+                )}
+              </View>
+            ) : (
+              <Text style={styles.headerTitle}>Chat</Text>
+            )}
           </View>
           {selectedChannel && selectedChannel.channel_type === 'channel' && (
             <Text style={styles.headerSubtitle}>
               {selectedChannel.member_count || 0} members
             </Text>
           )}
-          {/* WebRTC Mode Indicator */}
-          <Text style={styles.webrtcModeIndicator}>
-            {webRTCDetector.getModeDescription()}
-          </Text>
         </View>
 
-        {/* Toggle closed channels button - only show when no channel is selected */}
+        {/* Chat Settings button - only show when no channel is selected */}
         {!selectedChannel && (
           <TouchableOpacity
-            style={[styles.callButton, { backgroundColor: showClosedChannels ? '#FF9500' : '#34C759' }]}
-            onPress={handleToggleClosedChannels}
+            style={[styles.callButton, { backgroundColor: '#8E8E93' }]}
+            onPress={() => navigation.navigate('ChatSettings')}
           >
-            <MaterialIcons
-              name={showClosedChannels ? "visibility-off" : "visibility"}
-              size={24}
-              color="#FFF"
-            />
+            <MaterialIcons name="settings" size={24} color="#FFF" />
           </TouchableOpacity>
         )}
 
@@ -1629,7 +1670,13 @@ export default function ChatScreen() {
 
         <TouchableOpacity
           style={styles.profileButton}
-          onPress={showNavigationDrawer}
+          onPress={() => {
+            if (selectedChannel) {
+              navigation.navigate('ChatProfile', { channel: selectedChannel });
+            } else {
+              console.log('No channel selected for profile view');
+            }
+          }}
         >
           <MaterialIcons name="account-circle" size={32} color="#007AFF" />
         </TouchableOpacity>
@@ -1645,10 +1692,10 @@ export default function ChatScreen() {
               renderRightActions={() => (
                 <TouchableOpacity
                   style={styles.leaveChannelButton}
-                  onPress={() => handleLeaveChannel(item)}
+                  onPress={() => handleFoldChannel(item)}
                 >
-                  <MaterialIcons name="exit-to-app" size={24} color="#FFF" />
-                  <Text style={styles.leaveChannelText}>Leave</Text>
+                  <MaterialIcons name="visibility-off" size={24} color="#FFF" />
+                  <Text style={styles.leaveChannelText}>Hide</Text>
                 </TouchableOpacity>
               )}
             >
@@ -1977,15 +2024,74 @@ export default function ChatScreen() {
             <MaterialIcons name="download" size={24} color="#FFF" />
           </TouchableOpacity>
 
-          <Image
-            source={{ uri: selectedImageUri }}
-            style={styles.fullScreenImage}
-            resizeMode="contain"
-          />
+          <TouchableOpacity
+            style={styles.imageViewerShareButton}
+            onPress={() => {
+              setShowImageViewer(false);
+              // Extract attachment info from the selected image
+              const attachmentId = selectedImageUri.match(/\/(\d+)$/)?.[1];
+              if (attachmentId) {
+                shareAttachment(
+                  parseInt(attachmentId),
+                  selectedImageName,
+                  { mimetype: 'image/jpeg', url: selectedImageUri }
+                );
+              }
+            }}
+          >
+            <MaterialIcons name="share" size={24} color="#FFF" />
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            onLongPress={() => {
+              // Show action sheet for long press
+              const attachmentId = selectedImageUri.match(/\/(\d+)$/)?.[1];
+              if (attachmentId) {
+                Alert.alert(
+                  selectedImageName || 'Image',
+                  'Choose an action',
+                  [
+                    { text: 'Cancel', style: 'cancel' },
+                    {
+                      text: 'Download',
+                      onPress: () => {
+                        setShowImageViewer(false);
+                        downloadAttachment(
+                          parseInt(attachmentId),
+                          selectedImageName,
+                          { mimetype: 'image/jpeg', url: selectedImageUri }
+                        );
+                      }
+                    },
+                    {
+                      text: 'Share',
+                      onPress: () => {
+                        setShowImageViewer(false);
+                        shareAttachment(
+                          parseInt(attachmentId),
+                          selectedImageName,
+                          { mimetype: 'image/jpeg', url: selectedImageUri }
+                        );
+                      }
+                    }
+                  ]
+                );
+              }
+            }}
+            activeOpacity={1}
+          >
+            <Image
+              source={{ uri: selectedImageUri }}
+              style={styles.fullScreenImage}
+              resizeMode="contain"
+            />
+          </TouchableOpacity>
 
           <Text style={styles.imageViewerTitle}>{selectedImageName}</Text>
         </View>
       )}
+
+
     </SafeAreaView>
     </GestureHandlerRootView>
   );
@@ -2489,13 +2595,7 @@ const styles = StyleSheet.create({
     fontSize: 10,
     fontFamily: 'monospace',
   },
-  webrtcModeIndicator: {
-    fontSize: 10,
-    color: '#666',
-    textAlign: 'center',
-    marginTop: 2,
-    fontStyle: 'italic',
-  },
+
   leaveChannelButton: {
     backgroundColor: '#FF3B30',
     justifyContent: 'center',
@@ -2514,6 +2614,14 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  headerAvatar: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: '#007AFF',
+    justifyContent: 'center',
+    alignItems: 'center',
   },
 
   // Image Viewer Modal Styles
@@ -2546,6 +2654,15 @@ const styles = StyleSheet.create({
     borderRadius: 20,
     backgroundColor: 'rgba(0, 0, 0, 0.5)',
   },
+  imageViewerShareButton: {
+    position: 'absolute',
+    top: 50,
+    left: 80, // Position to the right of download button
+    zIndex: 10000,
+    padding: 10,
+    borderRadius: 20,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+  },
   fullScreenImage: {
     width: '100%',
     height: '100%',
@@ -2563,5 +2680,7 @@ const styles = StyleSheet.create({
     padding: 10,
     borderRadius: 8,
   },
+
+
 
 });

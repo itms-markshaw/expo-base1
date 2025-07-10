@@ -292,8 +292,9 @@ class SyncService {
    * Start sync process
    */
   async startSync(selectedModels: string[] = [
-    'discuss.channel',    // Prioritize chat channels
-    'mail.message',       // Prioritize chat messages
+    'discuss.channel',        // Prioritize chat channels
+    'discuss.channel.member', // CRITICAL: Channel memberships and fold states - ENABLED BY DEFAULT
+    'mail.message',           // Prioritize chat messages
     // NOTE: mail.thread is an abstract model - not synced directly
     'res.partner',
     'sale.order',
@@ -514,7 +515,10 @@ class SyncService {
       const fields = await this.getFieldsForModel(modelName);
 
       // Build domain based on incremental sync and time period settings
-      const domain = await this.buildDomainForModel(modelName, forceFullSync);
+      let domain = await this.buildDomainForModel(modelName, forceFullSync);
+
+      // TODO: Add filtering for discuss.channel.member by current user
+      // For now, let's sync all memberships to get the table created
 
       // Fetch records with time filtering and smart limits
       const limit = this.getLimitForModel(modelName);
@@ -1341,6 +1345,23 @@ class SyncService {
       case 'discuss.channel':
         // Only sync active channels to match Odoo web behavior
         return [['active', '=', true]];
+
+      case 'discuss.channel.member':
+        // Only sync current user's channel memberships
+        try {
+          const client = this.xmlrpcClient;
+          if (client && (client as any).uid) {
+            const currentUserId = (client as any).uid;
+            console.log(`📱 🔒 Adding discuss.channel.member filters for user ID: ${currentUserId}`);
+            return [['partner_id.user_ids', 'in', [currentUserId]]];
+          } else {
+            console.log('📱 ⚠️ No authenticated user - syncing all channel memberships');
+            return [];
+          }
+        } catch (error) {
+          console.warn('📱 ⚠️ Error getting current user for channel member filtering:', error);
+          return [];
+        }
 
       case 'res.partner':
         // Only sync active partners

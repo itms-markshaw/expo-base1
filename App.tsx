@@ -51,6 +51,8 @@ import SyncDashboard from './src/models/sync_management/screens/981_SyncDashboar
 import ActivitiesList from './src/models/mail_activity/screens/501_ActivitiesList';
 import CalendarView from './src/models/calendar_event/screens/701_CalendarView';
 import ChatList from './src/models/discuss_channel/screens/151_ChatList';
+import ChatSettings from './src/models/discuss_channel/screens/152_ChatSettings';
+import ChatProfile from './src/models/discuss_channel/screens/154_ChatProfile';
 import CallScreen from './src/models/discuss_channel/screens/152_CallScreen';
 import VideoCallScreen from './src/models/discuss_channel/screens/152_VideoCallScreen';
 import ModelSelectionScreen from './src/models/sync_management/screens/982_ModelSelection';
@@ -218,6 +220,19 @@ function AllScreensStack() {
         name="SyncPreferences"
         component={withBottomNav(SyncPreferences, 'Settings')}
         options={{ title: 'Sync Preferences' }}
+      />
+      <Stack.Screen
+        name="ChatSettings"
+        component={withBottomNav(ChatSettings, 'Settings')}
+        options={{ title: 'Chat Settings' }}
+      />
+      <Stack.Screen
+        name="ChatProfile"
+        component={ChatProfile}
+        options={{
+          title: 'Chat Profile',
+          headerShown: false
+        }}
       />
       <Stack.Screen
         name="SyncStack"

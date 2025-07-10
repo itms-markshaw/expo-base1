@@ -57,6 +57,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
   availableModels: [], // Will be loaded dynamically
   selectedModels: [
     'discuss.channel',
+    'discuss.channel.member', // CRITICAL: Channel memberships and fold states - ENABLED BY DEFAULT
     'mail.message',
     // mail.thread removed - it's an abstract model, not directly accessible
     'res.partner',

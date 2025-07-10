@@ -544,6 +544,8 @@ class ChatService {
     }
   }
 
+
+
   /**
    * Load chat channels from cache first, then from Odoo (sorted by last activity)
    */
@@ -566,7 +568,8 @@ class ChatService {
         console.log('📱 🔍 Checking for cached channels in SQLite...');
         const cachedChannels = await syncService.getCachedData('discuss.channel');
         if (cachedChannels && cachedChannels.length > 0) {
-          console.log(`📱 ✅ Found ${cachedChannels.length} cached channels - using offline data`);
+          console.log(`📱 ✅ Found ${cachedChannels.length} total cached channels`);
+
           cacheChannels = cachedChannels;
           hasOfflineData = true;
 
@@ -934,6 +937,27 @@ class ChatService {
       // OFFLINE FIRST: Try to load from BaseSyncService (authoritative source)
       try {
         console.log(`📨 🔍 Checking BaseSyncService for channel ${channelId} messages...`);
+        console.log(`📨 🔍 Looking for messages with model='discuss.channel' and res_id=${channelId}`);
+
+        // First, get all mail.message records to debug
+        const allMessages = await syncService.getCachedData('mail.message');
+        console.log(`📨 🔍 Total mail.message records in DB: ${allMessages.length}`);
+
+        if (allMessages.length > 0) {
+          console.log(`📨 🔍 Sample message:`, JSON.stringify(allMessages[0], null, 2));
+
+          // Check for messages with our channel ID
+          const channelMessages = allMessages.filter(msg =>
+            msg.res_id === channelId || msg.res_id === String(channelId)
+          );
+          console.log(`📨 🔍 Messages with res_id=${channelId}: ${channelMessages.length}`);
+
+          const discussChannelMessages = allMessages.filter(msg =>
+            msg.model === 'discuss.channel'
+          );
+          console.log(`📨 🔍 Messages with model='discuss.channel': ${discussChannelMessages.length}`);
+        }
+
         const cachedMessages = await syncService.getCachedData('mail.message', {
           model: 'discuss.channel',
           res_id: channelId

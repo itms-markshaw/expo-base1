@@ -163,12 +163,13 @@ class ChannelMemberService {
             }
             return member;
           });
-          
+
           // Save updated cache (if sync service supports it)
           // This is optional - the next sync will update the cache anyway
         }
       } catch (cacheError) {
-        console.warn('⚠️ Failed to update cached membership data:', cacheError);
+        // Ignore cache errors - table might not exist yet
+        console.log('🗄️ Local cache update skipped (table may not exist yet)');
       }
 
       return true;
@@ -212,9 +213,13 @@ class ChannelMemberService {
       const client = authService.getClient();
       if (!client) {
         // Try to get from cache if no client available
-        const cachedMembers = await syncService.getCachedData('discuss.channel.member');
-        if (cachedMembers) {
-          return cachedMembers.filter(member => member.partner_id === partnerId);
+        try {
+          const cachedMembers = await syncService.getCachedData('discuss.channel.member');
+          if (cachedMembers) {
+            return cachedMembers.filter(member => member.partner_id === partnerId);
+          }
+        } catch (cacheError) {
+          console.log('🗄️ No cached membership data available (table may not exist yet)');
         }
         throw new Error('No authenticated client available and no cached data');
       }
