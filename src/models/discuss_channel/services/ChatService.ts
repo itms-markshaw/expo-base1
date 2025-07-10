@@ -561,7 +561,7 @@ class ChatService {
 
       const query = `
         SELECT DISTINCT c.id, c.name, c.description, c.channel_type,
-               c.uuid, c.member_count, c.avatar_128
+               c.uuid, c.member_count
         FROM discuss_channel c
         INNER JOIN discuss_channel_member m ON c.id = m.channel_id
         WHERE m.partner_id = ?

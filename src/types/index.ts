@@ -30,6 +30,8 @@ export interface User {
   name: string;
   login: string;
   email?: string;
+  partner_id?: number; // Critical for chat/channel filtering
+  company_id?: number; // Useful for multi-company setups
 }
 
 export interface AuthResult {

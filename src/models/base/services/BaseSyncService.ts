@@ -289,6 +289,22 @@ class SyncService {
   }
 
   /**
+   * Get model dependencies for proper sync ordering
+   */
+  private getModelDependencies(modelName: string): string[] {
+    const dependencies: { [key: string]: string[] } = {
+      'discuss.channel.member': ['res.partner', 'res.users'],  // Needs user/partner context
+      'discuss.channel': ['discuss.channel.member'],           // Needs memberships for filtering
+      'mail.message': ['discuss.channel'],                     // Needs channels for res_id filtering
+      'ir.attachment': ['mail.message'],                       // Attachments depend on messages
+      'sale.order.line': ['sale.order'],                       // Order lines depend on orders
+      'product.template': ['product.category'],                // Products depend on categories
+      // Add more as needed
+    };
+    return dependencies[modelName] || [];
+  }
+
+  /**
    * Start sync process
    */
   async startSync(selectedModels: string[] = [
@@ -328,6 +344,15 @@ class SyncService {
       });
 
       console.log('🚀 Starting sync process...');
+
+      // Resolve model dependencies for proper sync ordering
+      const allModelsToSync = new Set(selectedModels);
+      for (const model of selectedModels) {
+        const deps = this.getModelDependencies(model);
+        deps.forEach(dep => allModelsToSync.add(dep));
+      }
+      const orderedModels = Array.from(allModelsToSync);
+      console.log(`🚀 Syncing models in dependency order: ${orderedModels.join(', ')}`);
 
       // Clear field cache to force re-detection with improved validation
       this.clearFieldCache();
@@ -391,7 +416,7 @@ class SyncService {
 
       // Calculate total records to sync
       let totalRecords = 0;
-      for (const modelName of selectedModels) {
+      for (const modelName of orderedModels) {
         try {
           // Build domain for counting (respects incremental sync and time period settings)
           const domain = await this.buildDomainForModel(modelName);
@@ -410,9 +435,9 @@ class SyncService {
       const BATCH_SIZE = 3; // Sync 3 models at once
       let syncedRecords = 0;
 
-      for (let i = 0; i < selectedModels.length; i += BATCH_SIZE) {
-        const batch = selectedModels.slice(i, i + BATCH_SIZE);
-        const baseProgress = (i / selectedModels.length) * 100;
+      for (let i = 0; i < orderedModels.length; i += BATCH_SIZE) {
+        const batch = orderedModels.slice(i, i + BATCH_SIZE);
+        const baseProgress = (i / orderedModels.length) * 100;
 
         this.updateStatus({
           currentModel: batch.length > 1 ? `${batch[0]} +${batch.length-1} more` : batch[0],
@@ -529,39 +554,56 @@ class SyncService {
       // Simplified logging for performance
       console.log(`🔍 ${modelName}: ${domain.length > 0 ? 'incremental' : 'full'} sync (${fields.length} fields)`);
 
-      // SMART INCREMENTAL SYNC: Check count first for large incremental syncs
-      let records;
-      try {
-        // For incremental sync, check count first to detect bulk changes
-        if (domain.length > 0) { // Has write_date filter = incremental sync
-          const changeCount = await client.searchCount(modelName, domain);
-          if (changeCount > 1000) {
-            console.warn(`⚠️ Large incremental sync detected for ${modelName}: ${changeCount} changed records`);
-            console.warn(`⚠️ This suggests bulk data changes in Odoo. Using pagination...`);
+      // SMART INCREMENTAL SYNC with retry logic
+      let records: any[] = [];
+      const maxRetries = 3;
 
-            // Use smaller batches for large incremental syncs
-            const batchSize = 500;
-            records = await client.searchRead(modelName, domain, fields, {
-              limit: batchSize,
-              order: 'write_date desc',
-              timeout
-            });
-            console.log(`📦 Retrieved first batch: ${records.length}/${changeCount} records`);
+      for (let attempt = 1; attempt <= maxRetries; attempt++) {
+        try {
+          // For incremental sync, check count first to detect bulk changes
+          if (domain.length > 0) { // Has write_date filter = incremental sync
+            const changeCount = await client.searchCount(modelName, domain);
+            if (changeCount > 1000) {
+              console.warn(`⚠️ Large incremental sync detected for ${modelName}: ${changeCount} changed records`);
+              console.warn(`⚠️ This suggests bulk data changes in Odoo. Using pagination...`);
+
+              // Use smaller batches for large incremental syncs
+              const batchSize = 500;
+              records = await client.searchRead(modelName, domain, fields, {
+                limit: batchSize,
+                order: 'write_date desc',
+                timeout
+              });
+              console.log(`📦 Retrieved first batch: ${records.length}/${changeCount} records`);
+            } else {
+              records = await client.searchRead(modelName, domain, fields, {
+                limit,
+                order: 'write_date desc',
+                timeout
+              });
+            }
           } else {
+            // Full sync - use normal limit
             records = await client.searchRead(modelName, domain, fields, {
               limit,
               order: 'write_date desc',
               timeout
             });
           }
-        } else {
-          // Full sync - use normal limit
-          records = await client.searchRead(modelName, domain, fields, {
-            limit,
-            order: 'write_date desc',
-            timeout
-          });
+          break; // Success, exit retry loop
+        } catch (retryError) {
+          if (attempt === maxRetries) {
+            throw retryError; // Final attempt failed, continue to existing error handling
+          }
+          const errorMessage = retryError instanceof Error ? retryError.message : String(retryError);
+          console.warn(`⚠️ Retry ${attempt}/${maxRetries} for ${modelName}:`, errorMessage);
+          await new Promise(resolve => setTimeout(resolve, 2000 * attempt)); // Exponential backoff
         }
+      }
+
+      // Existing error handling continues below
+      try {
+        // This try block is for the existing specific error handling
       } catch (searchError) {
         const errorMessage = searchError instanceof Error ? searchError.message : String(searchError);
 
@@ -622,28 +664,26 @@ class SyncService {
       // Save to database
       await databaseService.saveRecords(tableName, records);
 
-      // Cleanup stale records for specific models
-      if (['discuss.channel', 'discuss.channel.member'].includes(modelName)) {
-        try {
-          const db = databaseService.getDatabase();
-          if (db) {
-            const serverIds = records.map(record => record.id);
+      // Cleanup stale records for ALL models to prevent data accumulation
+      try {
+        const db = databaseService.getDatabase();
+        if (db) {
+          const serverIds = records.map(record => record.id);
 
-            if (serverIds.length > 0) {
-              const placeholders = serverIds.map(() => '?').join(',');
-              await db.runAsync(
-                `DELETE FROM ${tableName} WHERE id NOT IN (${placeholders})`,
-                serverIds
-              );
-              console.log(`🧹 Cleaned up stale records for ${modelName}: kept ${serverIds.length}`);
-            } else {
-              await db.runAsync(`DELETE FROM ${tableName}`);
-              console.log(`🧹 Cleared all records for ${modelName} (no server data)`);
-            }
+          if (serverIds.length > 0) {
+            const placeholders = serverIds.map(() => '?').join(',');
+            await db.runAsync(
+              `DELETE FROM ${tableName} WHERE id NOT IN (${placeholders})`,
+              serverIds
+            );
+            console.log(`🧹 Cleaned stale records for ${modelName}: kept ${serverIds.length}`);
+          } else {
+            await db.runAsync(`DELETE FROM ${tableName}`);
+            console.log(`🧹 Cleared all records for ${modelName} (no server data)`);
           }
-        } catch (cleanupError) {
-          console.warn(`⚠️ Failed to cleanup stale records for ${modelName}:`, cleanupError);
         }
+      } catch (cleanupError) {
+        console.warn(`⚠️ Failed to cleanup stale records for ${modelName}:`, cleanupError);
       }
 
       // INCREMENTAL SYNC: Update sync metadata with latest write_date
@@ -1310,7 +1350,7 @@ class SyncService {
       const domain = [['write_date', '>', syncMetadata.last_sync_write_date]];
 
       // Add model-specific filters
-      const modelSpecificFilters = this.getModelSpecificFilters(modelName);
+      const modelSpecificFilters = await this.getModelSpecificFilters(modelName);
       return [...domain, ...modelSpecificFilters];
     } else {
       // INITIAL SYNC: Use time period for first sync
@@ -1349,7 +1389,7 @@ class SyncService {
       const timeDomain = [['write_date', '>=', dateThreshold]];
 
       // Add model-specific filters
-      const modelSpecificFilters = this.getModelSpecificFilters(modelName);
+      const modelSpecificFilters = await this.getModelSpecificFilters(modelName);
       return [...timeDomain, ...modelSpecificFilters];
     }
     } catch (error) {
@@ -1364,41 +1404,80 @@ class SyncService {
   /**
    * Get model-specific filters to apply during sync
    */
-  private getModelSpecificFilters(modelName: string): any[] {
+  private async getModelSpecificFilters(modelName: string): Promise<any[]> {
     switch (modelName) {
       case 'discuss.channel':
-        // Only sync channels where current user is a member (matches server logic)
+        // Use membership IDs from previously synced discuss.channel.member
         try {
-          const user = authService.getCurrentUser();
-          if (user && user.id) {
-            console.log(`📱 🔒 Adding discuss.channel filters for user ID: ${user.id}`);
-            return [
-              ['active', '=', true],
-              ['is_member', '=', true]  // Only channels where user is a member
-            ];
-          } else {
-            console.log('📱 ⚠️ No authenticated user - syncing all active channels');
-            return [['active', '=', true]];
+          // Try to get cached members first (dependency ordering ensures this exists)
+          const members = await databaseService.getRecords('discuss_channel_member', 100, 0);
+          const channelIds = members.map((m: any) => {
+            let channelId = m.channel_id;
+            // Handle XML-RPC array format: <array><data><value><int>105</int></value></data></array>
+            if (typeof channelId === 'string' && channelId.includes('<int>')) {
+              const match = channelId.match(/<int>(\d+)<\/int>/);
+              channelId = match ? parseInt(match[1], 10) : channelId;
+            } else if (Array.isArray(channelId)) {
+              channelId = channelId[0];
+            }
+            return channelId;
+          }).filter(id => id && !isNaN(id));
+
+          if (channelIds.length > 0) {
+            console.log(`📱 🔒 Filtering discuss.channel to member's channels: ${channelIds.length} IDs [${channelIds.join(', ')}]`);
+            return [['id', 'in', channelIds], ['active', '=', true]];
           }
+          // Fallback to is_member filter if no cached members
+          console.log(`📱 🔒 Using is_member fallback filter for discuss.channel`);
+          return [['active', '=', true], ['is_member', '=', true]];
         } catch (error) {
-          console.warn('📱 ⚠️ Error getting current user for channel filtering:', error);
+          console.warn('📱 ⚠️ Channel filter error:', error);
           return [['active', '=', true]];
         }
 
       case 'discuss.channel.member':
-        // Only sync current user's channel memberships
+        // Only sync current user's channel memberships using cached partner_id
         try {
           const user = authService.getCurrentUser();
-          if (user && user.id) {
-            console.log(`📱 🔒 Adding discuss.channel.member filters for user ID: ${user.id}`);
-            return [['partner_id.user_ids', 'in', [user.id]]];
-          } else {
-            console.log('📱 ⚠️ No authenticated user - syncing all channel memberships');
-            return [];
+          if (user && user.partner_id) {
+            console.log(`📱 🔒 Filtering discuss.channel.member for partner ID: ${user.partner_id} (cached)`);
+            return [['partner_id', '=', user.partner_id]];
           }
+
+          console.warn('📱 ⚠️ No cached partner_id - this should not happen after login');
+          return []; // Sync all if no partner ID (fallback)
         } catch (error) {
-          console.warn('📱 ⚠️ Error getting current user for channel member filtering:', error);
+          console.warn('📱 ⚠️ User context error:', error);
           return [];
+        }
+
+      case 'mail.message':
+        // Filter messages to user's channels only
+        try {
+          const channels = await databaseService.getRecords('discuss_channel', 100, 0);
+          const channelIds = channels.map((c: any) => {
+            let channelId = c.id;
+            // Handle XML-RPC array format
+            if (typeof channelId === 'string' && channelId.includes('<int>')) {
+              const match = channelId.match(/<int>(\d+)<\/int>/);
+              channelId = match ? parseInt(match[1], 10) : channelId;
+            } else if (Array.isArray(channelId)) {
+              channelId = channelId[0];
+            }
+            return channelId;
+          }).filter(id => id && !isNaN(id));
+
+          if (channelIds.length > 0) {
+            console.log(`📱 🔒 Filtering mail.message to user's channels: ${channelIds.length} IDs [${channelIds.join(', ')}]`);
+            return [
+              ['model', '=', 'discuss.channel'],
+              ['res_id', 'in', channelIds]
+            ];
+          }
+          return [['model', '=', 'discuss.channel']];
+        } catch (error) {
+          console.warn('📱 ⚠️ Message filter error:', error);
+          return [['model', '=', 'discuss.channel']];
         }
 
       case 'res.partner':

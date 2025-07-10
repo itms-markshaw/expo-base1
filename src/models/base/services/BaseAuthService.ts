@@ -37,13 +37,35 @@ class AuthService {
         throw new Error(connectionTest.error || 'Connection failed');
       }
 
-      // Get user info
+      // Get comprehensive user info including critical IDs
       const userInfo = await this.client.callModel('res.users', 'read', [connectionTest.uid], {
-        fields: ['name', 'login', 'email']
+        fields: ['name', 'login', 'email', 'partner_id', 'company_id']
       });
 
       if (!userInfo || userInfo.length === 0) {
         throw new Error('Failed to get user information');
+      }
+
+      // Parse partner_id from different possible formats
+      let partnerId = userInfo[0].partner_id;
+      if (Array.isArray(partnerId) && partnerId.length > 0) {
+        partnerId = partnerId[0];
+      } else if (typeof partnerId === 'string') {
+        const match = partnerId.match(/<value><int>(\d+)<\/int>/);
+        if (match) {
+          partnerId = parseInt(match[1]);
+        } else {
+          const parsed = parseInt(partnerId);
+          if (!isNaN(parsed)) {
+            partnerId = parsed;
+          }
+        }
+      }
+
+      // Parse company_id similarly
+      let companyId = userInfo[0].company_id;
+      if (Array.isArray(companyId) && companyId.length > 0) {
+        companyId = companyId[0];
       }
 
       this.currentUser = {
@@ -51,7 +73,11 @@ class AuthService {
         name: userInfo[0].name,
         login: userInfo[0].login,
         email: userInfo[0].email,
+        partner_id: partnerId,
+        company_id: companyId,
       };
+
+      console.log(`👤 User authenticated: ID=${this.currentUser.id}, Partner=${this.currentUser.partner_id}, Company=${this.currentUser.company_id}`);
 
       // Store session
       await AsyncStorage.setItem('odoo_user', JSON.stringify(this.currentUser));
