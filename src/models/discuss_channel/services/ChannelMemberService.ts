@@ -32,6 +32,20 @@ class ChannelMemberService {
   }
 
   /**
+   * Parse XML-RPC formatted values from SQLite cache
+   */
+  private parseXMLRPCValue(value: any): any {
+    if (typeof value === 'string' && value.includes('<array><data>')) {
+      // Extract integer from XML-RPC array format
+      const match = value.match(/<int>(\d+)<\/int>/);
+      if (match) {
+        return parseInt(match[1], 10);
+      }
+    }
+    return value;
+  }
+
+  /**
    * Initialize current user partner ID
    */
   private async initializeCurrentUser(): Promise<void> {
@@ -147,7 +161,7 @@ class ChannelMemberService {
       }
 
       // Update the fold state
-      await client.write('discuss.channel.member', memberIds, {
+      await client.update('discuss.channel.member', memberIds, {
         fold_state: foldState
       });
 
@@ -216,7 +230,21 @@ class ChannelMemberService {
         try {
           const cachedMembers = await syncService.getCachedData('discuss.channel.member');
           if (cachedMembers) {
-            return cachedMembers.filter(member => member.partner_id === partnerId);
+            // Parse XML-RPC formatted data from cache
+            const parsedMembers = cachedMembers
+              .filter(member => {
+                const memberPartnerId = this.parseXMLRPCValue(member.partner_id);
+                return memberPartnerId === partnerId;
+              })
+              .map(member => ({
+                ...member,
+                channel_id: this.parseXMLRPCValue(member.channel_id),
+                partner_id: this.parseXMLRPCValue(member.partner_id),
+                is_pinned: !member.unpin_dt
+              }));
+
+            console.log(`🗄️ Found ${parsedMembers.length} cached memberships for partner ${partnerId}`);
+            return parsedMembers;
           }
         } catch (cacheError) {
           console.log('🗄️ No cached membership data available (table may not exist yet)');
@@ -348,7 +376,7 @@ class ChannelMemberService {
         throw new Error(`No membership found for channel ${channelId}`);
       }
 
-      await client.write('discuss.channel.member', memberIds, {
+      await client.update('discuss.channel.member', memberIds, {
         unpin_dt: false // Clear unpin date to pin the channel
       });
 
@@ -384,7 +412,7 @@ class ChannelMemberService {
         throw new Error(`No membership found for channel ${channelId}`);
       }
 
-      await client.write('discuss.channel.member', memberIds, {
+      await client.update('discuss.channel.member', memberIds, {
         unpin_dt: new Date().toISOString()
       });
 
@@ -420,7 +448,7 @@ class ChannelMemberService {
         throw new Error(`No membership found for channel ${channelId}`);
       }
 
-      await client.write('discuss.channel.member', memberIds, {
+      await client.update('discuss.channel.member', memberIds, {
         custom_channel_name: customName || false
       });
 
@@ -456,7 +484,7 @@ class ChannelMemberService {
         throw new Error(`No membership found for channel ${channelId}`);
       }
 
-      await client.write('discuss.channel.member', memberIds, {
+      await client.update('discuss.channel.member', memberIds, {
         last_seen_dt: new Date().toISOString()
       });
 
@@ -464,6 +492,42 @@ class ChannelMemberService {
       return true;
     } catch (error) {
       console.error('❌ Failed to mark channel as seen:', error);
+      return false;
+    }
+  }
+
+  /**
+   * Leave a channel (remove membership)
+   */
+  async leaveChannel(channelId: number): Promise<boolean> {
+    try {
+      const partnerId = await this.getCurrentUserPartnerId();
+      if (!partnerId) {
+        throw new Error('Current user partner ID not available');
+      }
+
+      const client = authService.getClient();
+      if (!client) {
+        throw new Error('No authenticated client available');
+      }
+
+      const memberIds = await client.search('discuss.channel.member', [
+        ['channel_id', '=', channelId],
+        ['partner_id', '=', partnerId]
+      ]);
+
+      if (memberIds.length === 0) {
+        console.log(`⚠️ No membership found for channel ${channelId} - already left?`);
+        return true;
+      }
+
+      // Delete the membership record
+      await client.delete('discuss.channel.member', memberIds);
+
+      console.log(`🚪 Left channel ${channelId}`);
+      return true;
+    } catch (error) {
+      console.error(`❌ Failed to leave channel ${channelId}:`, error);
       return false;
     }
   }

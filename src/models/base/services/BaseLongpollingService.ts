@@ -159,7 +159,7 @@ class OdooPollingService {
       });
 
       if (messages && messages.length > 0) {
-        console.log(`📨 ${messages.length} new messages in channel ${channelId}`);
+        console.log(`📨 ${messages.length} new messages`);
 
         // Update last message ID for this channel
         const maxId = Math.max(...messages.map(m => m.id));
@@ -189,7 +189,9 @@ class OdooPollingService {
    * Process incoming message notification
    */
   private processMessage(message: LongpollingMessage): void {
-    console.log('🚌 RAW bus message received:', JSON.stringify(message, null, 2));
+    // Only log message type and ID, not full content
+    const messageInfo = message.payload?.id ? `ID:${message.payload.id}` : 'no-id';
+    console.log(`🚌 ${message.type} ${messageInfo}`);
 
     // Emit generic message event
     this.emit('message', message);
@@ -208,21 +210,20 @@ class OdooPollingService {
                                  message.payload.body?.includes('missed');
 
       if (isCallStatusMessage) {
-        console.log('📞 CALL STATUS MESSAGE DETECTED:', message);
+        console.log('📞 Call status update');
       } else {
-        console.log('📞 CALL-RELATED MESSAGE DETECTED:', message);
+        console.log('📞 Call message detected');
       }
     }
 
     // Handle specific message types
     switch (message.type) {
       case 'call_invitation':
-        console.log('📞 CALL INVITATION detected:', message.payload);
+        console.log('📞 Call invitation');
         this.emit('callInvitation', message.payload);
         break;
       case 'mail.message':
       case 'discuss.channel':
-        console.log('💬 Chat message detected:', message.payload);
         this.emit('chatMessage', message.payload);
         break;
       case 'bus.presence':
@@ -232,7 +233,6 @@ class OdooPollingService {
         this.emit('activityUpdate', message.payload);
         break;
       default:
-        console.log('🔔 Generic notification:', message);
         this.emit('notification', message);
     }
   }

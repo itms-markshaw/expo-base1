@@ -9,6 +9,7 @@ import longpollingService from '../../base/services/BaseLongpollingService';
 import { authService } from '../../base/services/BaseAuthService';
 import { syncService } from '../../base/services/BaseSyncService';
 import syncCoordinator from '../../sync_management/services/SyncCoordinator';
+import { channelMemberService } from './ChannelMemberService';
 import { useAppStore } from '../../../store';
 
 export interface ChatMessage {
@@ -151,11 +152,11 @@ class ChatService {
       try {
         console.log('📱 Requesting sync for chat data via coordinator...');
         try {
-          await syncCoordinator.requestSync(['discuss.channel', 'mail.message'], 'chat-service-init');
+          await syncCoordinator.requestSync(['discuss.channel', 'discuss.channel.member', 'mail.message'], 'chat-service-init');
         } catch (coordinatorError: any) {
           console.log(`⚠️ Sync coordinator failed, using direct sync: ${coordinatorError.message}`);
           // Fallback to direct sync service
-          await syncService.startSync(['discuss.channel', 'mail.message']);
+          await syncService.startSync(['discuss.channel', 'discuss.channel.member', 'mail.message']);
         }
         console.log('✅ Chat data sync completed');
       } catch (syncError: any) {
@@ -185,11 +186,9 @@ class ChatService {
     
     // CRITICAL FIX: Properly handle incoming chat messages
     longpollingService.on('chatMessage', (message: any) => {
-      console.log('📨 INCOMING MESSAGE VIA LONGPOLLING:', message);
-
       // CHECK: Look for call-related messages
       if (message.body && message.body.includes('conference')) {
-        console.log('📞 POTENTIAL CALL MESSAGE:', message);
+        console.log('📞 Call message via longpolling');
       }
 
       this.handleIncomingMessage(message, 'longpolling');
@@ -228,7 +227,8 @@ class ChatService {
    * CRITICAL FIX: Handle incoming messages with proper deduplication
    */
   private async handleIncomingMessage(messageData: any, source: 'longpolling' | 'polling' = 'longpolling'): Promise<void> {
-    console.log(`📨 Processing incoming message from ${source}:`, messageData);
+    // Only log message ID and source, not full content
+    console.log(`📨 Processing msg ${messageData.id} from ${source}`);
 
     try {
       // GLOBAL DEDUPLICATION: Check if this exact message was recently processed
@@ -237,7 +237,7 @@ class ChatService {
       const recentMessage = this.globalMessageCache.get(messageId);
 
       if (recentMessage && (now - recentMessage.timestamp) < 5000) { // 5 second window
-        console.log(`📨 Message ${messageId} already processed ${Math.round((now - recentMessage.timestamp) / 1000)}s ago by ${recentMessage.source}, skipping ${source}`);
+        console.log(`📨 Msg ${messageId} already processed, skipping ${source}`);
         return;
       }
 
@@ -341,12 +341,7 @@ class ChatService {
         (processedMessage as any).authorName = authorName;
         (processedMessage as any).cleanAuthorName = authorName;
 
-        console.log(`📨 Processed message for channel ${channelId}:`, {
-          id: processedMessage.id,
-          body: processedMessage.body,
-          authorName,
-          source
-        });
+        console.log(`📨 Processed msg ${processedMessage.id} for channel ${channelId} (${source})`);
 
         // Enrich message with attachment details if it has attachments
         let enrichedMessage = processedMessage;
@@ -526,10 +521,7 @@ class ChatService {
           }
 
         } else {
-          console.log(`📨 Message ${enrichedMessage.id} already exists or was recently processed in channel ${channelId}, skipping (source: ${source})`);
-          console.log(`   - Message exists: ${messageExists}`);
-          console.log(`   - Recently processed: ${wasRecentlyProcessed}`);
-          console.log(`   - Has optimistic messages: ${hasOptimisticMessages}`);
+          console.log(`📨 Msg ${enrichedMessage.id} already exists in channel ${channelId}, skipping`);
         }
 
       } finally {
@@ -545,6 +537,138 @@ class ChatService {
   }
 
 
+
+
+
+  /**
+   * Load channels with proper JOIN and fold_state filtering
+   */
+  private async loadChannelsWithMembership(): Promise<ChatChannel[]> {
+    try {
+      const client = authService.getClient();
+      if (!client) {
+        throw new Error('No authenticated client available');
+      }
+
+      // Get current user's partner ID using the existing method
+      let currentPartnerId = await channelMemberService.getCurrentUserPartnerId();
+
+      // If ChannelMemberService doesn't have it, try direct approach
+      if (!currentPartnerId) {
+        console.log('📱 ChannelMemberService partner ID not available, trying direct approach...');
+
+        const currentUser = await client.searchRead('res.users',
+          [['id', '=', client.uid]],
+          ['partner_id']
+        );
+
+        if (currentUser.length > 0) {
+          const partnerIdField = currentUser[0].partner_id;
+
+          // Handle different partner_id formats
+          if (Array.isArray(partnerIdField) && partnerIdField.length > 0) {
+            currentPartnerId = partnerIdField[0];
+          } else if (typeof partnerIdField === 'number') {
+            currentPartnerId = partnerIdField;
+          } else if (typeof partnerIdField === 'string') {
+            // Try to parse XML-RPC format
+            const match = partnerIdField.match(/<value><int>(\d+)<\/int>/);
+            if (match) {
+              currentPartnerId = parseInt(match[1]);
+            } else {
+              // Try direct string to number conversion
+              const parsed = parseInt(partnerIdField);
+              if (!isNaN(parsed)) {
+                currentPartnerId = parsed;
+              }
+            }
+          }
+        }
+      }
+
+      if (!currentPartnerId) {
+        throw new Error('Could not determine current user partner ID');
+      }
+
+      console.log(`👤 Loading channels for partner ID: ${currentPartnerId}`);
+
+      // Load channel memberships first to get fold_state info
+      const memberships = await client.searchRead('discuss.channel.member',
+        [['partner_id', '=', currentPartnerId]],
+        ['channel_id', 'fold_state']
+      );
+
+      console.log(`📁 Found ${memberships.length} channel memberships`);
+
+      // Debug: Show all memberships with their fold_states
+      memberships.forEach(member => {
+        let channelId = member.channel_id;
+        // Handle XML-RPC array format
+        if (typeof channelId === 'string' && channelId.includes('<int>')) {
+          const match = channelId.match(/<int>(\d+)<\/int>/);
+          channelId = match ? parseInt(match[1], 10) : channelId;
+        } else if (Array.isArray(channelId)) {
+          channelId = channelId[0];
+        }
+        console.log(`📁 Membership: Channel ${channelId}, fold_state: "${member.fold_state}"`);
+      });
+
+      // Get channel IDs where fold_state is NOT 'closed' (show open and null/undefined)
+      const visibleChannelIds = memberships
+        .filter(member => {
+          const foldState = member.fold_state;
+          const isVisible = foldState !== 'closed'; // Show 'open', 'folded', null, undefined
+
+          let channelId = member.channel_id;
+          // Handle XML-RPC array format
+          if (typeof channelId === 'string' && channelId.includes('<int>')) {
+            const match = channelId.match(/<int>(\d+)<\/int>/);
+            channelId = match ? parseInt(match[1], 10) : channelId;
+          } else if (Array.isArray(channelId)) {
+            channelId = channelId[0];
+          }
+
+          console.log(`📁 Channel ${channelId}: fold_state="${foldState}" → visible=${isVisible}`);
+          return isVisible;
+        })
+        .map(member => {
+          // Handle XML-RPC array format
+          if (typeof member.channel_id === 'string' && member.channel_id.includes('<int>')) {
+            const match = member.channel_id.match(/<int>(\d+)<\/int>/);
+            return match ? parseInt(match[1], 10) : null;
+          }
+          return Array.isArray(member.channel_id) ? member.channel_id[0] : member.channel_id;
+        })
+        .filter(id => id !== null);
+
+      console.log(`📁 Visible channel IDs (not closed): [${visibleChannelIds.join(', ')}]`);
+
+      if (visibleChannelIds.length === 0) {
+        console.log('📁 No visible channels found');
+        return [];
+      }
+
+      // Load the actual channel data for visible channels only
+      const channels = await client.searchRead('discuss.channel',
+        [
+          ['id', 'in', visibleChannelIds],
+          ['active', '=', true]
+        ],
+        [
+          'id', 'name', 'description', 'channel_type', 'channel_member_ids',
+          'uuid', 'is_member', 'member_count', 'avatar_128'
+        ],
+        { order: 'id desc' }
+      );
+
+      console.log(`📱 ✅ MEMBERSHIP FILTER: Found ${channels.length} visible channels`);
+      return channels;
+
+    } catch (error) {
+      console.error('❌ Failed to load channels with membership filtering:', error);
+      throw error;
+    }
+  }
 
   /**
    * Load chat channels from cache first, then from Odoo (sorted by last activity)
@@ -610,163 +734,28 @@ class ChatService {
           }
           return;
         }
-        console.log('📱 Loading channels from server...');
+        console.log('📱 Loading channels from server with membership filtering...');
 
         try {
-          // First, try to get the current user's partner ID
-          const currentUser = await client.searchRead('res.users',
-            [['id', '=', client.uid]],
-            ['partner_id']
+          // Use is_member filter (proven to work correctly)
+          console.log('📱 Using is_member filter (matches Odoo web behavior)...');
+          channels = await client.searchRead('discuss.channel',
+            [
+              ['is_member', '=', true],
+              ['active', '=', true],
+              '|',
+              ['channel_type', '=', 'chat'],
+              ['channel_type', '=', 'channel']
+            ],
+            [
+              'id', 'name', 'description', 'channel_type', 'channel_member_ids',
+              'uuid', 'is_member', 'member_count', 'avatar_128'
+            ],
+            { order: 'id desc' }
           );
+          console.log(`📱 ✅ IS_MEMBER FILTER: Found ${channels.length} channels (matches Odoo web)`);
 
-          if (currentUser.length > 0) {
-            let currentPartnerId;
-            const partnerIdField = currentUser[0].partner_id;
-
-            // Handle different partner_id formats
-            if (Array.isArray(partnerIdField) && partnerIdField.length > 0) {
-              currentPartnerId = partnerIdField[0];
-            } else if (typeof partnerIdField === 'number') {
-              currentPartnerId = partnerIdField;
-            } else if (typeof partnerIdField === 'string') {
-              // Try to parse XML-RPC format
-              const match = partnerIdField.match(/<value><int>(\d+)<\/int>/);
-              if (match) {
-                currentPartnerId = parseInt(match[1]);
-              } else {
-                // Try direct string to number conversion
-                const parsed = parseInt(partnerIdField);
-                if (!isNaN(parsed)) {
-                  currentPartnerId = parsed;
-                }
-              }
-            }
-
-            console.log(`👤 Current user partner ID: ${currentPartnerId} (from ${typeof partnerIdField}: ${JSON.stringify(partnerIdField)})`);
-
-            // Try to load channels where the current user is a member (only if we have a valid partner ID)
-            if (currentPartnerId && typeof currentPartnerId === 'number') {
-              channels = await client.searchRead('discuss.channel',
-                [
-                  ['channel_member_ids.partner_id', '=', currentPartnerId],
-                  ['active', '=', true],              // Only active channels
-                  '|',
-                  ['channel_type', '=', 'chat'],      // Direct messages
-                  ['channel_type', '=', 'channel']    // Group channels
-                ],
-                [
-                  'id', 'name', 'description', 'channel_type', 'channel_member_ids',
-                  'uuid', 'is_member', 'member_count', 'avatar_128'
-                ],
-                { order: 'id desc' }
-              );
-
-              console.log(`📱 ✅ PARTNER FILTER: Found ${channels.length} active channels`);
-            } else {
-              console.log(`⚠️ Invalid partner ID (${currentPartnerId}), skipping partner-based filtering`);
-            }
-          }
-        } catch (error) {
-          console.warn('❌ Partner-based filtering failed:', error);
-
-          // If network request failed but we have offline data, that's OK
-          if (hasOfflineData) {
-            console.log('📱 ✅ Network failed but offline data available - continuing with cached data');
-            return;
-          } else {
-            console.log('📱 ❌ Network failed and no offline data available');
-            this.emit('error', { type: 'loadChannels', error });
-            return;
-          }
-        }
-
-        // Fallback: If no channels found with partner filter, try simpler approach
-        if (channels.length === 0) {
-          console.log('📱 Trying fallback approach - loading channels with is_member filter...');
-
-          try {
-            channels = await client.searchRead('discuss.channel',
-              [
-                ['is_member', '=', true],
-                ['active', '=', true],              // Only active channels
-                '|',
-                ['channel_type', '=', 'chat'],      // Direct messages
-                ['channel_type', '=', 'channel']    // Group channels
-              ],
-              [
-                'id', 'name', 'description', 'channel_type', 'channel_member_ids',
-                'uuid', 'is_member', 'member_count', 'avatar_128'
-              ],
-              { order: 'id desc' }
-            );
-
-            console.log(`📱 ✅ IS_MEMBER FILTER: Found ${channels.length} active channels`);
-
-            // DEDUPLICATION: Remove duplicate channels first
-            let originalCount = channels.length;
-            const seenChannels = new Set();
-            channels = channels.filter(channel => {
-              const key = `${channel.channel_type}-${channel.name}`;
-              if (seenChannels.has(key)) {
-                console.log(`📱 🔄 Removing duplicate: ${channel.name} (${channel.channel_type})`);
-                return false;
-              }
-              seenChannels.add(key);
-              return true;
-            });
-
-            if (channels.length !== originalCount) {
-              console.log(`📱 ✅ Deduplicated: ${originalCount} → ${channels.length} channels`);
-              originalCount = channels.length;
-            }
-
-            // Filter channels to match Odoo web behavior (remove inactive/archived)
-            channels = channels.filter(channel => {
-              // Keep active channels (active field might be undefined, which means active)
-              const isActive = channel.active !== false;
-
-              // Additional filtering for chat channels
-              if (channel.channel_type === 'chat') {
-                // Skip empty or malformed channel names
-                if (!channel.name || channel.name.trim() === '') {
-                  return false;
-                }
-              }
-
-              return isActive;
-            });
-
-            // Note: fold_state is handled via discuss.channel.member, not discuss.channel
-
-            if (channels.length !== originalCount) {
-              console.log(`📱 Filtered to ${channels.length} active channels (was ${originalCount})`);
-            }
-
-          } catch (fallbackError) {
-            console.warn('❌ is_member filtering also failed:', fallbackError);
-
-            // Last resort: Load all channels and filter client-side
-            console.log('📱 Last resort - loading all channels...');
-            channels = await client.searchRead('discuss.channel',
-              [
-                ['active', '=', true],              // Only active channels
-                '|',
-                ['channel_type', '=', 'chat'],      // Direct messages
-                ['channel_type', '=', 'channel']    // Group channels
-              ],
-              [
-                'id', 'name', 'description', 'channel_type', 'channel_member_ids',
-                'uuid', 'is_member', 'member_count', 'avatar_128'
-              ],
-              { order: 'id desc', limit: 50 } // Limit to prevent too many results
-            );
-
-            console.log(`📱 ⚠️ LAST RESORT: Found ${channels.length} active channels (limited to 50)`);
-          }
-        }
-      }
-
-      console.log(`📱 Processing ${channels.length} fresh channels in background...`);
+          console.log(`📱 Processing ${channels.length} fresh channels in background...`);
 
       // Process channels in background (reduced logging for speed)
       const processedChannels = [];
@@ -780,12 +769,23 @@ class ChatService {
       // Sort channels by last activity (most recent first)
       const sortedChannels = await this.sortChannelsByLastActivity(processedChannels);
 
-      // Only emit fresh data if it's significantly different from cached data
-      if (!hasOfflineData || sortedChannels.length !== cacheChannels.length) {
-        console.log(`📱 Fresh data different from cache (${cacheChannels.length} -> ${sortedChannels.length}), emitting update...`);
-        this.emit('channelsLoaded', sortedChannels);
-      } else {
-        console.log('📱 Fresh data same as cache, not emitting duplicate channelsLoaded event');
+      // Always emit fresh data to ensure UI updates with server data
+      console.log(`📱 Fresh data loaded (${cacheChannels.length} -> ${sortedChannels.length}), emitting update...`);
+      this.emit('channelsLoaded', sortedChannels);
+
+        } catch (error) {
+          console.warn('❌ Channel loading failed:', error);
+
+          // If network request failed but we have offline data, that's OK
+          if (hasOfflineData) {
+            console.log('📱 ✅ Network failed but offline data available - continuing with cached data');
+            return;
+          } else {
+            console.log('📱 ❌ Network failed and no offline data available');
+            this.emit('error', { type: 'loadChannels', error });
+            return;
+          }
+        }
       }
 
     } catch (error) {
@@ -793,6 +793,8 @@ class ChatService {
       this.emit('error', { type: 'loadChannels', error });
     }
   }
+
+
 
   /**
    * Sort channels by last activity (most recent first)
@@ -896,15 +898,11 @@ class ChatService {
    * Get last rendered messages instantly (no loading, no scrolling)
    */
   getLastRenderedMessages(channelId: number): ChatMessage[] {
-    console.log(`📨 🔍 Checking lastRenderedMessages cache for channel ${channelId}...`);
-    console.log(`📨 🔍 Cache has ${this.lastRenderedMessages.size} channels stored`);
-
     const lastRendered = this.lastRenderedMessages.get(channelId);
     if (lastRendered && lastRendered.length > 0) {
-      console.log(`📨 ⚡ Returning ${lastRendered.length} last rendered messages instantly for channel ${channelId}`);
+      console.log(`📨 ⚡ Returning ${lastRendered.length} cached messages for channel ${channelId}`);
       return lastRendered;
     }
-    console.log(`📨 ⚠️ No last rendered messages found for channel ${channelId} (cache entry: ${lastRendered ? 'exists but empty' : 'does not exist'})`);
     return [];
   }
 
@@ -913,12 +911,7 @@ class ChatService {
    */
   saveLastRenderedMessages(channelId: number, messages: ChatMessage[]): void {
     this.lastRenderedMessages.set(channelId, [...messages]);
-    console.log(`📨 💾 Saved ${messages.length} messages as last rendered state for channel ${channelId}`);
-    console.log(`📨 💾 Cache now has ${this.lastRenderedMessages.size} channels stored`);
-
-    // Debug: Show what's in the cache
-    const stored = this.lastRenderedMessages.get(channelId);
-    console.log(`📨 💾 Verification: stored ${stored?.length || 0} messages for channel ${channelId}`);
+    console.log(`📨 💾 Cached ${messages.length} messages for channel ${channelId}`);
   }
 
   /**
@@ -936,27 +929,7 @@ class ChatService {
 
       // OFFLINE FIRST: Try to load from BaseSyncService (authoritative source)
       try {
-        console.log(`📨 🔍 Checking BaseSyncService for channel ${channelId} messages...`);
-        console.log(`📨 🔍 Looking for messages with model='discuss.channel' and res_id=${channelId}`);
-
-        // First, get all mail.message records to debug
-        const allMessages = await syncService.getCachedData('mail.message');
-        console.log(`📨 🔍 Total mail.message records in DB: ${allMessages.length}`);
-
-        if (allMessages.length > 0) {
-          console.log(`📨 🔍 Sample message:`, JSON.stringify(allMessages[0], null, 2));
-
-          // Check for messages with our channel ID
-          const channelMessages = allMessages.filter(msg =>
-            msg.res_id === channelId || msg.res_id === String(channelId)
-          );
-          console.log(`📨 🔍 Messages with res_id=${channelId}: ${channelMessages.length}`);
-
-          const discussChannelMessages = allMessages.filter(msg =>
-            msg.model === 'discuss.channel'
-          );
-          console.log(`📨 🔍 Messages with model='discuss.channel': ${discussChannelMessages.length}`);
-        }
+        console.log(`📨 Loading cached messages for channel ${channelId}...`);
 
         const cachedMessages = await syncService.getCachedData('mail.message', {
           model: 'discuss.channel',
@@ -964,7 +937,7 @@ class ChatService {
         });
 
         if (cachedMessages && cachedMessages.length > 0) {
-          console.log(`📨 ✅ Found ${cachedMessages.length} cached messages in BaseSyncService`);
+          console.log(`📨 ✅ Found ${cachedMessages.length} cached messages`);
 
           // Filter and sort messages properly
           messages = cachedMessages
@@ -992,19 +965,19 @@ class ChatService {
             this.saveLastRenderedMessages(channelId, processedMessages); // Save for instant loading
             this.emit('messagesLoaded', { channelId, messages: processedMessages });
 
-            console.log(`📨 Cached messages loaded, fetching fresh data in background...`);
+            console.log(`📨 Cached messages loaded, fetching fresh data...`);
           }
         } else {
-          console.log(`📨 ⚠️ No cached messages found in BaseSyncService for channel ${channelId}`);
+          console.log(`📨 ⚠️ No cached messages found for channel ${channelId}`);
         }
       } catch (cacheError) {
-        console.warn('⚠️ Failed to load cached messages from BaseSyncService:', cacheError);
+        console.warn('⚠️ Failed to load cached messages:', cacheError);
       }
 
       // Try to get fresh data only if we have network connectivity
       if (client && isAuth) {
         try {
-          console.log(`📨 Loading fresh messages from server for channel ${channelId} (limit: ${limit}, offset: ${offset})...`);
+          console.log(`📨 Loading fresh messages from server...`);
           const freshMessages = await client.searchRead('mail.message',
           [
             ['model', '=', 'discuss.channel'],
@@ -1025,16 +998,16 @@ class ChatService {
           console.warn('⚠️ Failed to load fresh messages, using cached data:', serverError);
           // If we have cached messages, that's fine - we already emitted them
           if (messages.length > 0) {
-            console.log('📨 ✅ Using cached messages due to network error');
+            console.log('📨 ✅ Using cached messages (network error)');
           } else {
             console.log('📨 ❌ No cached messages and network failed');
             throw serverError;
           }
         }
       } else {
-        console.log('📨 ⚠️ No network connectivity - using cached messages only');
+        console.log('📨 ⚠️ Using cached messages only (offline)');
         if (messages.length === 0) {
-          console.log('📨 ❌ No cached messages available and no network');
+          console.log('📨 ❌ No cached messages available');
           throw new Error('No cached messages available and no network connectivity');
         }
       }
@@ -1206,7 +1179,7 @@ class ChatService {
       const existingMessages = this.channelMessages.get(channelId) || [];
       const offset = existingMessages.length;
 
-      console.log(`📨 Loading more messages for channel ${channelId} (offset: ${offset})...`);
+      console.log(`📨 Loading more messages (offset: ${offset})...`);
 
       const olderMessages = await this.loadChannelMessages(channelId, limit, offset);
 
@@ -1216,7 +1189,7 @@ class ChatService {
         this.channelMessages.set(channelId, allMessages);
         this.emit('messagesLoaded', { channelId, messages: allMessages });
 
-        console.log(`📨 Loaded ${olderMessages.length} more messages for channel ${channelId}`);
+        console.log(`📨 Loaded ${olderMessages.length} more messages`);
       }
 
       return olderMessages;
@@ -1466,7 +1439,7 @@ class ChatService {
    * Handle bus notification
    */
   private handleBusNotification(notification: any): void {
-    console.log('🚌 Bus notification:', notification);
+    console.log(`🚌 ${notification.type} notification`);
     
     // Handle typing notifications
     if (notification.type === 'typing') {

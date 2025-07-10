@@ -3,18 +3,14 @@
  * Simple test runner for XML-RPC
  */
 
-import { OdooXMLRPCClient } from '../src/models/base/services/BaseOdooClient.ts';
+import { OdooXMLRPCClient } from '../services/xmlrpc/OdooXMLRPCClient.js';
 
 // Configuration
-import ODOO_CONFIG from "../src/config/odoo.ts";
-
-// Use config from odoo.ts
 const CONFIG = {
-  baseURL: ODOO_CONFIG.baseURL,
-  database: ODOO_CONFIG.db,
-  username: ODOO_CONFIG.username,
-  password: ODOO_CONFIG.password,
-  apiKey: ODOO_CONFIG.apiKey,
+  baseURL: 'https://itmsgroup.com.au',
+  database: '', // Auto-detect
+  username: 'mark.shaw@itmsgroup.com.au',
+  password: 'hTempTWxeCFYWVswzMcv',
 };
 
 async function runTest() {

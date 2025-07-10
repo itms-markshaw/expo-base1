@@ -101,6 +101,12 @@ export default function ChatScreen() {
   const [messageText, setMessageText] = useState('');
   const [loading, setLoading] = useState(true);
   const [loadingFresh, setLoadingFresh] = useState(false);
+
+  // Debug loading state changes
+  useEffect(() => {
+    const timestamp = new Date().toISOString().split('T')[1].split('.')[0];
+    console.log(`📱 🔄 [${timestamp}] LOADING STATE: loading=${loading}, loadingFresh=${loadingFresh}`);
+  }, [loading, loadingFresh]);
   const [isInitialLoad, setIsInitialLoad] = useState(true);
   const [sending, setSending] = useState(false);
   const [typingUsers, setTypingUsers] = useState<TypingUser[]>([]);
@@ -126,6 +132,10 @@ export default function ChatScreen() {
   const [selectedImageUri, setSelectedImageUri] = useState<string>('');
   const [selectedImageName, setSelectedImageName] = useState<string>('');
 
+  // Prevent rapid channel updates
+  const lastChannelUpdateRef = useRef<number>(0);
+  const channelUpdateTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+
   // Filter state
   const [showFilterSheet, setShowFilterSheet] = useState(false);
   const [channelFilters, setChannelFilters] = useState<ChannelFilters>({
@@ -133,12 +143,15 @@ export default function ChatScreen() {
     sortBy: 'activity',
     sortOrder: 'desc',
     showDirectMessages: true,
-    showChannels: true,
+    showChannels: false, // Default to hide group channels, show only direct messages
     showClosedChannels: false,
     showFoldedChannels: false,
     showEmptyChannels: true,
     showArchivedChannels: false,
   });
+
+  // Channel membership fold states
+  const [channelFoldStates, setChannelFoldStates] = useState<Map<number, string>>(new Map());
 
   // Use refs to access current values in event listeners
   const selectedChannelRef = useRef<ChatChannel | null>(null);
@@ -153,14 +166,30 @@ export default function ChatScreen() {
     messagesRef.current = messages;
   }, [messages]);
 
-  // Re-filter channels when toggle state or filters change
+  // Debug: Track channels state changes and identify flickering
   useEffect(() => {
-    if (allChannels.length > 0) {
-      filterChannelsByFoldState(allChannels).then(foldStateFiltered => {
-        applyFilters(foldStateFiltered, channelFilters);
-      });
+    const timestamp = new Date().toISOString().split('T')[1].split('.')[0];
+    console.log(`📱 🔍 [${timestamp}] CHANNELS STATE CHANGED: ${channels.length} channels`);
+    console.log(`📱 🔍 [${timestamp}] Channel names: ${channels.map(ch => ch.name).slice(0, 3).join(', ')}${channels.length > 3 ? '...' : ''}`);
+
+    // Track rapid changes that cause flickering
+    const now = Date.now();
+    const timeSinceLastChange = now - (window as any).lastChannelChange || 0;
+    (window as any).lastChannelChange = now;
+
+    if (timeSinceLastChange < 200) {
+      console.log(`⚡ FLICKER DETECTED: Channel change within ${timeSinceLastChange}ms`);
     }
-  }, [showClosedChannels, channelFilters]);
+  }, [channels]);
+
+  // Re-filter channels when filters change (but NOT when allChannels updates to avoid conflicts)
+  useEffect(() => {
+    if (allChannels.length > 0 && !loading && !loadingFresh) {
+      // Only apply filters when user manually changes filters, not during data loading
+      console.log(`📱 🔄 User changed filters - applying to ${allChannels.length} channels`);
+      applyFilters(allChannels, channelFilters);
+    }
+  }, [channelFilters]); // Removed allChannels dependency to prevent conflicts
 
   const flatListRef = useRef<FlatList>(null);
   const textInputRef = useRef<TextInput>(null);
@@ -188,6 +217,36 @@ export default function ChatScreen() {
     };
   }, []);
 
+  // Load channel fold states from memberships
+  const loadChannelFoldStates = async () => {
+    try {
+      console.log('📁 Loading channel fold states...');
+
+      // Debug: Check partner ID consistency
+      const partnerId = await channelMemberService.getCurrentUserPartnerId();
+      console.log(`📁 Using partner ID: ${partnerId} for fold states`);
+
+      const memberships = await channelMemberService.getCurrentUserMemberships();
+      const foldStateMap = new Map<number, string>();
+
+      console.log(`📁 Found ${memberships.length} memberships:`, memberships.map(m => ({
+        channel_id: m.channel_id,
+        fold_state: m.fold_state || 'open'
+      })));
+
+      memberships.forEach(member => {
+        foldStateMap.set(member.channel_id, member.fold_state || 'open');
+      });
+
+      setChannelFoldStates(foldStateMap);
+      console.log(`📁 Loaded fold states for ${foldStateMap.size} channels`);
+      return foldStateMap;
+    } catch (error) {
+      console.error('❌ Failed to load channel fold states:', error);
+      return new Map<number, string>();
+    }
+  };
+
   const initializeChat = async () => {
     try {
       setLoading(true);
@@ -199,9 +258,9 @@ export default function ChatScreen() {
         const loadedChannels = chatService.getChannels();
         setAllChannels(loadedChannels);
 
-        // Filter channels immediately on initial load
-        const foldStateFiltered = await filterChannelsByFoldState(loadedChannels);
-        applyFilters(foldStateFiltered, channelFilters);
+        // Channels are already filtered by fold_state at the SQL level
+        // Just apply UI filters (grouping, sorting, etc.)
+        applyFilters(loadedChannels, channelFilters);
 
         // AUTO-UNFOLD: Check for closed channels and unfold them automatically
         const closedChannels = loadedChannels.filter(ch => ch.fold_state === 'closed');
@@ -316,70 +375,102 @@ export default function ChatScreen() {
   };
 
   // Filter channels based on fold state
-  const filterChannelsByFoldState = async (channelsToFilter: ChatChannel[]): Promise<ChatChannel[]> => {
+  const filterChannelsByFoldState = async (
+    channelsToFilter: ChatChannel[],
+    foldStateMap?: Map<number, string>
+  ): Promise<ChatChannel[]> => {
     if (showClosedChannels) {
       // Show all channels
       console.log(`📱 👁️ Showing all ${channelsToFilter.length} channels (including closed)`);
       return channelsToFilter;
     }
 
-    // SIMPLE FILTERING: Hide channels with specific patterns or names
-    // This is a temporary solution until discuss.channel.member sync works
-    const channelsToHide = [
-      '411-a', '411'  // Hide these specific channels for now
-    ];
+    // Use provided fold state map or the current state
+    const foldStates = foldStateMap || channelFoldStates;
 
-    const visibleChannels = channelsToFilter.filter(channel => {
-      const shouldHide = channelsToHide.includes(channel.name) ||
-                        channel.name?.includes('test-') ||
-                        (channel.channel_type === 'channel' && channel.name?.startsWith('411'));
-      return !shouldHide;
-    });
+    console.log(`📱 🔍 Filtering ${channelsToFilter.length} channels with ${foldStates.size} fold states`);
 
-    const hiddenCount = channelsToFilter.length - visibleChannels.length;
-    if (hiddenCount > 0) {
-      console.log(`📱 🔒 SIMPLE FILTER: Hiding ${hiddenCount} channels (${visibleChannels.length} visible)`);
-      console.log(`📱 🔒 Hidden channels: ${channelsToFilter.filter(c => !visibleChannels.includes(c)).map(c => c.name).join(', ')}`);
-    } else {
-      console.log(`📱 ✅ No channels to hide with simple filter (${visibleChannels.length} visible)`);
+    // Debug: Show mismatch between channels and fold states
+    const channelIds = new Set(channelsToFilter.map(ch => ch.id));
+    const foldStateIds = new Set(foldStates.keys());
+    const missingFoldStates = channelsToFilter.filter(ch => !foldStates.has(ch.id));
+    if (missingFoldStates.length > 0) {
+      console.log(`📱 ⚠️ Missing fold states for channels: [${missingFoldStates.map(ch => ch.id).join(', ')}]`);
     }
 
-    return visibleChannels;
+    // Filter out closed channels based on membership fold_state
+    const filteredChannels = channelsToFilter.filter(channel => {
+      const foldState = foldStates.get(channel.id) || 'open';
+      const isVisible = foldState !== 'closed';
+
+      if (foldState === 'closed') {
+        console.log(`📱 🔒 Hiding channel ${channel.id} (${channel.name}) - fold_state: ${foldState}`);
+      }
+
+      return isVisible;
+    });
+
+    const hiddenCount = channelsToFilter.length - filteredChannels.length;
+    const hiddenChannels = channelsToFilter.filter(ch => {
+      const foldState = foldStates.get(ch.id) || 'open';
+      return foldState === 'closed';
+    }).map(ch => `${ch.id}-${ch.name?.substring(0, 10) || 'unnamed'}`);
+
+    console.log(`📱 🔒 FOLD STATE FILTER: Hiding ${hiddenCount} closed channels (${filteredChannels.length} visible)`);
+    if (hiddenChannels.length > 0) {
+      console.log(`📱 🔒 Hidden channels: ${hiddenChannels.join(', ')}`);
+    }
+
+    return filteredChannels;
   };
 
   const handleChannelsLoaded = async (loadedChannels: ChatChannel[]) => {
-    console.log(`📱 ✅ Loaded ${loadedChannels.length} channels`);
+    const now = Date.now();
+    const timeSinceLastUpdate = now - lastChannelUpdateRef.current;
 
-    // Store all channels
-    setAllChannels(loadedChannels);
+    console.log(`📱 ✅ handleChannelsLoaded called with ${loadedChannels.length} channels (${timeSinceLastUpdate}ms since last)`);
+    console.log(`📱 📋 Channel names: ${loadedChannels.map(ch => ch.name).join(', ')}`);
 
-    // Filter out closed channels by default (simple UI filtering)
-    const openChannels = await filterChannelsByFoldState(loadedChannels);
-    console.log(`📱 🔒 Showing ${openChannels.length} open channels (${loadedChannels.length - openChannels.length} closed channels hidden)`);
-
-    // If this is the first load (cache), hide main loading but show background refresh
-    if (loading) {
-      // First load: Cache data - display immediately
-      setChannels(openChannels);
-      setLoading(false);
-      setLoadingFresh(true);
-      console.log('📱 Cache loaded - UI ready, fetching fresh data...');
-    } else {
-      // Fresh data: Only update if significantly different to prevent flickering
-      const currentChannels = channels;
-      const isDifferent = openChannels.length !== currentChannels.length ||
-                          openChannels.some(newCh => !currentChannels.find(oldCh => oldCh.id === newCh.id));
-
-      if (isDifferent) {
-        console.log(`📱 Fresh data different (${currentChannels.length} -> ${openChannels.length}), updating...`);
-        setChannels(openChannels);
-      } else {
-        console.log('📱 Fresh data same as cache, no update needed');
-      }
-
-      setLoadingFresh(false);
-      console.log('📱 Fresh data loaded - all done!');
+    // Clear any pending timeout
+    if (channelUpdateTimeoutRef.current) {
+      clearTimeout(channelUpdateTimeoutRef.current);
     }
+
+    // Debounce rapid updates - only process the latest one
+    channelUpdateTimeoutRef.current = setTimeout(() => {
+      console.log(`📱 🔄 Processing channel update (${loadedChannels.length} channels)`);
+
+      // Apply filters directly here to avoid useEffect conflicts
+      let filteredChannels = [...loadedChannels];
+
+      // Apply channel type filters (direct messages vs groups)
+      filteredChannels = filteredChannels.filter(channel => {
+        if (channel.channel_type === 'chat' && !channelFilters.showDirectMessages) return false;
+        if (channel.channel_type === 'channel' && !channelFilters.showChannels) return false;
+        return true;
+      });
+
+      console.log(`📱 🔄 FILTERED: ${loadedChannels.length} -> ${filteredChannels.length} channels`);
+      console.log(`📱 📋 Filtered names: ${filteredChannels.map(ch => ch.name).join(', ')}`);
+
+      // Store all channels (unfiltered) and set UI channels (filtered)
+      setAllChannels(loadedChannels);
+      setChannels(filteredChannels);
+      console.log(`📱 ✅ UI CHANNELS SET TO: ${filteredChannels.length} channels`);
+
+      lastChannelUpdateRef.current = Date.now();
+
+      // Update loading states
+      if (loading) {
+        setLoading(false);
+        setLoadingFresh(true);
+        console.log('📱 Cache loaded - UI ready, fetching fresh data...');
+      } else {
+        setLoadingFresh(false);
+        console.log('📱 ✅ Fresh data loaded - UI updated!');
+      }
+    }, 100); // 100ms debounce
+
     // Don't auto-select - let user choose from list
   };
 
@@ -1251,98 +1342,52 @@ export default function ChatScreen() {
     }
   };
 
-  // Toggle showing closed channels
+  // Toggle showing closed channels (now handled at SQL level)
   const handleToggleClosedChannels = async () => {
-    try {
-      const newShowClosed = !showClosedChannels;
-      setShowClosedChannels(newShowClosed);
-
-      // Re-filter channels with new setting
-      const filteredChannels = await filterChannelsByFoldState(allChannels);
-      setChannels(filteredChannels);
-
-      if (newShowClosed) {
-        console.log('📱 👁️ Now showing all channels (including closed)');
-      } else {
-        console.log('📱 🔒 Now hiding closed channels');
-      }
-    } catch (error) {
-      console.error('Error toggling closed channels:', error);
-    }
+    console.log('📱 ⚠️ Closed channels are now filtered at SQL level - toggle not needed');
+    // This functionality is now handled by the SQL-level filtering
+    // To show closed channels, we would need to modify the loadChannelsWithMembership method
   };
+
+  // Render right action for swipe (hide/leave channel)
+  const renderRightAction = (channel: ChatChannel) => (
+    <TouchableOpacity
+      style={styles.leaveChannelButton}
+      onPress={() => handleFoldChannel(channel)}
+    >
+      <MaterialIcons name="visibility-off" size={24} color="#FFF" />
+      <Text style={styles.leaveChannelText}>Hide</Text>
+    </TouchableOpacity>
+  );
 
   // Fold/Hide channel functionality (non-destructive)
   const handleFoldChannel = async (channel: any) => {
     try {
       console.log(`📁 Folding channel ${channel.id}: ${channel.name}`);
 
-      // Update the channel membership to set fold_state to 'closed'
-      const client = chatService.getAuthenticatedClient();
-      if (client) {
-        try {
-          console.log('🔍 Getting current user partner ID...');
-
-          // Get current user's partner ID
-          const authResult = await client.authenticate();
-          const userData = await client.callModel('res.users', 'read', [authResult.uid], {
-            fields: ['partner_id']
-          });
-
-          let partnerId;
-          if (userData && userData.length > 0) {
-            const partnerIdField = userData[0].partner_id;
-            if (Array.isArray(partnerIdField) && partnerIdField.length > 0) {
-              partnerId = partnerIdField[0];
-            } else if (typeof partnerIdField === 'number') {
-              partnerId = partnerIdField;
-            }
-          }
-
-          if (!partnerId) {
-            throw new Error('Could not determine current user partner ID');
-          }
-
-          // Find the channel membership and update fold_state to 'closed'
-          console.log(`🔄 Setting fold_state to 'closed' for channel ${channel.id}...`);
-          const membershipIds = await client.callModel('discuss.channel.member', 'search', [
-            [['channel_id', '=', channel.id], ['partner_id', '=', partnerId]]
-          ]);
-
-          if (membershipIds && membershipIds.length > 0) {
-            await client.callModel('discuss.channel.member', 'write', [membershipIds, {
-              fold_state: 'closed'
-            }]);
-            console.log(`✅ Successfully set fold_state to 'closed' for membership ${membershipIds[0]}`);
-          } else {
-            console.log('⚠️ No membership found to update');
-          }
-
-        } catch (odooError: any) {
-          console.error('❌ Failed to update fold state on server:', odooError);
-          // Continue with local update even if server fails
-        }
-      }
-
-      // Update local database
+      // Use ChannelMemberService to close/hide the channel
       try {
-        console.log('🗄️ Updating local channel membership...');
-        // Update the fold_state in local database
-        const db = databaseService.getDatabase();
-        if (db) {
-          await db.runAsync(
-            'UPDATE discuss_channel_member SET fold_state = ? WHERE channel_id = ?',
-            ['closed', channel.id]
-          );
-          console.log('✅ Local fold state updated');
+        const success = await channelMemberService.closeChannel(channel.id);
+        if (success) {
+          console.log(`✅ Successfully closed channel ${channel.id}`);
+        } else {
+          console.log('⚠️ Failed to close channel on server');
         }
-      } catch (dbError) {
-        console.error('❌ Failed to update local fold state:', dbError);
+      } catch (serviceError: any) {
+        console.error('❌ Failed to close channel on server:', serviceError);
+        // Continue with local update even if server fails
       }
+
+      // Note: Local database update skipped - discuss_channel_member table may not exist yet
+      // The ChannelMemberService handles server updates and cache refresh
+      console.log('🗄️ Local database update skipped (table may not exist yet)');
 
       // Update UI by re-filtering channels
       try {
         console.log('🔄 Refreshing channel list...');
-        const filteredChannels = await filterChannelsByFoldState(allChannels);
+        // Reload fold states after channel update
+        const updatedFoldStates = await loadChannelFoldStates();
+        const filteredChannels = await filterChannelsByFoldState(allChannels, updatedFoldStates);
         setChannels(filteredChannels);
 
         // If this was the selected channel, clear selection
@@ -1530,9 +1575,10 @@ export default function ChatScreen() {
       if (channel.channel_type === 'chat' && !filters.showDirectMessages) return false;
       if (channel.channel_type === 'channel' && !filters.showChannels) return false;
 
-      // Filter by status (if these fields exist)
-      if (!filters.showClosedChannels && channel.fold_state === 'closed') return false;
-      if (!filters.showFoldedChannels && channel.fold_state === 'folded') return false;
+      // Filter by status using fold_state from memberships
+      const foldState = channelFoldStates.get(channel.id) || 'open';
+      if (!filters.showClosedChannels && foldState === 'closed') return false;
+      if (!filters.showFoldedChannels && foldState === 'folded') return false;
 
       // Filter empty channels
       if (!filters.showEmptyChannels && (channel.member_count || 0) === 0) return false;
@@ -1764,15 +1810,7 @@ export default function ChatScreen() {
           keyExtractor={(item) => item.id.toString()}
           renderItem={({ item }) => (
             <Swipeable
-              renderRightActions={() => (
-                <TouchableOpacity
-                  style={styles.leaveChannelButton}
-                  onPress={() => handleFoldChannel(item)}
-                >
-                  <MaterialIcons name="visibility-off" size={24} color="#FFF" />
-                  <Text style={styles.leaveChannelText}>Hide</Text>
-                </TouchableOpacity>
-              )}
+              renderRightActions={() => renderRightAction(item)}
             >
               <TouchableOpacity
                 style={styles.chatListItem}

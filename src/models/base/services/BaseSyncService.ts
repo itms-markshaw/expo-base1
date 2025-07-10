@@ -1343,17 +1343,31 @@ class SyncService {
   private getModelSpecificFilters(modelName: string): any[] {
     switch (modelName) {
       case 'discuss.channel':
-        // Only sync active channels to match Odoo web behavior
-        return [['active', '=', true]];
+        // Only sync channels where current user is a member (matches server logic)
+        try {
+          const user = authService.getCurrentUser();
+          if (user && user.id) {
+            console.log(`📱 🔒 Adding discuss.channel filters for user ID: ${user.id}`);
+            return [
+              ['active', '=', true],
+              ['is_member', '=', true]  // Only channels where user is a member
+            ];
+          } else {
+            console.log('📱 ⚠️ No authenticated user - syncing all active channels');
+            return [['active', '=', true]];
+          }
+        } catch (error) {
+          console.warn('📱 ⚠️ Error getting current user for channel filtering:', error);
+          return [['active', '=', true]];
+        }
 
       case 'discuss.channel.member':
         // Only sync current user's channel memberships
         try {
-          const client = this.xmlrpcClient;
-          if (client && (client as any).uid) {
-            const currentUserId = (client as any).uid;
-            console.log(`📱 🔒 Adding discuss.channel.member filters for user ID: ${currentUserId}`);
-            return [['partner_id.user_ids', 'in', [currentUserId]]];
+          const user = authService.getCurrentUser();
+          if (user && user.id) {
+            console.log(`📱 🔒 Adding discuss.channel.member filters for user ID: ${user.id}`);
+            return [['partner_id.user_ids', 'in', [user.id]]];
           } else {
             console.log('📱 ⚠️ No authenticated user - syncing all channel memberships');
             return [];
